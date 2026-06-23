@@ -122,6 +122,10 @@ class NapcatChannel(BaseChannel):
     # ------------------------------------------------------------------
 
     async def start(self) -> None:
+        import os
+        if os.environ.get("NANOBOT_NO_NAPCAT"):
+            logger.info("napcat: disabled by NANOBOT_NO_NAPCAT env var")
+            return
         if not self.config.ws_url:
             logger.error("napcat: ws_url not configured")
             return
