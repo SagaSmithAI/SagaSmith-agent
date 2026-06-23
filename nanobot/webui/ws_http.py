@@ -665,7 +665,6 @@ class GatewayHTTPHandler:
             return self._handle_webui_sidebar_state(request)
         if got == "/api/webui/sidebar-state/update":
             return self._handle_webui_sidebar_state_update(request)
-<<<<<<< HEAD
         # D&D routes
         dnd_result = await self._dispatch_dnd_routes(connection, request, got)
         if dnd_result is not None:
@@ -763,8 +762,6 @@ class GatewayHTTPHandler:
         if got == "/api/dnd/rules/status":
             return _http_json_response(dnd_api.rule_status())
 
-=======
->>>>>>> parent of e18ab8d7 (feat: multiplayer campaign room WebUI + peer broadcast + NPC attitude)
         return None
 
     def _handle_commands(self, request: WsRequest) -> Response:
@@ -1004,10 +1001,6 @@ def _positive_int(value: Any) -> int | None:
 
 
 def _is_websocket_channel_session_key(key: str) -> bool:
-<<<<<<< HEAD
     # Accept any channel prefix so Feishu/Telegram/etc sessions show in WebUI.
     # Internal session types (like cron internals) don't use channel prefixes.
     return ":" in key
-=======
-    return key.startswith("websocket:")
->>>>>>> parent of e18ab8d7 (feat: multiplayer campaign room WebUI + peer broadcast + NPC attitude)
