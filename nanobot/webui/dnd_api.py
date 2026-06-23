@@ -14,7 +14,9 @@ from nanobot.dnd.db.world import WorldService
 
 
 def _db() -> Database:
-    return Database()
+    db = Database()
+    db.upgrade_schema()
+    return db
 
 
 # ── Campaigns ────────────────────────────────────────────────────────────
