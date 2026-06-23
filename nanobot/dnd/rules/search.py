@@ -23,6 +23,8 @@ from nanobot.dnd.db.models import (
 )
 from nanobot.dnd.rules.embedding import BgeM3Embedder, Embedder
 from nanobot.dnd.rules.ingest import DEFAULT_RULE_SET_ID
+from nanobot.dnd.vector.client import VectorStore
+from nanobot.dnd.vector.search import chroma_dense_search
 
 
 class RuleSearchError(RuntimeError):
@@ -390,6 +392,17 @@ class RuleSearchService:
     def _dense_ids(
         self, session, query_vector: list[float], scope: SearchScope, *, limit: int
     ) -> list[str]:
+        # ── ChromaDB path ──────────────────────────────────────────
+        if VectorStore().enabled:
+            where: dict[str, Any] = {"rule_set_id": scope.rule_set_id}
+            if scope.publication_ids:
+                where["publication_id"] = {"$in": list(scope.publication_ids)}
+            results = chroma_dense_search(
+                "dnd_rules", query_vector, where, limit=limit
+            )
+            return [chunk_id for chunk_id, _ in results]
+
+        # ── PostgreSQL pgvector path ───────────────────────────────
         if session.bind.dialect.name == "postgresql":
             params: dict[str, Any] = {
                 "vector": json.dumps(query_vector),
@@ -416,6 +429,7 @@ class RuleSearchService:
             )
             return [str(row[0]) for row in rows]
 
+        # ── SQLite numpy brute-force path ──────────────────────────
         cached = self._dense_cache.get(scope)
         if cached is None:
             rows = list(

@@ -29,7 +29,7 @@ class WhatsAppConfig(Base):
     bridge_url: str = "ws://localhost:3001"
     bridge_token: str = ""
     allow_from: list[str] = Field(default_factory=list)
-    group_policy: Literal["open", "mention"] = "open"  # "open" responds to all, "mention" only when @mentioned
+    group_policy: Literal["open", "mention"] = "mention"  # "mention" only when @mentioned, "open" responds to all
 
 
 def _bridge_token_path() -> Path:

@@ -15,7 +15,7 @@ metadata:
 
 ## 权威边界
 
-- **规则计算**：只使用内置 `dnd-engine/src/dnd_engine/` 与本 Skill 的 SRD 5.2.1。
+- **规则计算**：只使用内置 `dnd-engine/src/dnd_engine/` 与当前战役绑定的规则集（通过 `CampaignRuleProfile` 锁定版本与出版物）。
 - **战役状态**：数据库是唯一权威源；所有状态必须带 `campaign_id`。
 - **战役与存读档**：使用 `dnd-campaign-manager` Skill 和完整数据库 Snapshot。
 - **模组事实**：以当前战役绑定的模组原文和数据库场景状态为准。
@@ -84,32 +84,41 @@ metadata:
 
 ## 数据库规则检索
 
-先按当前战役的规则配置锁定版本与启用规则书，再执行精确名称、FTS5/PostgreSQL 全文和
-BGE-M3 Dense Vector 混合检索：
+先按当前战役的规则配置锁定版本与启用规则书，再执行三层混合检索：
+
+1. **精确名称匹配** — `CompendiumEntry` 和 `RuleSection.title` 大小写折叠匹配。
+2. **全文检索** — SQLite FTS5（BM25）或 PostgreSQL `tsvector`。
+3. **Dense 向量检索** — BGE-M3（1024 维），优先走 ChromaDB HNSW 索引，未配置时回退
+   PostgreSQL pgvector 或内存 numpy 余弦相似度。
 
 优先调用常驻的 `dnd_rules` 工具，避免每次查询重新载入 BGE-M3：
 
-- `action=search`：传入 `campaign_id`、`query` 和 `top_k`。
+- `action=search`：传入 `campaign_id`、`query`、`top_k`。结果按 RRF 加权融合排序。
 - `action=expand`：传入搜索结果的 `chunk_id` 和 `expand_mode=section`。
-- `action=status`：检查当前索引是否存在且已有向量。
+- `action=status`：检查规则索引状态；若配置了 ChromaDB 还会报告向量存储状态。
 
 只有在工具不可用或进行人工维护时才使用 JSON CLI：
 
 ```powershell
 python -m nanobot.dnd.db.cli rules search --campaign <campaign-id> --query "关键词" --top-k 5
 python -m nanobot.dnd.db.cli rules expand --chunk <chunk-id> --mode section
+python -m nanobot.dnd.db.cli vector status
 ```
 
 ## 模组 Dense 检索
 
-模组入库时使用 BGE-M3 对独立的 `module_chunks` 建立 Dense 索引，不与 SRD 规则块混合。
-需要定位地点、NPC、事件或线索时优先调用常驻 `dnd_module` 工具：先
-`action=search` 且传入当前 `campaign_id`，再对选中的 `chunk_id` 调用
-`action=expand` 读取完整场景。禁止仅凭命中摘要推进剧情。
+模组入库时使用 BGE-M3 对 `module_chunks` 建立 Dense 索引，与 SRD 规则块隔离。
+检索流程：
+
+1. `action=search` — 传入当前 `campaign_id` 和 `query`，执行词法+Dense 混合检索。
+   Dense 路径优先走 ChromaDB HNSW（按 campaign_id 过滤），未配置时回退内存 numpy。
+2. `action=expand` — 对选中的 `chunk_id` 读取完整场景。禁止仅凭命中摘要推进剧情。
+3. `action=status` — 确认模组索引状态和 ChromaDB 向量存储状态。
 
 频道用户明确要求把附件作为模组时，直接调用 `dnd_module action=import`，不要通过 shell
 拼接路径。导入后依次检查 `index` 与 `status`。每轮先读取 `action=current`；实际进入或
 更新场景后调用 `action=set_scene`，使世界状态、场景进度、审计与事件日志同步落库。
+导入完成后嵌入向量通过 ChromaDB（若已配置）异步写入，不阻塞 SQL 事务。
 
 明确的法术、状态或物品名称优先使用精确结果；自然语言问题使用 Dense 召回。常见中文
 D&D 术语会追加对应英文 SRD 术语，但精确检索仍使用原始名称。命中后按

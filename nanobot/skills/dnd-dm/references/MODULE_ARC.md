@@ -48,7 +48,11 @@ NPC 状态由当前 `campaign_id` 的 `WorldState.state_json` 维护。
 
 ## 存档剧情快照
 
-通过 `CampaignSnapshotService` 管理。每次存档时调用 `save create`：
+通过 `CampaignSnapshotService` 管理。优先使用 `dnd_save` 原生工具；CLI 为维护后备：
 ```powershell
-python -m nanobot.dnd.db.cli save create --campaign <id> --label "<描述>"
+python -m nanobot.dnd.db.cli save create --campaign <id> --label "<描述>" --workspace "<workspace>"
 ```
+
+快照捕获可变进度（世界、队伍、角色、战斗、剧情摘要、事件、场景状态），不复制模组原文、
+章节元数据、场景索引和 Dense 向量。向量存储在 ChromaDB（若已配置）或 SQL
+`embedding_json` 列中，恢复快照不会影响向量数据。

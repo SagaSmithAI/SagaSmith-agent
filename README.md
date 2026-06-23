@@ -7,7 +7,7 @@
 > *"The rulebooks are scripture, the module is the map, the dice are the judge."*  
 > — Minthara Baenre, SagaSmith default DM
 
-SagaSmith Agent is a complete, runnable AI DM system. Connect QQ (NapCat), Telegram, or WebSocket — players send messages in chat, the DM responds. Backed by a SQLite/PostgreSQL campaign database, BGE-M3 rule search engine, d20 combat engine, and a Lawful Evil drow DM persona.
+SagaSmith Agent is a complete, runnable AI DM system. Connect QQ (NapCat), Telegram, or WebSocket — players send messages in chat, the DM responds. Backed by a SQLite/PostgreSQL campaign database, ChromaDB vector store (optional), BGE-M3 rule search engine, d20 combat engine, and a Lawful Evil drow DM persona.
 
 ---
 
@@ -25,9 +25,9 @@ SagaSmith Agent is a complete, runnable AI DM system. Connect QQ (NapCat), Teleg
 
 | System | Description |
 |--------|-------------|
-| 🎲 **Rule Engine** | BGE-M3 Dense Vector search over 2,700+ SRD chunks — exact name + FTS + semantic hybrid |
+| 🎲 **Rule Engine** | BGE-M3 Dense Vector over 8,000+ SRD chunks across 3 editions. 3-layer hybrid (exact + FTS + semantic). ChromaDB HNSW when configured, numpy/pgvector fallback. Auto-ingest on first use. |
 | ⚔️ **Combat Engine** | True d20 rolls, initiative/hit/damage/save/crit, turn tracking, XP |
-| 🏛️ **Campaign DB** | SQLAlchemy ORM + Alembic migrations, full CRUD, Snapshot save/load/verify/undo |
+| 🏛️ **Campaign DB** | SQLAlchemy ORM + Alembic migrations, full CRUD, Snapshot save/load/verify/undo. Per-campaign rule set + extension binding. ChromaDB optional vector store. |
 | 📖 **Module Mgmt** | PDF/HTML/DOCX import, structure-aware chunking, scene index, Dense retrieval |
 | 🎭 **Minthara Persona** | Lawful Evil DM, 2024-rules absolutist, cold wit, never leaks hidden info |
 | 💬 **Multi-Channel** | QQ (NapCat OneBot v11), Telegram, WebSocket, WebUI |
@@ -40,6 +40,47 @@ SagaSmith Agent is a complete, runnable AI DM system. Connect QQ (NapCat), Teleg
 | 📋 **dnd-campaign-manager** | Campaign lifecycle, Snapshot save/load/verify/undo |
 | ✍️ **dnd-module-gen** | Module generation (5 types × 25 paradigms), multi-step + sandbox |
 
+### Supported Platforms
+
+19 chat platforms built in. **Group-chat platforms default to mention-only** to avoid noise:
+
+| Platform | Type | Default Policy | Setup |
+|----------|------|---------------|-------|
+| 🐱 **Napcat (QQ)** | Group | **Mention-only** | `nanobot onboard` |
+| 📬 **Telegram** | Group | **Mention-only** | `nanobot onboard` |
+| 🎮 **Discord** | Group | **Mention-only** | `nanobot onboard` |
+| 💬 **Slack** | Group | **Mention-only** | `nanobot onboard` |
+| 🐦 **Feishu/Lark** | Group | **Mention-only** | `nanobot onboard` |
+| 📱 **WhatsApp** | Group | **Mention-only** | `nanobot onboard` |
+| 🔗 **Matrix** | Group | **Mention-only** | `nanobot onboard` |
+| 📶 **Signal** | Group | **Mention-only** | `nanobot onboard` |
+| 💼 **Mochat** | Group | **Mention-only** | `nanobot onboard` |
+| 📋 **MSTeams** | Group | **Mention-only** | `nanobot onboard` |
+| 🐧 **QQ** | Group | @-only | `nanobot onboard` |
+| 📌 **DingTalk** | Group | All messages | `nanobot onboard` |
+| 🟢 **WeCom** | Group | All messages | `nanobot onboard` |
+| 💚 **WeChat** | Group | All messages | `nanobot onboard` |
+| 📧 **Email** | DM | N/A | `nanobot onboard` |
+| 🔌 **WebSocket** | General | N/A | `nanobot onboard` |
+
+```powershell
+# First-run: auto-discovers all platforms, writes default config
+nanobot onboard
+
+# Or use the interactive wizard
+nanobot onboard --wizard
+```
+
+To allow a group to receive all messages, set in `~/.nanobot/config.json`:
+```json
+{
+  "channels": {
+    "napcat": { "group_policy": "open" },
+    "telegram": { "group_policy": "open" }
+  }
+}
+```
+
 ---
 
 ## Usage Examples
@@ -48,17 +89,21 @@ A complete walkthrough from zero to running a D&D session. Each phase shows both
 
 ### 1. Rulebook Import
 
+Three rule sets are bundled and **auto-ingested** on first rules access (lazy, no manual CLI needed):
+
+| Rule Set ID | Edition | Locale | Chunks | Source |
+|---|---|---|---|---|
+| `dnd5e-2024-srd-5.2.1` | 2024 | EN | 2,684 | Bundled SRD 5.2.1 |
+| `dnd5e-2014-srd-5.1-en` | 2014 | EN | 3,524 | Bundled SRD 5.1 |
+| `dnd5e-2014-srd-5.1-zh-v2` | 2014 | ZH-CN | ~2,000 | Bundled Chinese translation |
+
+With ChromaDB configured (`CHROMA_DB_PATH` or `CHROMA_DB_URL`), vectors are stored via HNSW indexing. Without ChromaDB, chunks are stored without embeddings (lexical search still works).
+
 ```powershell
-# CLI: first-run SRD ingestion
+# Manual CLI (maintenance fallback)
 uv run python -m nanobot.dnd.db.cli rules ingest-srd
-```
-
-```
-📚 SRD 5.2.1 imported
-   Chunks: 2,847 · Embeddings: 2,847 (BGE-M3, 1024-dim)
-   Books: Player's Handbook (2024) · DM Guide (2024) · Monster Manual (2025)
-
-📊 Index: ready ✅
+uv run python -m nanobot.dnd.db.cli rules status
+uv run python -m nanobot.dnd.db.cli vector status   # ChromaDB state
 ```
 
 ### 2. Module Import
@@ -89,33 +134,38 @@ uv run python -m nanobot.dnd.db.cli module index --campaign <id>
 
 ### 3. Campaign Start
 
+Campaigns can choose which rule set and extensions to use:
+
 ```
 User: Start a new campaign
 
 Agent:
 🎲 Campaign Setup
 
-1️⃣ Module source — found in database:
+1️⃣ Rule sets available:
+   · dnd5e-2024-srd-5.2.1 — D&D 5e 2024 / SRD 5.2.1 (EN, recommended)
+   · dnd5e-2014-srd-5.1-en — D&D 5e 2014 / SRD 5.1 (EN)
+   · dnd5e-2014-srd-5.1-zh-v2 — D&D 5e 2014 / SRD 5.1 (中文)
+   Which edition?
+
+2️⃣ Module source — found in database:
    · BGDIA (5 chapters / 62 scenes)
    Use existing or import new?
 
-2️⃣ Rules — locked: 2024 Core + SRD 5.2.1
-
-3️⃣ Players & characters — how many, any preferences?
-
-User: BGDIA, 2 players, we'll build our own characters
+User: 2024, BGDIA, 2 players
 
 Agent:
 ⚔️ One-shot start
    ✅ Campaign created: campaign_7a3f
-   ✅ Rules bound: 2024 Core
+   ✅ Rules bound: D&D 5e 2024 / SRD 5.2.1 [en]
+   ✅ Extensions: core rulebook only
    ✅ Module bound: BGDIA · Ch.1 unlocked
    ✅ Initial snapshot: slot 1 "Initial State"
 
    🎉 Campaign ready!
-
-   Create characters — tell me race/class/level, or say "random roll".
 ```
+
+The `dnd_campaign start` action accepts `rule_set_id`, `publication_ids`, and `locale` — omit them to auto-select the most recent active rule set with core publications only.
 
 ### 4. Character Creation
 
@@ -319,13 +369,16 @@ Agent:
 # 1. Install (uv-managed editable install)
 uv sync
 
-# 2. Initialize workspace
+# 2. Initialize workspace + auto-discover platforms
 uv run nanobot onboard --wizard
 
-# 3. Import SRD rulebooks
-uv run python -m nanobot.dnd.db.cli rules ingest-srd
+# 3. SRD auto-ingested on first rules access — no manual CLI needed
+#    Optional: pre-ingest with uv run python -m nanobot.dnd.db.cli rules ingest-srd
 
-# 4. Launch gateway + QQ
+# 4. (Optional) Enable ChromaDB for fast vector search
+$env:CHROMA_DB_PATH = "$env:APPDATA\nanobot\dnd\chroma_db"
+
+# 5. Launch gateway + QQ
 .\scripts\start-all.bat
 ```
 
@@ -394,11 +447,12 @@ Chunking: 1,200-char max, ≈100-char overlap, no cross-heading boundaries, page
 
 ## Rule Search
 
-2,700+ SRD chunks indexed with `BAAI/bge-m3` (1,024-dim) semantic vectors:
+8,000+ SRD chunks across 3 rule sets (2024 EN · 2014 EN · 2014 ZH), indexed with `BAAI/bge-m3` (1,024-dim) semantic vectors. ChromaDB HNSW when configured; numpy/pgvector fallback.
 
 ```powershell
 uv run python -m nanobot.dnd.db.cli rules status
 uv run python -m nanobot.dnd.db.cli rules search --campaign <id> --query "grapple escape" --top-k 5
+uv run python -m nanobot.dnd.db.cli vector status   # ChromaDB collections
 ```
 
 GPU acceleration: `$env:DND_EMBEDDING_DEVICE="cuda"`.
@@ -407,13 +461,20 @@ GPU acceleration: `$env:DND_EMBEDDING_DEVICE="cuda"`.
 
 ## Campaign Management
 
-Database is the single source of truth. Snapshots cover campaign metadata, world, party, characters, combat, plot summary, and event log — module source documents are never duplicated.
+Database is the single source of truth. Snapshots cover campaign metadata, world, party, characters, combat, plot summary, and event log — module source documents and vectors are never duplicated. Each campaign pins a rule set and enabled publications (extensions), queried via `dnd_campaign show`.
 
 ```powershell
-uv run python -m nanobot.dnd.db.cli campaign create --name "Baldur's Gate" --module "BGDIA"
-uv run python -m nanobot.dnd.db.cli save create --campaign <id> --label "Initial State"
+# Create with specific rule set
+uv run python -m nanobot.dnd.db.cli campaign create --name "Baldur's Gate" --module "BGDIA" \
+  --rule-set dnd5e-2024-srd-5.2.1
+
+# Or with 2014 rules
+uv run python -m nanobot.dnd.db.cli campaign create --name "Classic FR" \
+  --rule-set dnd5e-2014-srd-5.1-en
+
+uv run python -m nanobot.dnd.db.cli save create --campaign <id> --label "Initial State" --workspace "<path>"
 uv run python -m nanobot.dnd.db.cli save list --campaign <id>
-uv run python -m nanobot.dnd.db.cli save load --campaign <id> --slot <n>
+uv run python -m nanobot.dnd.db.cli save load --campaign <id> --slot <n> --workspace "<path>"
 ```
 
 ---
@@ -421,17 +482,28 @@ uv run python -m nanobot.dnd.db.cli save load --campaign <id> --slot <n>
 ## Architecture
 
 ```
-QQ / Telegram / WebUI
+QQ / Telegram / Discord / Slack / Feishu / WhatsApp / Matrix ...
         │
         ▼
-NanoBot Runtime  (Provider · Agent Loop · Session · Memory · Channels)
+NanoBot Runtime  (Provider · Agent Loop · Session · Memory · 19 Channels)
         │
         ▼
 D&D Adapter       (dnd_rules search · dnd-engine calc · Campaign DB)
         │
-        ▼
-SQLite / PostgreSQL  (Rule index · Campaign state · Audit · Snapshots)
+        ├── SQLite / PostgreSQL  (Rule index · Campaign state · Audit · Snapshots)
+        └── ChromaDB (optional) (HNSW vector index · dnd_rules + dnd_modules collections)
 ```
+
+### Rule Sets
+
+```
+nanobot/skills/dnd-dm/srd/
+├── references/              D&D 5e 2024 SRD 5.2.1 (EN) — 20 files, 2,684 chunks
+├── references-2014-en/      D&D 5e 2014 SRD 5.1 (EN) — 1,019 files, 3,524 chunks
+└── references-2014-zh/      D&D 5e 2014 SRD 5.1 (ZH) — 300+ files, ~2,000 chunks
+```
+
+All three are auto-ingested on first `dnd_rules` access — no manual CLI needed.
 
 ### Project Structure
 
@@ -467,6 +539,8 @@ SagaSmith-agent/
 - [ackiles/dnd-dm-skill](https://github.com/ackiles/dnd-dm-skill) — D&D DM skill pioneer, inspiration and design reference for SagaSmith
 - [NanoBot](https://github.com/HKUDS/nanobot) — Lightweight agent framework
 - D&D 5e SRD 5.2.1 © Wizards of the Coast ([CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/))
+- [SagiriWWW/DND.SRD.zh-CN](https://github.com/SagiriWWW/DND.SRD.zh-CN) — D&D 5e SRD 5.1 Chinese translation ([CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/))
+- D&D 5e SRD 5.1 (2014 English) — bundled Markdown edition
 
 ---
 

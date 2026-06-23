@@ -13,6 +13,7 @@ from nanobot.agent.tools.context import current_request_context
 from nanobot.dnd.db.database import Database
 from nanobot.dnd.db.models import ModuleChunk, ModuleSource
 from nanobot.dnd.db.module_content import ModuleImportService
+from nanobot.dnd.vector.client import VectorStore
 from nanobot.dnd.db.module_progress import ModuleProgressService
 from nanobot.dnd.modules.search import ModuleSearchService
 from nanobot.dnd.rules.embedding import BgeM3Embedder
@@ -171,7 +172,7 @@ class DndModuleTool(Tool):
             conditions = []
             if resolved_campaign:
                 conditions.append(ModuleSource.campaign_id == resolved_campaign)
-            return {
+            result: dict[str, Any] = {
                 "modules": int(
                     session.scalar(
                         select(func.count()).select_from(ModuleSource).where(*conditions)
@@ -197,6 +198,15 @@ class DndModuleTool(Tool):
                     or 0
                 ),
             }
+        store = VectorStore()
+        if store.enabled:
+            try:
+                result["chromadb"] = store.collection_stats("dnd_modules")
+            except Exception:
+                result["chromadb"] = {"name": "dnd_modules", "error": "unreachable"}
+        else:
+            result["chromadb"] = None
+        return result
 
     async def execute(
         self,

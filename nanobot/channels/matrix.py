@@ -205,7 +205,7 @@ class MatrixConfig(Base):
     max_media_bytes: int = 20 * 1024 * 1024
     max_concurrent_media_downloads: int = 2
     allow_from: list[str] = Field(default_factory=list)
-    group_policy: Literal["open", "mention", "allowlist"] = "open"
+    group_policy: Literal["open", "mention", "allowlist"] = "mention"
     group_allow_from: list[str] = Field(default_factory=list)
     allow_room_mentions: bool = False
     streaming: bool = False

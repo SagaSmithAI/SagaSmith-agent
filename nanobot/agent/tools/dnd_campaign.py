@@ -44,6 +44,25 @@ from nanobot.dnd.db.module_content import ModuleImportError, ModuleImportService
                 "enum": ["active", "archived"],
                 "description": "Campaign status for set_status action.",
             },
+            "rule_set_id": {
+                "type": "string",
+                "description": (
+                    "Rule set ID for create/start (e.g. dnd5e-2024-srd-5.2.1). "
+                    "Omit to auto-select the most recent active rule set."
+                ),
+            },
+            "publication_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "Publication IDs to enable for this campaign. "
+                    "Omit to auto-enable core publications only."
+                ),
+            },
+            "locale": {
+                "type": "string",
+                "description": "Rule locale override (e.g. en, zh-CN). Usually inherited from the rule set.",
+            },
         },
         "required": ["action"],
     }
@@ -84,6 +103,9 @@ class DndCampaignTool(Tool):
                     module_name=args.get("module_name"),
                     description=args.get("description"),
                     source_path=args.get("source_path"),
+                    rule_set_id=args.get("rule_set_id"),
+                    publication_ids=args.get("publication_ids"),
+                    locale=args.get("locale"),
                 )
             except CampaignAlreadyExistsError as exc:
                 return {"error": "campaign_already_exists", "detail": str(exc)}
@@ -96,6 +118,9 @@ class DndCampaignTool(Tool):
                     campaign_id=args.get("campaign_id"),
                     module_name=args.get("module_name"),
                     description=args.get("description"),
+                    rule_set_id=args.get("rule_set_id"),
+                    publication_ids=args.get("publication_ids"),
+                    locale=args.get("locale"),
                 )
             except CampaignAlreadyExistsError as exc:
                 return {"error": "campaign_already_exists", "detail": str(exc)}

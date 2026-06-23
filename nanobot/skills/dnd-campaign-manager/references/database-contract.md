@@ -25,6 +25,24 @@ Snapshot rows, tool audit history, state revisions, dice audit history, and glob
 rule/compendium data are intentionally not nested into a snapshot. Restoring a
 snapshot retains those historical records.
 
+## Vector storage
+
+Dense embedding vectors (BGE-M3, 1024-dim) for rule and module chunks are stored
+**outside snapshot boundaries**:
+
+- **ChromaDB** (when `CHROMA_DB_URL` or `CHROMA_DB_PATH` is set): vectors live in
+  the `dnd_rules` and `dnd_modules` ChromaDB collections with HNSW indexing.
+  Snapshots never read or write ChromaDB — vectors are regenerated from SQL chunk
+  content on re-ingest or via `vector reindex`.
+- **Fallback** (no ChromaDB configured): vectors are stored in the
+  `rule_chunks.embedding_json` and `module_chunks.embedding_json` JSON columns.
+  These columns are part of the static chunk rows and are never captured or
+  restored by snapshots.
+
+In both paths, restoring a snapshot does not delete, replace, or invalidate
+vector data.  The `vector migrate` CLI command copies existing SQL embeddings
+into ChromaDB for users upgrading from the fallback path.
+
 ## Isolation and identity
 
 All snapshot lookup uses `(campaign_id, slot)`. Restore additionally validates

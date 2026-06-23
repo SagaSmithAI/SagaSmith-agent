@@ -31,6 +31,7 @@ from nanobot.dnd.db.user_context import read_player_roles, write_player_roles
 from nanobot.dnd.modules.search import ModuleSearchService
 from nanobot.dnd.rules.ingest import RuleIngestService
 from nanobot.dnd.rules.search import RuleSearchService
+from nanobot.dnd.vector.client import VectorStore
 
 
 def _emit(value: Any) -> None:
@@ -71,6 +72,9 @@ def _parser() -> argparse.ArgumentParser:
     create.add_argument("--id")
     create.add_argument("--module")
     create.add_argument("--description")
+    create.add_argument("--rule-set", dest="rule_set_id")
+    create.add_argument("--publication", action="append", dest="publication_ids")
+    create.add_argument("--locale")
     listing = campaign_commands.add_parser("list")
     listing.add_argument("--status", choices=("active", "archived"))
     show = campaign_commands.add_parser("show")
@@ -217,7 +221,274 @@ def _parser() -> argparse.ArgumentParser:
     )
     rule_commands.add_parser("tree")
     rule_commands.add_parser("status")
+
+    vector = commands.add_parser("vector")
+    vector_commands = vector.add_subparsers(dest="action", required=True)
+    vector_migrate = vector_commands.add_parser("migrate")
+    vector_migrate.add_argument(
+        "--batch-size", type=int, default=100, help="Rows per ChromaDB upsert batch"
+    )
+    vector_status = vector_commands.add_parser("status")
+    vector_verify = vector_commands.add_parser("verify")
+    vector_verify.add_argument(
+        "--count", type=int, default=5, help="Number of spot-checks per collection"
+    )
+    vector_commands.add_parser("reindex")
+
     return parser
+
+
+def _batched(iterable, size: int):
+    """Yield successive batches from *iterable*."""
+    batch = []
+    for item in iterable:
+        batch.append(item)
+        if len(batch) >= size:
+            yield batch
+            batch = []
+    if batch:
+        yield batch
+
+
+def _vector_status(store: VectorStore) -> dict:
+    return {
+        "enabled": store.enabled,
+        "url": store.configured_url(),
+        "path": str(store.configured_path()) if store.configured_path() else None,
+        "collections": [
+            store.collection_stats(name)
+            for name in ("dnd_rules", "dnd_modules")
+        ],
+    }
+
+
+def _vector_migrate(database: Database, store: VectorStore, *, batch_size: int = 100) -> dict:
+    """Copy existing embedding_json vectors into ChromaDB."""
+    total_rules = 0
+    total_modules = 0
+    with database.transaction() as session:
+        # Migrate rule chunks
+        rule_rows = list(
+            session.execute(
+                select(RuleChunk.id, RuleChunk.embedding_json, RuleSource.rule_set_id,
+                       RuleSource.publication_id, RuleChunk.source_id,
+                       RuleChunk.section_id, RuleChunk.chunk_index,
+                       RuleChunk.content_hash)
+                .join(RuleSource, RuleSource.id == RuleChunk.source_id)
+                .where(RuleChunk.embedding_json.is_not(None))
+            )
+        )
+        for batch in _batched(rule_rows, batch_size):
+            coll = store.collection("dnd_rules")
+            ids = [str(row[0]) for row in batch]
+            embeddings = [row[1] for row in batch]
+            metadatas = [
+                {
+                    "chunk_id": str(row[0]),
+                    "rule_set_id": str(row[2] or ""),
+                    "publication_id": str(row[3] or ""),
+                    "source_id": str(row[4] or ""),
+                    "section_id": str(row[5] or ""),
+                    "chunk_index": int(row[6] or 0),
+                    "chunk_type": "section",
+                    "content_hash": str(row[7] or ""),
+                    "version": 1,
+                }
+                for row in batch
+            ]
+            coll.upsert(ids=ids, embeddings=embeddings, metadatas=metadatas)
+            total_rules += len(batch)
+
+        # Migrate module chunks
+        module_rows = list(
+            session.execute(
+                select(ModuleChunk.id, ModuleChunk.embedding_json,
+                       ModuleChunk.module_id, ModuleChunk.chapter_id,
+                       ModuleChunk.scene_id, ModuleChunk.chunk_index,
+                       ModuleChunk.chunk_type, ModuleChunk.content_hash,
+                       ModuleSource.campaign_id)
+                .join(ModuleSource, ModuleSource.id == ModuleChunk.module_id)
+                .where(ModuleChunk.embedding_json.is_not(None))
+            )
+        )
+        for batch in _batched(module_rows, batch_size):
+            coll = store.collection("dnd_modules")
+            ids = [str(row[0]) for row in batch]
+            embeddings = [row[1] for row in batch]
+            metadatas = [
+                {
+                    "chunk_id": str(row[0]),
+                    "campaign_id": str(row[8] or ""),
+                    "module_id": str(row[2] or ""),
+                    "chapter_id": str(row[3] or ""),
+                    "scene_id": str(row[4] or ""),
+                    "chunk_index": int(row[5] or 0),
+                    "chunk_type": str(row[6] or "narrative"),
+                    "content_hash": str(row[7] or ""),
+                    "version": 1,
+                }
+                for row in batch
+            ]
+            coll.upsert(ids=ids, embeddings=embeddings, metadatas=metadatas)
+            total_modules += len(batch)
+
+    return {"rules_migrated": total_rules, "modules_migrated": total_modules}
+
+
+def _vector_verify(database: Database, store: VectorStore, *, sample_count: int = 5) -> dict:
+    """Spot-check ChromaDB matches a random sample of SQL embeddings."""
+    import random as _random
+
+    results = {}
+    for coll_name, model, source_join, scope_filter in (
+        ("dnd_rules", RuleChunk, RuleSource, RuleSource.rule_set_id),
+        ("dnd_modules", ModuleChunk, ModuleSource, ModuleSource.campaign_id),
+    ):
+        with database.transaction() as session:
+            rows = list(
+                session.execute(
+                    select(model.id, model.embedding_json)
+                    .join(source_join, source_join.id == model.source_id)
+                    .where(model.embedding_json.is_not(None))
+                )
+            )
+        if not rows:
+            results[coll_name] = {"sampled": 0, "note": "no embedded rows in SQL"}
+            continue
+        sample = _random.sample(rows, min(sample_count, len(rows)))
+        coll = store.collection(coll_name)
+        checks = []
+        for row in sample:
+            chunk_id = str(row[0])
+            chroma_result = coll.get(ids=[chunk_id], include=["embeddings"])
+            found = bool(chroma_result and chroma_result.get("ids"))
+            checks.append(
+                {
+                    "chunk_id": chunk_id,
+                    "in_chromadb": found,
+                }
+            )
+        results[coll_name] = {
+            "sampled": len(sample),
+            "total_in_sql": len(rows),
+            "checks": checks,
+        }
+    return results
+
+
+def _vector_reindex(database: Database, store: VectorStore) -> dict:
+    """Drop and rebuild ChromaDB collections from SQL chunk content.
+
+    This requires the embedding model (BGE-M3) to be available so that
+    vectors can be regenerated from the chunk text stored in SQL.
+    """
+    from nanobot.dnd.rules.embedding import BgeM3Embedder
+
+    embedder = BgeM3Embedder(show_progress=True)
+    results: dict[str, int] = {}
+
+    # ── Rules ───────────────────────────────────────────────────────
+    store.drop_collection("dnd_rules")
+    coll = store.collection("dnd_rules")
+    total_rules = 0
+    with database.transaction() as session:
+        rows = list(
+            session.execute(
+                select(
+                    RuleChunk.id, RuleChunk.chunk_text,
+                    RuleSource.rule_set_id, RuleSource.publication_id,
+                    RuleChunk.source_id, RuleChunk.section_id,
+                    RuleChunk.chunk_index, RuleChunk.content_hash,
+                    RuleSet, RulePublication,
+                )
+                .join(RuleSource, RuleSource.id == RuleChunk.source_id)
+                .join(RuleSet, RuleSet.id == RuleSource.rule_set_id)
+                .join(RulePublication, RulePublication.id == RuleSource.publication_id)
+                .order_by(RuleChunk.source_id, RuleChunk.chunk_index)
+            )
+        )
+    for batch in _batched(rows, 50):
+        texts = []
+        ids = []
+        metadatas = []
+        for row in batch:
+            chunk_id = str(row[0])
+            chunk_text = str(row[1] or "")
+            rule_set = row[8]
+            publication = row[9]
+            breadcrumb = ""  # We don't have heading_path here; use minimal context
+            embedding_text = (
+                f"{rule_set.game_system} | {rule_set.edition} | {rule_set.release}\n"
+                f"{publication.name} | {breadcrumb}\n{chunk_text}"
+            )
+            texts.append(embedding_text)
+            ids.append(chunk_id)
+            metadatas.append(
+                {
+                    "chunk_id": chunk_id,
+                    "rule_set_id": str(row[2] or ""),
+                    "publication_id": str(row[3] or ""),
+                    "source_id": str(row[4] or ""),
+                    "section_id": str(row[5] or ""),
+                    "chunk_index": int(row[6] or 0),
+                    "chunk_type": "section",
+                    "content_hash": str(row[7] or ""),
+                    "version": 1,
+                }
+            )
+        vectors = embedder.encode(texts)
+        coll.upsert(ids=ids, embeddings=vectors, metadatas=metadatas)
+        total_rules += len(batch)
+    results["dnd_rules"] = total_rules
+
+    # ── Modules ─────────────────────────────────────────────────────
+    store.drop_collection("dnd_modules")
+    coll = store.collection("dnd_modules")
+    total_modules = 0
+    with database.transaction() as session:
+        rows = list(
+            session.execute(
+                select(
+                    ModuleChunk.id, ModuleChunk.chunk_text,
+                    ModuleChunk.module_id, ModuleChunk.chapter_id,
+                    ModuleChunk.scene_id, ModuleChunk.chunk_index,
+                    ModuleChunk.chunk_type, ModuleChunk.content_hash,
+                    ModuleSource.campaign_id, ModuleSource.name,
+                )
+                .join(ModuleSource, ModuleSource.id == ModuleChunk.module_id)
+                .order_by(ModuleChunk.module_id, ModuleChunk.chunk_index)
+            )
+        )
+    for batch in _batched(rows, 50):
+        texts = []
+        ids = []
+        metadatas = []
+        for row in batch:
+            chunk_id = str(row[0])
+            chunk_text = str(row[1] or "")
+            module_name = str(row[9] or "")
+            embedding_text = f"{module_name} | | \n{chunk_text}"
+            texts.append(embedding_text)
+            ids.append(chunk_id)
+            metadatas.append(
+                {
+                    "chunk_id": chunk_id,
+                    "campaign_id": str(row[8] or ""),
+                    "module_id": str(row[2] or ""),
+                    "chapter_id": str(row[3] or ""),
+                    "scene_id": str(row[4] or ""),
+                    "chunk_index": int(row[5] or 0),
+                    "chunk_type": str(row[6] or "narrative"),
+                    "content_hash": str(row[7] or ""),
+                    "version": 1,
+                }
+            )
+        vectors = embedder.encode(texts)
+        coll.upsert(ids=ids, embeddings=vectors, metadatas=metadatas)
+        total_modules += len(batch)
+    results["dnd_modules"] = total_modules
+
+    return results
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -237,6 +508,9 @@ def main(argv: list[str] | None = None) -> int:
                     campaign_id=args.id,
                     module_name=args.module,
                     description=args.description,
+                    rule_set_id=getattr(args, "rule_set_id", None),
+                    publication_ids=getattr(args, "publication_ids", None),
+                    locale=getattr(args, "locale", None),
                 )
             elif args.action == "list":
                 result = campaigns.list(status=args.status)
@@ -398,6 +672,28 @@ def main(argv: list[str] | None = None) -> int:
                 else None
             )
             _emit({**asdict(result), "count": result.count, "user_md": user_file})
+        elif args.area == "vector":
+            store = VectorStore()
+            if not store.enabled:
+                _emit(
+                    {
+                        "error": "ChromaDBNotConfigured",
+                        "message": (
+                            "Set CHROMA_DB_URL (for HTTP) or CHROMA_DB_PATH "
+                            "(for persistent local) to enable the vector store."
+                        ),
+                    }
+                )
+                return 1
+            if args.action == "migrate":
+                result = _vector_migrate(database, store, batch_size=args.batch_size)
+                _emit(result)
+            elif args.action == "status":
+                _emit(_vector_status(store))
+            elif args.action == "verify":
+                _emit(_vector_verify(database, store, sample_count=args.count))
+            else:
+                _emit(_vector_reindex(database, store))
         else:
             ingest_service = RuleIngestService(database)
             search_service = RuleSearchService(database)

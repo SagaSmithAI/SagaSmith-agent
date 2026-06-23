@@ -68,6 +68,7 @@ dependencies = [
     "alembic>=1.16.0,<2.0.0",
     "sentence-transformers>=5.0.0,<6.0.0",
     "pgvector>=0.4.0,<1.0.0",
+    "chromadb>=0.6.0,<1.0.0",
 ]
 
 [project.optional-dependencies]

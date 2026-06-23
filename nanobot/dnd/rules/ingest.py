@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,12 +26,28 @@ from nanobot.dnd.db.models import (
 )
 from nanobot.dnd.rules.embedding import BgeM3Embedder, Embedder
 from nanobot.dnd.rules.parser import ParsedSection, parse_markdown
+from nanobot.dnd.vector.client import VectorStore
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_RULE_SET_ID = "dnd5e-2024-srd-5.2.1"
 DEFAULT_PUBLICATION_ID = "publication-srd-5.2.1"
 DEFAULT_EMBEDDING_MODEL_ID = "embedding-bge-m3"
 ZH_CN_RULE_SET_ID = "dnd5e-2014-srd-5.1"
 ZH_CN_PUBLICATION_ID = "publication-srd-5.1-zh-cn"
+EN_2014_RULE_SET_ID = "dnd5e-2014-srd-5.1-en"
+EN_2014_PUBLICATION_ID = "publication-srd-5.1-en"
+ZH_CN_V2_RULE_SET_ID = "dnd5e-2014-srd-5.1-zh-v2"
+ZH_CN_V2_PUBLICATION_ID = "publication-srd-5.1-zh-v2"
+
+# Map rule set ID → bundled resource path relative to the srd skill directory.
+_BUNDLED_RULE_SETS: dict[str, tuple[str, str, bool]] = {
+    # (references_subdir, ingest_mode, use_directory_srd)
+    # ingest_mode: "flat" = ingest_srd (DND5eSRD_*.md), "dir" = ingest_directory_srd (rglob *.md)
+    DEFAULT_RULE_SET_ID: ("references", "flat"),
+    EN_2014_RULE_SET_ID: ("references-2014-en", "dir"),
+    ZH_CN_V2_RULE_SET_ID: ("references-2014-zh", "dir"),
+}
 
 
 @dataclass(frozen=True)
@@ -93,8 +110,12 @@ class RuleIngestService:
         if not files:
             raise FileNotFoundError(f"no SRD markdown files found in {root}")
         embedder = self.embedder or (BgeM3Embedder(show_progress=True) if embed else None)
+        chroma_enabled = VectorStore().enabled
 
         indexed = skipped = section_count = chunk_count = embedding_count = 0
+        # Chunks whose embeddings are deferred to ChromaDB after the SQL transaction.
+        chroma_batches: list[dict] = []
+
         with self.database.transaction() as session:
             rule_set = session.get(RuleSet, DEFAULT_RULE_SET_ID)
             if rule_set is None:
@@ -155,18 +176,26 @@ class RuleIngestService:
                         )
                         or 0
                     )
-                    embeddings_total = int(
-                        session.scalar(
-                            select(func.count()).select_from(RuleChunk).where(
-                                RuleChunk.source_id == source.id,
-                                RuleChunk.embedding_json.is_not(None),
+                    if chroma_enabled:
+                        # With ChromaDB, vectors live outside SQL – trust checksum.
+                        if chunks_total and embedder is not None:
+                            skipped += 1
+                            continue
+                    else:
+                        embeddings_total = int(
+                            session.scalar(
+                                select(func.count()).select_from(RuleChunk).where(
+                                    RuleChunk.source_id == source.id,
+                                    RuleChunk.embedding_json.is_not(None),
+                                )
                             )
+                            or 0
                         )
-                        or 0
-                    )
-                    if chunks_total and (embedder is None or embeddings_total == chunks_total):
-                        skipped += 1
-                        continue
+                        if chunks_total and (
+                            embedder is None or embeddings_total == chunks_total
+                        ):
+                            skipped += 1
+                            continue
                 if source is None:
                     source = RuleSource(
                         id=_stable_id("source", source_key),
@@ -230,9 +259,6 @@ class RuleIngestService:
                             char_end=section.char_end,
                         )
                     )
-                    # IDs are assigned explicitly, but SQLAlchemy cannot infer insert
-                    # order without ORM relationships. Flush the hierarchy node before
-                    # entries reference it.
                     session.flush()
                     entry_type = _entry_type(section)
                     if entry_type:
@@ -275,60 +301,148 @@ class RuleIngestService:
                     )
                     for chunk in parsed_chunks
                 ]
-                vectors = embedder.encode(texts) if embedder is not None else [None] * len(texts)
-                rows: list[RuleChunk] = []
-                for chunk, embedding_text, vector in zip(
-                    parsed_chunks, texts, vectors, strict=True
-                ):
-                    chunk_id = _stable_id("chunk", f"{source.id}:{chunk.chunk_index}")
-                    breadcrumb = " → ".join(chunk.heading_path)
-                    row = RuleChunk(
-                        id=chunk_id,
-                        source_id=source.id,
-                        section_id=section_ids[chunk.section_key],
-                        embedding_model_id=model_row.id if model_row else None,
-                        chunk_index=chunk.chunk_index,
-                        heading=chunk.heading,
-                        breadcrumb=breadcrumb,
-                        start_line=chunk.start_line,
-                        end_line=chunk.end_line,
-                        char_start=chunk.char_start,
-                        char_end=chunk.char_end,
-                        token_count=max(1, len(chunk.text) // 4),
-                        content_hash=_checksum(chunk.text),
-                        chunk_text=chunk.text,
-                        search_text=f"{breadcrumb}\n{chunk.text}",
-                        embedding_json=vector,
-                        metadata_json={"embedding_text_hash": _checksum(embedding_text)},
-                    )
-                    session.add(row)
-                    rows.append(row)
-                session.flush()
-                if rows and session.bind is not None and session.bind.dialect.name == "postgresql":
-                    session.execute(
-                        text(
-                            "UPDATE rule_chunks SET search_vector = "
-                            "to_tsvector('simple', search_text) WHERE source_id = :source_id"
-                        ),
-                        {"source_id": source.id},
-                    )
-                    vector_payload = [
-                        {"id": row.id, "vector": json.dumps(row.embedding_json)}
-                        for row in rows
-                        if row.embedding_json is not None
-                    ]
-                    if vector_payload:
+
+                if chroma_enabled and embedder is not None:
+                    # Defer embedding to after the SQL transaction.
+                    chunk_rows: list[tuple[str, dict]] = []
+                    for chunk, embedding_text in zip(parsed_chunks, texts, strict=True):
+                        chunk_id = _stable_id("chunk", f"{source.id}:{chunk.chunk_index}")
+                        breadcrumb = " → ".join(chunk.heading_path)
+                        row = RuleChunk(
+                            id=chunk_id,
+                            source_id=source.id,
+                            section_id=section_ids[chunk.section_key],
+                            embedding_model_id=model_row.id if model_row else None,
+                            chunk_index=chunk.chunk_index,
+                            heading=chunk.heading,
+                            breadcrumb=breadcrumb,
+                            start_line=chunk.start_line,
+                            end_line=chunk.end_line,
+                            char_start=chunk.char_start,
+                            char_end=chunk.char_end,
+                            token_count=max(1, len(chunk.text) // 4),
+                            content_hash=_checksum(chunk.text),
+                            chunk_text=chunk.text,
+                            search_text=f"{breadcrumb}\n{chunk.text}",
+                            embedding_json=None,
+                            metadata_json={"embedding_text_hash": _checksum(embedding_text)},
+                        )
+                        session.add(row)
+                        chunk_rows.append(
+                            (
+                                chunk_id,
+                                {
+                                    "chunk_id": chunk_id,
+                                    "rule_set_id": rule_set.id,
+                                    "publication_id": publication.id,
+                                    "source_id": source.id,
+                                    "section_id": section_ids[chunk.section_key],
+                                    "chunk_index": chunk.chunk_index,
+                                    "chunk_type": "section",
+                                    "content_hash": _checksum(chunk.text),
+                                    "version": 1,
+                                },
+                            )
+                        )
+                    session.flush()
+                    if session.bind is not None and session.bind.dialect.name == "postgresql":
                         session.execute(
                             text(
-                                "UPDATE rule_chunks SET embedding_vector = CAST(:vector AS vector) "
-                                "WHERE id = :id"
+                                "UPDATE rule_chunks SET search_vector = "
+                                "to_tsvector('simple', search_text) WHERE source_id = :source_id"
                             ),
-                            vector_payload,
+                            {"source_id": source.id},
                         )
+                    chroma_batches.append(
+                        {
+                            "texts": texts,
+                            "rows": chunk_rows,
+                        }
+                    )
+                    embedding_count += len(chunk_rows)
+                    chunk_count += len(chunk_rows)
+                else:
+                    vectors = (
+                        embedder.encode(texts) if embedder is not None
+                        else [None] * len(texts)
+                    )
+                    rows: list[RuleChunk] = []
+                    for chunk, embedding_text, vector in zip(
+                        parsed_chunks, texts, vectors, strict=True
+                    ):
+                        chunk_id = _stable_id("chunk", f"{source.id}:{chunk.chunk_index}")
+                        breadcrumb = " → ".join(chunk.heading_path)
+                        row = RuleChunk(
+                            id=chunk_id,
+                            source_id=source.id,
+                            section_id=section_ids[chunk.section_key],
+                            embedding_model_id=model_row.id if model_row else None,
+                            chunk_index=chunk.chunk_index,
+                            heading=chunk.heading,
+                            breadcrumb=breadcrumb,
+                            start_line=chunk.start_line,
+                            end_line=chunk.end_line,
+                            char_start=chunk.char_start,
+                            char_end=chunk.char_end,
+                            token_count=max(1, len(chunk.text) // 4),
+                            content_hash=_checksum(chunk.text),
+                            chunk_text=chunk.text,
+                            search_text=f"{breadcrumb}\n{chunk.text}",
+                            embedding_json=vector,
+                            metadata_json={"embedding_text_hash": _checksum(embedding_text)},
+                        )
+                        session.add(row)
+                        rows.append(row)
+                    session.flush()
+                    if (
+                        rows
+                        and session.bind is not None
+                        and session.bind.dialect.name == "postgresql"
+                    ):
+                        session.execute(
+                            text(
+                                "UPDATE rule_chunks SET search_vector = "
+                                "to_tsvector('simple', search_text) WHERE source_id = :source_id"
+                            ),
+                            {"source_id": source.id},
+                        )
+                        vector_payload = [
+                            {"id": row.id, "vector": json.dumps(row.embedding_json)}
+                            for row in rows
+                            if row.embedding_json is not None
+                        ]
+                        if vector_payload:
+                            session.execute(
+                                text(
+                                    "UPDATE rule_chunks SET embedding_vector = "
+                                    "CAST(:vector AS vector) WHERE id = :id"
+                                ),
+                                vector_payload,
+                            )
+                    chunk_count += len(rows)
+                    embedding_count += sum(row.embedding_json is not None for row in rows)
                 indexed += 1
                 section_count += len(parsed_sections)
-                chunk_count += len(rows)
-                embedding_count += sum(row.embedding_json is not None for row in rows)
+
+        # ── Post-transaction: ChromaDB upsert ──────────────────────────
+        if chroma_enabled and chroma_batches and embedder is not None:
+            try:
+                store = VectorStore()
+                coll = store.collection("dnd_rules")
+                for batch in chroma_batches:
+                    vectors = embedder.encode(batch["texts"])
+                    ids = [row[0] for row in batch["rows"]]
+                    metadatas = [row[1] for row in batch["rows"]]
+                    coll.upsert(ids=ids, embeddings=vectors, metadatas=metadatas)
+                logger.info(
+                    "ChromaDB upserted %s rule chunks to dnd_rules", embedding_count
+                )
+            except Exception:
+                logger.exception(
+                    "ChromaDB upsert failed for %s rule chunks; "
+                    "dense search will be unavailable for these chunks",
+                    embedding_count,
+                )
 
         return IngestResult(
             rule_set_id=DEFAULT_RULE_SET_ID,
@@ -346,6 +460,14 @@ class RuleIngestService:
         *,
         rule_set_id: str = ZH_CN_RULE_SET_ID,
         publication_id: str = ZH_CN_PUBLICATION_ID,
+        release: str = "SRD 5.1",
+        locale: str = "zh-CN",
+        game_system: str = "D&D 5e",
+        edition: str = "2014",
+        metadata_source: str = "SagiriWWW/DND.SRD.zh-CN",
+        source_prefix: str = "srd-5.1-zh-cn",
+        publication_name: str = "D&D 5E SRD 中文版",
+        publication_slug: str = "srd-5-1-zh-cn",
         embed: bool = True,
         force: bool = False,
     ) -> IngestResult:
@@ -371,11 +493,11 @@ class RuleIngestService:
             if rule_set is None:
                 rule_set = RuleSet(
                     id=rule_set_id,
-                    game_system="D&D 5e",
-                    edition="2014",
-                    release="SRD 5.1",
-                    locale="zh-CN",
-                    metadata_json={"license": "CC-BY-4.0", "source": "SagiriWWW/DND.SRD.zh-CN"},
+                    game_system=game_system,
+                    edition=edition,
+                    release=release,
+                    locale=locale,
+                    metadata_json={"license": "CC-BY-4.0", "source": metadata_source},
                 )
                 session.add(rule_set)
                 session.flush()
@@ -384,8 +506,8 @@ class RuleIngestService:
                 publication = RulePublication(
                     id=publication_id,
                     rule_set_id=rule_set_id,
-                    name="D&D 5E SRD 中文版",
-                    slug="srd-5-1-zh-cn",
+                    name=publication_name,
+                    slug=publication_slug,
                     publication_type="core",
                     priority=90,
                     license="CC-BY-4.0",
@@ -407,7 +529,7 @@ class RuleIngestService:
             for file_path in files:
                 rel = file_path.relative_to(root)
                 category_name = rel.parts[0] if len(rel.parts) > 1 else "_root"
-                source_key = f"srd-5.1-zh-cn/{rel.as_posix()}"
+                source_key = f"{source_prefix}/{rel.as_posix()}"
 
                 content = file_path.read_text(encoding="utf-8")
                 checksum = _checksum(content)
@@ -565,12 +687,13 @@ class RuleIngestService:
                     CampaignRuleProfile.campaign_id == campaign_id
                 )
             )
+            rule_set = session.get(RuleSet, rule_set_id)
             if profile is None:
                 profile = CampaignRuleProfile(
                     id=f"rule_profile_{uuid.uuid4().hex}",
                     campaign_id=campaign_id,
                     rule_set_id=rule_set_id,
-                    locale="en",
+                    locale=rule_set.locale if rule_set else "en",
                 )
                 session.add(profile)
                 session.flush()
@@ -594,3 +717,98 @@ class RuleIngestService:
                     )
                 )
             return profile.id
+
+
+def _bundled_srd_path(subdir: str) -> Path:
+    """Resolve a bundled SRD directory relative to the skills package."""
+    # ingest.py lives at nanobot/dnd/rules/ingest.py
+    # → .parents[2] = nanobot/ → skills/dnd-dm/srd/<subdir>
+    return Path(__file__).resolve().parents[2] / "skills" / "dnd-dm" / "srd" / subdir
+
+
+def ensure_bundled_rules_ingested(database: Database) -> dict[str, IngestResult]:
+    """Ingest all bundled rule sets that are not yet in the database.
+
+    Called lazily on first rules access.  Skips rule sets that already have
+    chunks.  Only generates embeddings when ChromaDB is configured
+    (``VectorStore().enabled``).
+
+    Returns a dict mapping rule_set_id → IngestResult for newly ingested sets.
+    """
+    from nanobot.dnd.vector.client import VectorStore
+
+    chroma_enabled = VectorStore().enabled
+    service = RuleIngestService(database)
+    results: dict[str, IngestResult] = {}
+
+    for rule_set_id, (subdir, mode) in _BUNDLED_RULE_SETS.items():
+        refs_dir = _bundled_srd_path(subdir)
+        if not refs_dir.is_dir():
+            logger.warning("Bundled SRD directory not found: %s", refs_dir)
+            continue
+
+        # Skip if this rule set already has chunks in the database.
+        with database.transaction() as session:
+            rule_set = session.get(RuleSet, rule_set_id)
+            if rule_set is not None:
+                from sqlalchemy import func as _func
+
+                chunk_count = session.scalar(
+                    select(_func.count())
+                    .select_from(RuleChunk)
+                    .join(RuleSource, RuleSource.id == RuleChunk.source_id)
+                    .where(RuleSource.rule_set_id == rule_set_id)
+                )
+                if chunk_count:
+                    logger.debug("Rule set %s already has %s chunks, skipping", rule_set_id, chunk_count)
+                    continue
+
+        logger.info("Auto-ingesting bundled rule set %s from %s", rule_set_id, refs_dir)
+        try:
+            if mode == "flat":
+                result = service.ingest_srd(
+                    refs_dir, embed=chroma_enabled, force=False
+                )
+            else:
+                # Build ingest params from the rule set identity.
+                if rule_set_id == EN_2014_RULE_SET_ID:
+                    result = service.ingest_directory_srd(
+                        refs_dir,
+                        rule_set_id=rule_set_id,
+                        publication_id=EN_2014_PUBLICATION_ID,
+                        release="SRD 5.1",
+                        locale="en",
+                        edition="2014",
+                        game_system="D&D 5e",
+                        metadata_source="bundled/references-2014-en",
+                        source_prefix="srd-5.1-en",
+                        publication_name="D&D 5E SRD 5.1 (2014 English)",
+                        publication_slug="srd-5-1-en",
+                        embed=chroma_enabled,
+                        force=False,
+                    )
+                else:
+                    result = service.ingest_directory_srd(
+                        refs_dir,
+                        rule_set_id=rule_set_id,
+                        publication_id=ZH_CN_V2_PUBLICATION_ID,
+                        release="SRD 5.1",
+                        locale="zh-CN",
+                        edition="2014",
+                        game_system="D&D 5e",
+                        metadata_source="bundled/references-2014-zh",
+                        source_prefix="srd-5.1-zh-v2",
+                        publication_name="D&D 5E SRD 中文版 (v2)",
+                        publication_slug="srd-5-1-zh-v2",
+                        embed=chroma_enabled,
+                        force=False,
+                    )
+            results[rule_set_id] = result
+            logger.info(
+                "Ingested %s: %s chunks, %s embeddings",
+                rule_set_id, result.chunks, result.embeddings,
+            )
+        except Exception:
+            logger.exception("Failed to auto-ingest bundled rule set %s", rule_set_id)
+
+    return results

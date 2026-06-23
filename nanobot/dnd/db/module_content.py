@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 import uuid
 from dataclasses import dataclass
@@ -31,6 +32,9 @@ from nanobot.dnd.modules.scene_utils import (
     preamble_title,
 )
 from nanobot.dnd.rules.embedding import BgeM3Embedder, Embedder
+from nanobot.dnd.vector.client import VectorStore
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_EMBEDDING_MODEL_ID = "embedding-bge-m3"
 SUPPORTED_MODULE_EXTENSIONS = {
@@ -743,6 +747,9 @@ class ModuleImportService:
         source_extensions: list[str] | None = None,
     ) -> ModuleInfo:
         """Shared tail of import_path and _import_content."""
+        chroma_enabled = VectorStore().enabled
+        chroma_batches: list[dict] = []
+
         with self.database.transaction() as session:
             campaign = session.get(Campaign, campaign_id)
             if campaign is None:
@@ -856,57 +863,136 @@ class ModuleImportService:
                     f"{' → '.join(chunk.heading_path)}\n{chunk.text}"
                     for chunk in parsed_chunks
                 ]
-                vectors = (
-                    embedder.encode(embedding_texts)
-                    if embedder is not None
-                    else [None] * len(embedding_texts)
-                )
-                for chunk, embedding_text, vector in zip(
-                    parsed_chunks, embedding_texts, vectors, strict=True
-                ):
-                    scene_row = next(
-                        (
-                            scene
-                            for scene in scene_rows
-                            if scene.start_line <= chunk.start_line <= scene.end_line
-                        ),
-                        None,
-                    )
-                    breadcrumb = " → ".join(chunk.heading_path)
-                    session.add(
-                        ModuleChunk(
-                            id=f"module_chunk_{uuid.uuid4().hex[:16]}",
-                            module_id=module.id,
-                            chapter_id=chapter.id,
-                            scene_id=scene_row.id if scene_row else None,
-                            embedding_model_id=model_row.id if model_row else None,
-                            chunk_index=chunk.chunk_index,
-                            heading=chunk.heading,
-                            breadcrumb=breadcrumb,
-                            start_line=chunk.start_line,
-                            end_line=chunk.end_line,
-                            char_start=chunk.char_start,
-                            char_end=chunk.char_end,
-                            page_start=chunk.page_start,
-                            page_end=chunk.page_end,
-                            chunk_type=chunk.chunk_type,
-                            token_count=max(1, len(chunk.text) // 4),
-                            content_hash=hashlib.sha256(
-                                chunk.text.encode("utf-8")
-                            ).hexdigest(),
-                            chunk_text=chunk.text,
-                            search_text=f"{module_name}\n{chapter.title}\n{breadcrumb}\n{chunk.text}",
-                            embedding_json=vector,
-                            metadata_json={
-                                "embedding_text_hash": hashlib.sha256(
-                                    embedding_text.encode("utf-8")
-                                ).hexdigest(),
-                                "overlap_chars": chunk.overlap_chars,
-                            },
+
+                if chroma_enabled and embedder is not None:
+                    # Defer embedding to after the SQL transaction.
+                    chapter_chroma_rows: list[tuple[str, dict]] = []
+                    for chunk, embedding_text in zip(
+                        parsed_chunks, embedding_texts, strict=True
+                    ):
+                        chunk_id = f"module_chunk_{uuid.uuid4().hex[:16]}"
+                        scene_row = next(
+                            (
+                                scene
+                                for scene in scene_rows
+                                if scene.start_line <= chunk.start_line <= scene.end_line
+                            ),
+                            None,
                         )
+                        breadcrumb = " → ".join(chunk.heading_path)
+                        session.add(
+                            ModuleChunk(
+                                id=chunk_id,
+                                module_id=module.id,
+                                chapter_id=chapter.id,
+                                scene_id=scene_row.id if scene_row else None,
+                                embedding_model_id=model_row.id if model_row else None,
+                                chunk_index=chunk.chunk_index,
+                                heading=chunk.heading,
+                                breadcrumb=breadcrumb,
+                                start_line=chunk.start_line,
+                                end_line=chunk.end_line,
+                                char_start=chunk.char_start,
+                                char_end=chunk.char_end,
+                                page_start=chunk.page_start,
+                                page_end=chunk.page_end,
+                                chunk_type=chunk.chunk_type,
+                                token_count=max(1, len(chunk.text) // 4),
+                                content_hash=hashlib.sha256(
+                                    chunk.text.encode("utf-8")
+                                ).hexdigest(),
+                                chunk_text=chunk.text,
+                                search_text=(
+                                    f"{module_name}\n{chapter.title}\n"
+                                    f"{breadcrumb}\n{chunk.text}"
+                                ),
+                                embedding_json=None,
+                                metadata_json={
+                                    "embedding_text_hash": hashlib.sha256(
+                                        embedding_text.encode("utf-8")
+                                    ).hexdigest(),
+                                    "overlap_chars": chunk.overlap_chars,
+                                },
+                            )
+                        )
+                        chapter_chroma_rows.append(
+                            (
+                                chunk_id,
+                                {
+                                    "chunk_id": chunk_id,
+                                    "campaign_id": campaign_id,
+                                    "module_id": module.id,
+                                    "chapter_id": chapter.id,
+                                    "scene_id": scene_row.id if scene_row else None,
+                                    "chunk_index": chunk.chunk_index,
+                                    "chunk_type": chunk.chunk_type,
+                                    "content_hash": hashlib.sha256(
+                                        chunk.text.encode("utf-8")
+                                    ).hexdigest(),
+                                    "version": 1,
+                                },
+                            )
+                        )
+                        chunk_count += 1
+                        embedding_count += 1
+                    chroma_batches.append(
+                        {"texts": embedding_texts, "rows": chapter_chroma_rows}
                     )
-                    chunk_count += 1
-                    embedding_count += vector is not None
+                else:
+                    vectors = (
+                        embedder.encode(embedding_texts)
+                        if embedder is not None
+                        else [None] * len(embedding_texts)
+                    )
+                    for chunk, embedding_text, vector in zip(
+                        parsed_chunks, embedding_texts, vectors, strict=True
+                    ):
+                        scene_row = next(
+                            (
+                                scene
+                                for scene in scene_rows
+                                if scene.start_line <= chunk.start_line <= scene.end_line
+                            ),
+                            None,
+                        )
+                        breadcrumb = " → ".join(chunk.heading_path)
+                        session.add(
+                            ModuleChunk(
+                                id=f"module_chunk_{uuid.uuid4().hex[:16]}",
+                                module_id=module.id,
+                                chapter_id=chapter.id,
+                                scene_id=scene_row.id if scene_row else None,
+                                embedding_model_id=model_row.id if model_row else None,
+                                chunk_index=chunk.chunk_index,
+                                heading=chunk.heading,
+                                breadcrumb=breadcrumb,
+                                start_line=chunk.start_line,
+                                end_line=chunk.end_line,
+                                char_start=chunk.char_start,
+                                char_end=chunk.char_end,
+                                page_start=chunk.page_start,
+                                page_end=chunk.page_end,
+                                chunk_type=chunk.chunk_type,
+                                token_count=max(1, len(chunk.text) // 4),
+                                content_hash=hashlib.sha256(
+                                    chunk.text.encode("utf-8")
+                                ).hexdigest(),
+                                chunk_text=chunk.text,
+                                search_text=(
+                                    f"{module_name}\n{chapter.title}\n"
+                                    f"{breadcrumb}\n{chunk.text}"
+                                ),
+                                embedding_json=vector,
+                                metadata_json={
+                                    "embedding_text_hash": hashlib.sha256(
+                                        embedding_text.encode("utf-8")
+                                    ).hexdigest(),
+                                    "overlap_chars": chunk.overlap_chars,
+                                },
+                            )
+                        )
+                        chunk_count += 1
+                        embedding_count += vector is not None
             if activate:
                 campaign.module_name = module_name
             session.flush()
@@ -929,7 +1015,7 @@ class ModuleImportService:
                     success=True,
                 )
             )
-            return ModuleInfo(
+            result = ModuleInfo(
                 id=module.id,
                 campaign_id=campaign_id,
                 name=module.name,
@@ -941,6 +1027,28 @@ class ModuleImportService:
                 chunk_count=chunk_count,
                 embeddings=embedding_count,
             )
+
+        # ── Post-transaction: ChromaDB upsert ──────────────────────────
+        if chroma_enabled and chroma_batches and embedder is not None:
+            try:
+                store = VectorStore()
+                coll = store.collection("dnd_modules")
+                for batch in chroma_batches:
+                    vectors = embedder.encode(batch["texts"])
+                    ids = [row[0] for row in batch["rows"]]
+                    metadatas = [row[1] for row in batch["rows"]]
+                    coll.upsert(ids=ids, embeddings=vectors, metadatas=metadatas)
+                logger.info(
+                    "ChromaDB upserted %s module chunks to dnd_modules", embedding_count
+                )
+            except Exception:
+                logger.exception(
+                    "ChromaDB upsert failed for %s module chunks; "
+                    "dense search will be unavailable for these chunks",
+                    embedding_count,
+                )
+
+        return result
 
     @staticmethod
     def _module_info(session: Any, module: ModuleSource, campaign_id: str) -> ModuleInfo:

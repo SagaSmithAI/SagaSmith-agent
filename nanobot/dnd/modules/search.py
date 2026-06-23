@@ -12,6 +12,8 @@ from sqlalchemy import func, or_, select
 from nanobot.dnd.db.database import Database
 from nanobot.dnd.db.models import ModuleChapter, ModuleChunk, ModuleSource, SceneIndex
 from nanobot.dnd.rules.embedding import BgeM3Embedder, Embedder
+from nanobot.dnd.vector.client import VectorStore
+from nanobot.dnd.vector.search import chroma_dense_search
 
 
 class ModuleSearchError(RuntimeError):
@@ -166,6 +168,26 @@ class ModuleSearchService:
         *,
         limit: int,
     ) -> tuple[list[str], dict[str, float]]:
+        # ── ChromaDB path ──────────────────────────────────────────
+        if VectorStore().enabled:
+            results = chroma_dense_search(
+                "dnd_modules",
+                query_vector,
+                {"campaign_id": campaign_id},
+                limit=limit,
+            )
+            # Post-filter: only return chunks that also exist in the
+            # allowed set (active module).  ChromaDB metadata stores the
+            # campaign but not whether the module is active — the SQL
+            # side owns that truth.
+            filtered = [
+                (cid, score) for cid, score in results if cid in set(allowed)
+            ]
+            ordered = [cid for cid, _ in filtered]
+            scores = {cid: score for cid, score in filtered}
+            return ordered, scores
+
+        # ── SQLite / PostgreSQL numpy brute-force path ─────────────
         cached = self._dense_cache.get(campaign_id)
         if cached is None:
             rows = list(

@@ -216,7 +216,7 @@ def parse_timestamp(value: Any) -> int | None:
 class MochatMentionConfig(Base):
     """Mochat mention behavior configuration."""
 
-    require_in_groups: bool = False
+    require_in_groups: bool = True
 
 
 class MochatGroupRule(Base):

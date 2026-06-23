@@ -13,7 +13,9 @@ from nanobot.agent.tools.context import current_request_context
 from nanobot.dnd.db.database import Database
 from nanobot.dnd.db.models import RuleChunk, RulePublication, RuleSet
 from nanobot.dnd.rules.embedding import BgeM3Embedder
+from nanobot.dnd.rules.ingest import ensure_bundled_rules_ingested
 from nanobot.dnd.rules.search import RuleSearchService
+from nanobot.dnd.vector.client import VectorStore
 
 
 @tool_parameters(
@@ -70,6 +72,7 @@ class DndRulesTool(Tool):
         if not self._ready:
             if self._migrate:
                 self.database.upgrade_schema()
+                ensure_bundled_rules_ingested(self.database)
             self._ready = True
 
     @staticmethod
@@ -107,7 +110,7 @@ class DndRulesTool(Tool):
                 raise ValueError("chunk_id is required for expand")
             return self.search_service.expand(chunk_id, mode=expand_mode)
         with self.database.transaction() as session:
-            return {
+            result: dict[str, Any] = {
                 "rule_sets": int(session.scalar(select(func.count()).select_from(RuleSet)) or 0),
                 "publications": int(
                     session.scalar(select(func.count()).select_from(RulePublication)) or 0
@@ -122,6 +125,15 @@ class DndRulesTool(Tool):
                     or 0
                 ),
             }
+        store = VectorStore()
+        if store.enabled:
+            try:
+                result["chromadb"] = store.collection_stats("dnd_rules")
+            except Exception:
+                result["chromadb"] = {"name": "dnd_rules", "error": "unreachable"}
+        else:
+            result["chromadb"] = None
+        return result
 
     async def execute(
         self,
