@@ -1050,16 +1050,5 @@
       "usePath": "Use Path",
       "absolutePathRequired": "Enter an absolute folder path on this machine."
     }
-  },
-  "dnd": {
-    "campaigns": "Campaigns",
-    "characters": "Characters",
-    "world": "World",
-    "all": "All",
-    "pc": "PC",
-    "npc": "NPC",
-    "create": "Create",
-    "noCampaigns": "No campaigns yet",
-    "saves": "Saves"
   }
 }

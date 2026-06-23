@@ -284,8 +284,6 @@ class WebSocketChannel(BaseChannel):
         self._conn_chats: dict[Any, set[str]] = {}
         # connection -> default chat_id for legacy frames that omit routing.
         self._conn_default: dict[Any, str] = {}
-        # chat_id -> {connection: {character_id, name}} for room presence.
-        self._room_players: dict[str, dict[Any, dict[str, str]]] = {}
         self._stop_event: asyncio.Event | None = None
         self._server_task: asyncio.Task[None] | None = None
 
@@ -318,29 +316,7 @@ class WebSocketChannel(BaseChannel):
             subs.discard(connection)
             if not subs:
                 self._subs.pop(cid, None)
-            # Clean up room presence and broadcast updated player list.
-            if cid in self._room_players:
-                self._room_players[cid].pop(connection, None)
-                players = [
-                    {"character_id": p["character_id"], "name": p["name"]}
-                    for p in self._room_players[cid].values()
-                ]
-                if players:
-                    for conn in list(subs or ()):
-                        raw = json.dumps({
-                            "event": "room_presence",
-                            "chat_id": cid,
-                            "players": players,
-                        })
-                        try:
-                            conn.send(raw)
-                        except Exception:
-                            pass
         self._conn_default.pop(connection, None)
-        # Remove empty room entries.
-        empty_rooms = [cid for cid, p in self._room_players.items() if not p]
-        for cid in empty_rooms:
-            self._room_players.pop(cid, None)
 
     async def _maybe_push_active_goal_state(self, chat_id: str) -> None:
         """Replay an active sustained goal from session metadata after *chat_id* is subscribed.
@@ -735,64 +711,6 @@ class WebSocketChannel(BaseChannel):
             event, payload = await webui_transcription_event(envelope)
             await self._send_event(connection, event, **payload)
             return
-        if t == "room_join":
-            cid = envelope.get("chat_id")
-            if not _is_valid_chat_id(cid):
-                await self._send_event(connection, "error", detail="invalid chat_id")
-                return
-            self._attach(connection, cid)
-            player = envelope.get("player") or {}
-            if cid not in self._room_players:
-                self._room_players[cid] = {}
-            self._room_players[cid][connection] = {
-                "character_id": player.get("character_id", ""),
-                "name": player.get("name", ""),
-            }
-            await self._send_event(connection, "attached", chat_id=cid)
-            # Broadcast presence to all room members.
-            for conn in list(self._subs.get(cid, ())):
-                await self._send_event(
-                    conn, "room_presence",
-                    chat_id=cid,
-                    players=[
-                        {"character_id": p["character_id"], "name": p["name"]}
-                        for p in self._room_players.get(cid, {}).values()
-                    ],
-                )
-            await self._hydrate_after_subscribe(cid)
-            return
-        if t == "room_leave":
-            cid = envelope.get("chat_id", "")
-            if cid and cid in self._room_players and connection in self._room_players[cid]:
-                del self._room_players[cid][connection]
-                # Broadcast updated presence.
-                for conn in list(self._subs.get(cid, ())):
-                    await self._send_event(
-                        conn, "room_presence",
-                        chat_id=cid,
-                        players=[
-                            {"character_id": p["character_id"], "name": p["name"]}
-                            for p in self._room_players.get(cid, {}).values()
-                        ],
-                    )
-            return
-        if t == "peer_message":
-            cid = envelope.get("chat_id")
-            content = envelope.get("content")
-            if not _is_valid_chat_id(cid) or not isinstance(content, str) or not content.strip():
-                return
-            # Broadcast to all room members WITHOUT going through the agent loop.
-            player = envelope.get("player") or {}
-            payload = json.dumps({
-                "event": "peer_message",
-                "chat_id": cid,
-                "text": content,
-                "player": player,
-                "timestamp": envelope.get("timestamp"),
-            })
-            for conn in list(self._subs.get(cid, ())):
-                await self._safe_send_to(conn, payload)
-            return
         if t == "message":
             cid = envelope.get("chat_id")
             content = envelope.get("content")
@@ -915,7 +833,6 @@ class WebSocketChannel(BaseChannel):
         self._subs.clear()
         self._conn_chats.clear()
         self._conn_default.clear()
-        self._room_players.clear()
         self._tokens.clear()
 
     async def _safe_send_to(self, connection: Any, raw: str, *, label: str = "") -> None:

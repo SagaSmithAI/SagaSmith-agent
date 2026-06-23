@@ -8,7 +8,6 @@ import {
   Settings,
   SquarePen,
   Blocks,
-  Swords,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -39,9 +38,8 @@ interface SidebarProps {
   onOpenApps: () => void;
   onOpenSkills: () => void;
   onOpenAutomations: () => void;
-  onOpenDnd?: () => void;
   onOpenSearch: () => void;
-  activeUtility?: "apps" | "skills" | "automations" | "dnd" | null;
+  activeUtility?: "apps" | "skills" | "automations" | null;
   onToggleArchived: () => void;
   onCollapse: () => void;
   onExpand?: () => void;
@@ -170,15 +168,6 @@ export function Sidebar(props: SidebarProps) {
           active={props.activeUtility === "skills"}
           icon={<Brain className="h-4 w-4" />}
         />
-        {props.onOpenDnd && (
-          <SidebarActionButton
-            collapsed={collapsed}
-            label="D&D"
-            onClick={props.onOpenDnd}
-            active={props.activeUtility === "dnd"}
-            icon={<Swords className="h-4 w-4" />}
-          />
-        )}
         <SidebarActionButton
           collapsed={collapsed}
           label={t("sidebar.automations", { defaultValue: "Automations" })}

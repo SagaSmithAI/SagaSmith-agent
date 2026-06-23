@@ -67,11 +67,8 @@ from nanobot.dnd.db.world import WorldService
                 "type": "object",
                 "description": "For update action: dict of field_name → new_value.",
             },
-            # NPC attitude / faction (use character_id, not name)
-            "character_id": {
-                "type": "string",
-                "description": "Character ID (for NPC attitude/status, bind, unbind, show, update).",
-            },
+            # NPC attitude / faction
+            "npc_name": {"type": "string", "description": "NPC name for attitude/status actions."},
             "faction_name": {"type": "string", "description": "Faction name for faction action."},
             "delta": {
                 "type": "integer",
@@ -159,6 +156,7 @@ class DndCharacterTool(Tool):
         notes: str | None = None,
         portrait_url: str | None = None,
         fields: dict | None = None,
+        npc_name: str | None = None,
         faction_name: str | None = None,
         delta: int | None = None,
         attitude: int | None = None,
@@ -236,25 +234,26 @@ class DndCharacterTool(Tool):
             raise ValueError("campaign_id is required for world state actions")
 
         if action == "npc_attitude":
-            if not character_id:
-                raise ValueError("character_id is required for npc_attitude")
+            if not npc_name:
+                raise ValueError("npc_name is required for npc_attitude")
             return self.world.update_npc_attitude(
-                resolved_campaign, character_id, delta or 0,
+                resolved_campaign, npc_name, delta or 0,
                 note=notes or "",
             )
 
         if action == "npc_status":
-            if not character_id:
-                raise ValueError("character_id is required for npc_status")
+            if not npc_name:
+                raise ValueError("npc_name is required for npc_status")
             if any(x is not None for x in (status, attitude, trust, fear, notes, location)):
                 return self.world.set_npc_status(
-                    resolved_campaign, character_id,
+                    resolved_campaign, npc_name,
                     status=status, attitude=attitude,
                     trust=trust, fear=fear,
                     note=notes, location=location,
                 )
-            result = self.world.get_npc_status(resolved_campaign, character_id)
-            return result or {"character_id": character_id, "status": "unknown"}
+            # No fields to set → get current status.
+            result = self.world.get_npc_status(resolved_campaign, npc_name)
+            return result or {"npc_name": npc_name, "status": "unknown"}
 
         if action == "faction":
             if not faction_name:
