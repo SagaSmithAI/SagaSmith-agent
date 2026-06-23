@@ -680,6 +680,10 @@ class GatewayHTTPHandler:
 
         from nanobot.webui import dnd_api
 
+        # Quick check: does this path look like a D&D API call?
+        if not got.startswith("/api/dnd"):
+            return None
+
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
 
