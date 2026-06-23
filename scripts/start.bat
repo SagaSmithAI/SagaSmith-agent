@@ -12,8 +12,9 @@ echo   dnd-dm-agent
 echo ============================================
 
 :: ---------- nanobot gateway (WebUI + Telegram, NapCat disabled) ----------
+set "ROOT=%~dp0.."
 echo [..] Starting nanobot gateway (GPU + ChromaDB)...
-start "nanobot-gateway" cmd /k "cd /d %cd% && set DND_EMBEDDING_DEVICE=cuda && set CHROMA_DB_PATH=%cd%\data\chroma && set NANOBOT_NO_NAPCAT=1 && uv run nanobot gateway --config config\config.json"
+start "nanobot-gateway" cmd /k "cd /d %ROOT% && set DND_EMBEDDING_DEVICE=cuda && set CHROMA_DB_PATH=%ROOT%\data\chroma && set NANOBOT_NO_NAPCAT=1 && uv run nanobot gateway --config %ROOT%\config\config.json"
 
 echo.
 echo ============================================
