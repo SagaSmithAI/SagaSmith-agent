@@ -43,7 +43,7 @@
     "transcriptionProvider": "groq",
     "transcriptionLanguage": null,
     "dingtalk": {
-      "enabled": false,
+      "enabled": true,
       "clientId": "",
       "clientSecret": "",
       "allowFrom": [],
@@ -52,7 +52,7 @@
       "groupUserIsolation": false
     },
     "discord": {
-      "enabled": false,
+      "enabled": true,
       "token": "",
       "allowFrom": [],
       "allowChannels": [],
@@ -67,7 +67,7 @@
       "proxyPassword": null
     },
     "email": {
-      "enabled": false,
+      "enabled": true,
       "consentGranted": false,
       "imapHost": "",
       "imapPort": 993,
@@ -99,7 +99,7 @@
       "maxAttachmentsPerEmail": 5
     },
     "feishu": {
-      "enabled": false,
+      "enabled": true,
       "appId": "",
       "appSecret": "",
       "encryptKey": "",
@@ -115,7 +115,7 @@
       "topicIsolation": true
     },
     "mochat": {
-      "enabled": false,
+      "enabled": true,
       "baseUrl": "https://mochat.io",
       "socketUrl": "",
       "socketPath": "/socket.io",
@@ -141,7 +141,7 @@
       "replyDelayMs": 120000
     },
     "msteams": {
-      "enabled": false,
+      "enabled": true,
       "appId": "",
       "appPassword": "",
       "tenantId": "",
@@ -180,7 +180,7 @@
       "maxImageBytes": 20971520
     },
     "qq": {
-      "enabled": false,
+      "enabled": true,
       "appId": "",
       "secret": "",
       "allowFrom": [],
@@ -191,7 +191,7 @@
       "downloadMaxBytes": 209715200
     },
     "signal": {
-      "enabled": false,
+      "enabled": true,
       "phoneNumber": "",
       "daemonHost": "localhost",
       "daemonPort": 8080,
@@ -211,7 +211,7 @@
       "allowFrom": []
     },
     "slack": {
-      "enabled": false,
+      "enabled": true,
       "mode": "socket",
       "webhookPath": "/slack/events",
       "botToken": "",
@@ -275,14 +275,14 @@
       "sslKeyfile": ""
     },
     "wecom": {
-      "enabled": false,
+      "enabled": true,
       "botId": "",
       "secret": "",
       "allowFrom": [],
       "welcomeMessage": ""
     },
     "weixin": {
-      "enabled": false,
+      "enabled": true,
       "allowFrom": [],
       "baseUrl": "https://ilinkai.weixin.qq.com",
       "cdnBaseUrl": "https://novac2c.cdn.weixin.qq.com/c2c",
@@ -292,7 +292,7 @@
       "pollTimeout": 35
     },
     "whatsapp": {
-      "enabled": false,
+      "enabled": true,
       "bridgeUrl": "ws://localhost:3001",
       "bridgeToken": "",
       "allowFrom": [],
