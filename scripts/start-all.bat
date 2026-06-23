@@ -17,8 +17,8 @@ echo [..] Starting NapCat QQ...
 start "NapCat-QQ" cmd /c "cd /d tools\NapCat.Shell && launcher.bat 1534055688"
 
 :: ---------- nanobot gateway ----------
-echo [..] Starting nanobot gateway (GPU)...
-start "nanobot-gateway" cmd /k "cd /d %cd% && set DND_EMBEDDING_DEVICE=cuda && uv run nanobot gateway"
+echo [..] Starting nanobot gateway (GPU + ChromaDB)...
+start "nanobot-gateway" cmd /k "cd /d %cd% && set DND_EMBEDDING_DEVICE=cuda && set CHROMA_DB_PATH=%cd%\data\chroma && uv run nanobot gateway --config config\config.json"
 
 echo.
 echo ============================================

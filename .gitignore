@@ -100,6 +100,9 @@ nano.*.save
 # Local config (keep example tracked)
 config/config.json
 
+# Local data (ChromaDB, etc.)
+data/
+
 # Logs & temp
 *.log
 logs/
