@@ -21,9 +21,9 @@ def _db() -> Database:
 
 # ── Campaigns ────────────────────────────────────────────────────────────
 
-def list_campaigns(args: dict[str, str] | None = None) -> list[dict[str, Any]]:
+def list_campaigns(args: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     args = args or {}
-    status = args.get("status") or None
+    status = _first(args, "status")
     svc = CampaignService(_db())
     try:
         campaigns = svc.list(status=status)
@@ -76,13 +76,18 @@ def set_campaign_status(campaign_id: str, status: str) -> dict[str, Any]:
 
 # ── Characters ───────────────────────────────────────────────────────────
 
-def list_characters(args: dict[str, str] | None = None) -> list[dict[str, Any]]:
+def _first(args: dict[str, Any], key: str) -> Any | None:
+    v = args.get(key)
+    return v[0] if isinstance(v, list) and v else v
+
+
+def list_characters(args: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     args = args or {}
     svc = CharacterService(_db())
     try:
         characters = svc.list(
-            campaign_id=args.get("campaign_id"),
-            character_type=args.get("character_type"),
+            campaign_id=_first(args, "campaign_id"),
+            character_type=_first(args, "character_type"),
         )
         return [asdict(c) for c in characters]
     finally:

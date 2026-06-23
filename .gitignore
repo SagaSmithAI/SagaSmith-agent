@@ -125,3 +125,5 @@ bridge/node_modules/
 tools/NapCat.Shell/
 tools/QQ*.exe
 tools/NapCat.Shell.zip
+config/dnd/
+*.lnk
