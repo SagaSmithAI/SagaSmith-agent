@@ -665,6 +665,99 @@ class GatewayHTTPHandler:
             return self._handle_webui_sidebar_state(request)
         if got == "/api/webui/sidebar-state/update":
             return self._handle_webui_sidebar_state_update(request)
+        # D&D routes
+        dnd_result = await self._dispatch_dnd_routes(connection, request, got)
+        if dnd_result is not None:
+            return dnd_result
+        return None
+
+    # -- D&D routes -----------------------------------------------------------
+
+    async def _dispatch_dnd_routes(
+        self, connection: Any, request: WsRequest, got: str
+    ) -> Response | None:
+        import json as _json
+
+        from nanobot.webui import dnd_api
+
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+
+        # Campaigns
+        if got == "/api/dnd/campaigns":
+            args = _parse_query(request.path)
+            return _http_json_response(dnd_api.list_campaigns(args))
+        if got == "/api/dnd/campaigns/create":
+            body = _json.loads(request.body) if request.body else {}
+            return _http_json_response(dnd_api.create_campaign(body))
+        m = re.match(r"^/api/dnd/campaigns/([^/]+)/delete$", got)
+        if m:
+            return _http_json_response(dnd_api.delete_campaign(m.group(1)))
+        m = re.match(r"^/api/dnd/campaigns/([^/]+)/status$", got)
+        if m:
+            body = _json.loads(request.body) if request.body else {}
+            return _http_json_response(
+                dnd_api.set_campaign_status(m.group(1), body.get("status", "active"))
+            )
+        m = re.match(r"^/api/dnd/campaigns/([^/]+)$", got)
+        if m:
+            return _http_json_response(dnd_api.get_campaign(m.group(1)))
+
+        # Characters
+        if got == "/api/dnd/characters":
+            args = _parse_query(request.path)
+            return _http_json_response(dnd_api.list_characters(args))
+        if got == "/api/dnd/characters/create":
+            body = _json.loads(request.body) if request.body else {}
+            return _http_json_response(dnd_api.create_character(body))
+        m = re.match(r"^/api/dnd/characters/([^/]+)/update$", got)
+        if m:
+            body = _json.loads(request.body) if request.body else {}
+            return _http_json_response(dnd_api.update_character(m.group(1), body))
+        m = re.match(r"^/api/dnd/characters/([^/]+)/bind$", got)
+        if m:
+            body = _json.loads(request.body) if request.body else {}
+            return _http_json_response(
+                dnd_api.bind_character(m.group(1), body.get("campaign_id", ""))
+            )
+        m = re.match(r"^/api/dnd/characters/([^/]+)/unbind$", got)
+        if m:
+            return _http_json_response(dnd_api.unbind_character(m.group(1)))
+        m = re.match(r"^/api/dnd/characters/([^/]+)$", got)
+        if m:
+            return _http_json_response(dnd_api.get_character(m.group(1)))
+
+        # World state
+        m = re.match(r"^/api/dnd/world/([^/]+)/faction$", got)
+        if m:
+            body = _json.loads(request.body) if request.body else {}
+            return _http_json_response(dnd_api.update_faction(m.group(1), body))
+        m = re.match(r"^/api/dnd/world/([^/]+)/npc-attitude$", got)
+        if m:
+            body = _json.loads(request.body) if request.body else {}
+            return _http_json_response(dnd_api.update_npc_attitude(m.group(1), body))
+        m = re.match(r"^/api/dnd/world/([^/]+)/npc-status$", got)
+        if m:
+            body = _json.loads(request.body) if request.body else {}
+            return _http_json_response(dnd_api.update_npc_status(m.group(1), body))
+        m = re.match(r"^/api/dnd/world/([^/]+)$", got)
+        if m:
+            return _http_json_response(dnd_api.get_world_state(m.group(1)))
+
+        # Saves
+        m = re.match(r"^/api/dnd/saves/([^/]+)$", got)
+        if m:
+            return _http_json_response(dnd_api.list_saves(m.group(1)))
+
+        # Campaign room
+        m = re.match(r"^/api/dnd/room/([^/]+)$", got)
+        if m:
+            return _http_json_response(dnd_api.get_campaign_room(m.group(1)))
+
+        # Rules
+        if got == "/api/dnd/rules/status":
+            return _http_json_response(dnd_api.rule_status())
+
         return None
 
     def _handle_commands(self, request: WsRequest) -> Response:
@@ -904,4 +997,4 @@ def _positive_int(value: Any) -> int | None:
 
 
 def _is_websocket_channel_session_key(key: str) -> bool:
-    return key.startswith("websocket:")
+    return key.startswith("websocket:") or key.startswith("campaign:")

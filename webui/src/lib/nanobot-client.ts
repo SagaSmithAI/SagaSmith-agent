@@ -380,6 +380,11 @@ export class NanobotClient {
     }
   }
 
+  /** Send an arbitrary envelope — for custom protocol messages (room_join, peer_message, etc.). */
+  sendRaw(frame: Record<string, unknown>): void {
+    this.queueSend(frame as Outbound);
+  }
+
   sendMessage(
     chatId: string,
     content: string,

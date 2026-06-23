@@ -105,10 +105,15 @@ class WorldService:
 
     # ── NPC status / attitude ──────────────────────────────────────────
 
+    def _resolve_npc_name(self, session, character_id: str) -> str:
+        from nanobot.dnd.db.models import Character
+        char = session.get(Character, character_id)
+        return char.name if char is not None else character_id
+
     def update_npc_attitude(
         self,
         campaign_id: str,
-        npc_name: str,
+        character_id: str,
         delta: int,
         *,
         note: str = "",
@@ -116,10 +121,11 @@ class WorldService:
         """Adjust an NPC's attitude score.  Uses the same scale as factions."""
         with self.database.transaction() as session:
             state = self._load(session, campaign_id)
-            npc_data = state["key_npc_status"].get(npc_name, {})
+            npc_name = self._resolve_npc_name(session, character_id)
+            npc_data = state["key_npc_status"].get(character_id, {})
             if isinstance(npc_data, str):
-                # Legacy free-text status → migrate to structured dict.
                 npc_data = {"status": npc_data, "attitude": 0}
+            npc_data.setdefault("npc_name", npc_name)
             current = npc_data.get("attitude", 0)
             current += delta
             npc_data["attitude"] = current
@@ -127,9 +133,10 @@ class WorldService:
                 npc_data.setdefault("history", []).append(
                     f"{delta:+d} ({self._attitude_label(current)}): {note}"
                 )
-            state["key_npc_status"][npc_name] = npc_data
+            state["key_npc_status"][character_id] = npc_data
             self._save(session, campaign_id, state)
         return {
+            "character_id": character_id,
             "npc_name": npc_name,
             "attitude_score": current,
             "attitude": self._attitude_label(current),
@@ -140,7 +147,7 @@ class WorldService:
     def set_npc_status(
         self,
         campaign_id: str,
-        npc_name: str,
+        character_id: str,
         *,
         status: str | None = None,
         attitude: int | None = None,
@@ -152,9 +159,11 @@ class WorldService:
         """Set one or more fields on a key NPC's status record."""
         with self.database.transaction() as session:
             state = self._load(session, campaign_id)
-            npc_data = state["key_npc_status"].get(npc_name, {})
+            npc_name = self._resolve_npc_name(session, character_id)
+            npc_data = state["key_npc_status"].get(character_id, {})
             if isinstance(npc_data, str):
                 npc_data = {"status": npc_data}
+            npc_data.setdefault("npc_name", npc_name)
             if status is not None:
                 npc_data["status"] = status
             if attitude is not None:
@@ -167,14 +176,14 @@ class WorldService:
                 npc_data.setdefault("history", []).append(note)
             if location is not None:
                 npc_data["location"] = location
-            state["key_npc_status"][npc_name] = npc_data
+            state["key_npc_status"][character_id] = npc_data
             self._save(session, campaign_id, state)
-        return {"npc_name": npc_name, **npc_data}
+        return {"character_id": character_id, **npc_data}
 
-    def get_npc_status(self, campaign_id: str, npc_name: str) -> dict | None:
+    def get_npc_status(self, campaign_id: str, character_id: str) -> dict | None:
         with self.database.transaction() as session:
             state = self._load(session, campaign_id)
-        return state["key_npc_status"].get(npc_name)
+        return state["key_npc_status"].get(character_id)
 
     def list_npc_statuses(self, campaign_id: str) -> dict[str, dict]:
         with self.database.transaction() as session:
@@ -247,14 +256,15 @@ class WorldService:
             lines.append(f"Active: {' / '.join(active)}")
         npcs = state.get("key_npc_status", {})
         important = {}
-        for name, data in npcs.items():
+        for cid, data in npcs.items():
             if isinstance(data, dict):
+                display_name = data.get("npc_name", cid)
                 att = data.get("attitude", 0)
                 status = data.get("status", "")
                 if att <= -1 or "待" in status or "未" in status:
-                    important[name] = self._attitude_label(att)
+                    important[display_name] = self._attitude_label(att)
             elif isinstance(data, str) and ("待" in data or "未" in data or "敌对" in data):
-                important[name] = data
+                important[cid] = data
         if important:
             parts = [f"{n}({s})" for n, s in important.items()]
             lines.append(f"Key NPCs: {' '.join(parts)}")

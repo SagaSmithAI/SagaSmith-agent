@@ -3,6 +3,13 @@ import type {
   AutomationUpdatePayload,
   ChatSummary,
   CliAppsPayload,
+  DndCampaignInfo,
+  DndCharacterFormData,
+  DndCharacterInfo,
+  DndRoomInfo,
+  DndRulesStatus,
+  DndSnapshotInfo,
+  DndWorldState,
   FilePreviewPayload,
   ImageGenerationSettingsUpdate,
   McpPresetsPayload,
@@ -670,4 +677,197 @@ export async function updateTranscriptionSettings(
     `${base}/api/settings/transcription/update?${query}`,
     token,
   );
+}
+
+// ── D&D API ────────────────────────────────────────────────────────────────
+
+export async function fetchDndCampaigns(
+  token: string,
+  base = "",
+  status?: string,
+): Promise<DndCampaignInfo[]> {
+  const q = status ? `?status=${status}` : "";
+  return request<DndCampaignInfo[]>(`${base}/api/dnd/campaigns${q}`, token);
+}
+
+export async function fetchDndCampaign(
+  token: string,
+  id: string,
+  base = "",
+): Promise<DndCampaignInfo> {
+  return request<DndCampaignInfo>(`${base}/api/dnd/campaigns/${id}`, token);
+}
+
+export async function createDndCampaign(
+  token: string,
+  data: Record<string, unknown>,
+  base = "",
+): Promise<DndCampaignInfo> {
+  return request<DndCampaignInfo>(`${base}/api/dnd/campaigns/create`, token, {
+    method: "POST",
+    body: JSON.stringify(data),
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+export async function deleteDndCampaign(
+  token: string,
+  id: string,
+  base = "",
+): Promise<{ deleted: string }> {
+  return request(`${base}/api/dnd/campaigns/${id}/delete`, token, { method: "POST" });
+}
+
+export async function setDndCampaignStatus(
+  token: string,
+  id: string,
+  status: string,
+  base = "",
+): Promise<DndCampaignInfo> {
+  return request(`${base}/api/dnd/campaigns/${id}/status`, token, {
+    method: "POST",
+    body: JSON.stringify({ status }),
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+export async function fetchDndCharacters(
+  token: string,
+  base = "",
+  params?: { character_type?: string; campaign_id?: string },
+): Promise<DndCharacterInfo[]> {
+  const sp = new URLSearchParams();
+  if (params?.character_type) sp.set("character_type", params.character_type);
+  if (params?.campaign_id) sp.set("campaign_id", params.campaign_id);
+  const qs = sp.toString();
+  return request<DndCharacterInfo[]>(
+    `${base}/api/dnd/characters${qs ? `?${qs}` : ""}`,
+    token,
+  );
+}
+
+export async function fetchDndCharacter(
+  token: string,
+  id: string,
+  base = "",
+): Promise<DndCharacterInfo> {
+  return request<DndCharacterInfo>(`${base}/api/dnd/characters/${id}`, token);
+}
+
+export async function createDndCharacter(
+  token: string,
+  data: DndCharacterFormData,
+  base = "",
+): Promise<DndCharacterInfo> {
+  return request<DndCharacterInfo>(`${base}/api/dnd/characters/create`, token, {
+    method: "POST",
+    body: JSON.stringify(data),
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+export async function updateDndCharacter(
+  token: string,
+  id: string,
+  fields: Record<string, unknown>,
+  base = "",
+): Promise<DndCharacterInfo> {
+  return request<DndCharacterInfo>(`${base}/api/dnd/characters/${id}/update`, token, {
+    method: "POST",
+    body: JSON.stringify(fields),
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+export async function bindDndCharacter(
+  token: string,
+  id: string,
+  campaignId: string,
+  base = "",
+): Promise<DndCharacterInfo> {
+  return request<DndCharacterInfo>(`${base}/api/dnd/characters/${id}/bind`, token, {
+    method: "POST",
+    body: JSON.stringify({ campaign_id: campaignId }),
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+export async function unbindDndCharacter(
+  token: string,
+  id: string,
+  base = "",
+): Promise<DndCharacterInfo> {
+  return request<DndCharacterInfo>(`${base}/api/dnd/characters/${id}/unbind`, token, {
+    method: "POST",
+  });
+}
+
+export async function fetchDndWorldState(
+  token: string,
+  campaignId: string,
+  base = "",
+): Promise<DndWorldState> {
+  return request<DndWorldState>(`${base}/api/dnd/world/${campaignId}`, token);
+}
+
+export async function updateDndFaction(
+  token: string,
+  campaignId: string,
+  data: { faction_name: string; delta: number; note?: string },
+  base = "",
+): Promise<Record<string, unknown>> {
+  return request(`${base}/api/dnd/world/${campaignId}/faction`, token, {
+    method: "POST",
+    body: JSON.stringify(data),
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+export async function updateDndNpcAttitude(
+  token: string,
+  campaignId: string,
+  data: { character_id: string; delta: number; note?: string },
+  base = "",
+): Promise<Record<string, unknown>> {
+  return request(`${base}/api/dnd/world/${campaignId}/npc-attitude`, token, {
+    method: "POST",
+    body: JSON.stringify(data),
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+export async function updateDndNpcStatus(
+  token: string,
+  campaignId: string,
+  data: { character_id: string } & Record<string, unknown>,
+  base = "",
+): Promise<Record<string, unknown>> {
+  return request(`${base}/api/dnd/world/${campaignId}/npc-status`, token, {
+    method: "POST",
+    body: JSON.stringify(data),
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+export async function fetchDndSaves(
+  token: string,
+  campaignId: string,
+  base = "",
+): Promise<DndSnapshotInfo[]> {
+  return request<DndSnapshotInfo[]>(`${base}/api/dnd/saves/${campaignId}`, token);
+}
+
+export async function fetchDndRulesStatus(
+  token: string,
+  base = "",
+): Promise<DndRulesStatus> {
+  return request<DndRulesStatus>(`${base}/api/dnd/rules/status`, token);
+}
+
+export async function fetchDndRoom(
+  token: string,
+  campaignId: string,
+  base = "",
+): Promise<DndRoomInfo> {
+  return request<DndRoomInfo>(`${base}/api/dnd/room/${campaignId}`, token);
 }
