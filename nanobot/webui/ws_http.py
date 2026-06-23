@@ -1001,4 +1001,6 @@ def _positive_int(value: Any) -> int | None:
 
 
 def _is_websocket_channel_session_key(key: str) -> bool:
-    return key.startswith("websocket:") or key.startswith("campaign:")
+    # Accept any channel prefix so Feishu/Telegram/etc sessions show in WebUI.
+    # Internal session types (like cron internals) don't use channel prefixes.
+    return ":" in key
