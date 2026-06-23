@@ -1424,6 +1424,7 @@ function Shell({
     onOpenApps,
     onOpenAutomations,
     onOpenSkills,
+	onOpenDnd,
     onOpenSearch: onOpenSessionSearch,
     activeUtility: view === "apps" || view === "automations" || view === "skills" || view === "dnd" ? view : null,
     onToggleArchived,

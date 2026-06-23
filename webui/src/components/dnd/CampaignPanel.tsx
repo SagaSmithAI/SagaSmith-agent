@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Plus, Trash2, Archive, RotateCcw } from "lucide-react";
+import { Trash2, Archive, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { DndCampaignInfo } from "@/lib/types";
 import {

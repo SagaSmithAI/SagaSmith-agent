@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Plus, X, User, Users } from "lucide-react";
+import { Plus, User, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { DndCharacterInfo } from "@/lib/types";
 import { fetchDndCharacters, fetchDndCharacter } from "@/lib/api";
@@ -10,16 +10,6 @@ import { cn } from "@/lib/utils";
 interface Props {
   token: string;
 }
-
-const ATTITUDE_COLORS: Record<number, string> = {
-  3: "bg-emerald-100 text-emerald-700",
-  2: "bg-green-100 text-green-700",
-  1: "bg-lime-100 text-lime-700",
-  0: "bg-gray-100 text-gray-600",
-  [-1]: "bg-orange-100 text-orange-700",
-  [-2]: "bg-red-100 text-red-700",
-  [-3]: "bg-rose-100 text-rose-700",
-};
 
 export function CharacterPanel({ token }: Props) {
   const { t } = useTranslation();

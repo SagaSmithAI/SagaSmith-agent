@@ -1,17 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
-import { useTranslation } from "react-i18next";
 import { Minus, Plus } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import type { DndWorldState, DndCampaignInfo } from "@/lib/types";
 import { fetchDndWorldState, fetchDndCampaigns, updateDndFaction, updateDndNpcAttitude } from "@/lib/api";
-import { cn } from "@/lib/utils";
 
 interface Props {
   token: string;
 }
 
 export function WorldPanel({ token }: Props) {
-  const { t } = useTranslation();
   const [campaigns, setCampaigns] = useState<DndCampaignInfo[]>([]);
   const [selectedCid, setSelectedCid] = useState<string>("");
   const [world, setWorld] = useState<DndWorldState | null>(null);

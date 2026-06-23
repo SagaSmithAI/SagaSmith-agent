@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { LogIn, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useClient } from "@/providers/ClientProvider";
-import type { DndCampaignInfo, DndRoomCharacter, DndRoomPlayer } from "@/lib/types";
+import type { DndCampaignInfo, DndRoomCharacter } from "@/lib/types";
 import { fetchDndCampaigns, fetchDndRoom } from "@/lib/api";
 
 interface Props {

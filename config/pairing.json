@@ -1,0 +1,23 @@
+{
+  "approved": {},
+  "pending": {
+    "8QAF-DN6D": {
+      "channel": "feishu",
+      "sender_id": "ou_5f3a8ffaf4ee31ece7ffe356023e9a4f",
+      "created_at": 1782249763.2967885,
+      "expires_at": 1782250363.2967885
+    },
+    "7N70-MZX9": {
+      "channel": "feishu",
+      "sender_id": "ou_5f3a8ffaf4ee31ece7ffe356023e9a4f",
+      "created_at": 1782249809.1360552,
+      "expires_at": 1782250409.1360552
+    },
+    "QDB9-6A6I": {
+      "channel": "feishu",
+      "sender_id": "ou_5f3a8ffaf4ee31ece7ffe356023e9a4f",
+      "created_at": 1782250188.805525,
+      "expires_at": 1782250788.805525
+    }
+  }
+}

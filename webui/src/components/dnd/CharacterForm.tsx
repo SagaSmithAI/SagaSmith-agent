@@ -1,9 +1,8 @@
 import { useState } from "react";
-import { useTranslation } from "react-i18next";
 import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { DndCharacterFormData, DndCharacterInfo } from "@/lib/types";
-import { createDndCharacter, updateDndCharacter, fetchDndCampaigns } from "@/lib/api";
+import { createDndCharacter, updateDndCharacter } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 interface Props {
@@ -15,7 +14,6 @@ interface Props {
 }
 
 export function CharacterForm({ token, defaultType, initial, onDone, onCancel }: Props) {
-  const { t } = useTranslation();
   const isNpc = defaultType === "npc";
   const [tab, setTab] = useState<"stats" | "lore">("stats");
   const [saving, setSaving] = useState(false);
