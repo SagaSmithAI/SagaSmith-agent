@@ -59,8 +59,8 @@ def test_character_service_persists_character_and_audit(tmp_path: Path) -> None:
     try:
         CampaignService(database).create("Avernus", campaign_id="avernus")
         created = CharacterService(database).create(
-            "avernus",
             "Kalen",
+            campaign_id="avernus",
             player_name="Alice",
             class_name="Wizard",
             level=3,
@@ -70,7 +70,7 @@ def test_character_service_persists_character_and_audit(tmp_path: Path) -> None:
             sheet_json={"stats": {"int": 16}},
         )
         assert created.party_id is not None
-        assert CharacterService(database).list("avernus") == [created]
+        assert CharacterService(database).list(campaign_id="avernus") == [created]
         with database.transaction() as session:
             audit = session.scalar(select(ToolAudit).where(ToolAudit.campaign_id == "avernus"))
             assert audit is not None

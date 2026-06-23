@@ -88,9 +88,10 @@ def _parser() -> argparse.ArgumentParser:
     character = commands.add_parser("character")
     character_commands = character.add_subparsers(dest="action", required=True)
     character_create = character_commands.add_parser("create")
-    character_create.add_argument("--campaign", required=True)
     character_create.add_argument("--name", required=True)
     character_create.add_argument("--id")
+    character_create.add_argument("--type", dest="character_type", choices=("pc", "npc"))
+    character_create.add_argument("--campaign")
     character_create.add_argument("--player")
     character_create.add_argument("--class", dest="class_name")
     character_create.add_argument("--level", type=int)
@@ -101,8 +102,29 @@ def _parser() -> argparse.ArgumentParser:
     sheet.add_argument("--sheet-json")
     sheet.add_argument("--sheet-file")
     character_create.add_argument("--actor")
+    # Lore fields
+    character_create.add_argument("--race")
+    character_create.add_argument("--background")
+    character_create.add_argument("--alignment")
+    character_create.add_argument("--personality", dest="personality_traits")
+    character_create.add_argument("--ideals")
+    character_create.add_argument("--bonds")
+    character_create.add_argument("--flaws")
+    character_create.add_argument("--appearance")
+    character_create.add_argument("--backstory")
+    character_create.add_argument("--goals")
+    character_create.add_argument("--notes")
+    character_create.add_argument("--portrait", dest="portrait_url")
     character_list = character_commands.add_parser("list")
-    character_list.add_argument("--campaign", required=True)
+    character_list.add_argument("--campaign")
+    character_list.add_argument("--type", dest="character_type", choices=("pc", "npc"))
+    character_show = character_commands.add_parser("show")
+    character_show.add_argument("--character", required=True)
+    character_bind = character_commands.add_parser("bind")
+    character_bind.add_argument("--character", required=True)
+    character_bind.add_argument("--campaign", required=True)
+    character_unbind = character_commands.add_parser("unbind")
+    character_unbind.add_argument("--character", required=True)
 
     event = commands.add_parser("event")
     event_commands = event.add_subparsers(dest="action", required=True)
@@ -532,9 +554,10 @@ def main(argv: list[str] | None = None) -> int:
                 else:
                     sheet_json = {}
                 result = characters.create(
-                    args.campaign,
                     args.name,
                     character_id=args.id,
+                    character_type=getattr(args, "character_type", None) or "pc",
+                    campaign_id=args.campaign,
                     player_name=args.player,
                     class_name=args.class_name,
                     level=args.level,
@@ -543,10 +566,34 @@ def main(argv: list[str] | None = None) -> int:
                     armor_class=args.ac,
                     sheet_json=sheet_json,
                     actor_id=args.actor,
+                    race=getattr(args, "race", None),
+                    background=getattr(args, "background", None),
+                    alignment=getattr(args, "alignment", None),
+                    personality_traits=getattr(args, "personality_traits", None),
+                    ideals=getattr(args, "ideals", None),
+                    bonds=getattr(args, "bonds", None),
+                    flaws=getattr(args, "flaws", None),
+                    appearance=getattr(args, "appearance", None),
+                    backstory=getattr(args, "backstory", None),
+                    goals=getattr(args, "goals", None),
+                    notes=getattr(args, "notes", None),
+                    portrait_url=getattr(args, "portrait_url", None),
                 )
                 _emit(asdict(result))
+            elif args.action == "list":
+                _emit([
+                    asdict(item)
+                    for item in characters.list(
+                        campaign_id=args.campaign,
+                        character_type=getattr(args, "character_type", None),
+                    )
+                ])
+            elif args.action == "show":
+                _emit(asdict(characters.get(args.character)))
+            elif args.action == "bind":
+                _emit(asdict(characters.bind_to_campaign(args.character, args.campaign)))
             else:
-                _emit([asdict(item) for item in characters.list(args.campaign)])
+                _emit(asdict(characters.unbind_from_campaign(args.character)))
         elif args.area == "event":
             if args.action == "create":
                 result = events.create(

@@ -63,8 +63,9 @@ class Character(TimestampMixin, Base):
     )
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
-    campaign_id: Mapped[str] = mapped_column(
-        ForeignKey("campaigns.id", ondelete="CASCADE"), index=True
+    character_type: Mapped[str] = mapped_column(String, default="pc", index=True)
+    campaign_id: Mapped[str | None] = mapped_column(
+        ForeignKey("campaigns.id", ondelete="SET NULL"), index=True, nullable=True
     )
     party_id: Mapped[str | None] = mapped_column(
         ForeignKey("parties.id", ondelete="SET NULL"), index=True
@@ -72,10 +73,27 @@ class Character(TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String, nullable=False)
     player_name: Mapped[str | None] = mapped_column(String)
     class_name: Mapped[str] = mapped_column(String, default="")
+
+    # ── Core stats ──
     level: Mapped[int] = mapped_column(Integer, default=1)
     hp: Mapped[int] = mapped_column(Integer, default=10)
     max_hp: Mapped[int] = mapped_column(Integer, default=10)
     armor_class: Mapped[int] = mapped_column(Integer, default=10)
     sheet_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
-    schema_version: Mapped[int] = mapped_column(Integer, default=1)
+
+    # ── Lore / roleplay fields ──
+    race: Mapped[str | None] = mapped_column(String, nullable=True)
+    background: Mapped[str | None] = mapped_column(String, nullable=True)
+    alignment: Mapped[str | None] = mapped_column(String, nullable=True)
+    personality_traits: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ideals: Mapped[str | None] = mapped_column(Text, nullable=True)
+    bonds: Mapped[str | None] = mapped_column(Text, nullable=True)
+    flaws: Mapped[str | None] = mapped_column(Text, nullable=True)
+    appearance: Mapped[str | None] = mapped_column(Text, nullable=True)
+    backstory: Mapped[str | None] = mapped_column(Text, nullable=True)
+    goals: Mapped[str | None] = mapped_column(Text, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    portrait_url: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    schema_version: Mapped[int] = mapped_column(Integer, default=2)
     state_version: Mapped[int] = mapped_column(Integer, default=1)

@@ -227,26 +227,36 @@
 ❓ 确认创建？[是/否]
 ```
 
-确认后，必须先用确定性 CLI 将完整角色卡写入当前 `campaign_id` 的数据库队伍与角色表：
+确认后，优先使用 `dnd_character` 工具（`action=create`）将完整角色卡写入数据库。
+PC（玩家角色）创建时绑定当前 `campaign_id`，NPC 创建时不指定战役。
 
 ```powershell
+# PC 创建（绑定战役）
 python -m nanobot.dnd.db.cli character create `
-  --campaign <campaign-id> `
-  --name "<角色名>" `
-  --player "<玩家名>" `
-  --class "<职业>" `
-  --level <等级> `
-  --hp <当前HP> `
-  --max-hp <最大HP> `
-  --ac <AC> `
+  --type pc --campaign <campaign-id> `
+  --name "<角色名>" --player "<玩家名>" `
+  --class "<职业>" --level <等级> `
+  --hp <当前HP> --max-hp <最大HP> --ac <AC> `
+  --race "<种族>" --background "<背景>" --alignment "<阵营>" `
+  --personality "<性格>" --backstory "<背景故事>" `
   --sheet-file "<UTF-8 JSON角色卡路径>"
+
+# NPC 创建（全局角色库）
+python -m nanobot.dnd.db.cli character create `
+  --type npc --name "<NPC名>" `
+  --race "<种族>" --class "<职业>" --alignment "<阵营>" `
+  --personality "<性格>" --appearance "<外貌>" `
+  --backstory "<背景故事>" --notes "<DM备注>"
 ```
 
-命令成功返回 `character_id` 后，再创建初始或剧情节点 Snapshot。禁止只把角色卡写入
-会话、记忆或 workspace JSON 后便声称创建完成。用下面的命令核验当前战役角色：
+命令成功返回 `character_id` 后，再创建 Snapshot。禁止只把角色卡写入
+会话、记忆或 workspace JSON 后便声称创建完成。用下面的命令核验：
 
 ```powershell
-python -m nanobot.dnd.db.cli character list --campaign <campaign-id>
+python -m nanobot.dnd.db.cli character list --campaign <campaign-id>  # 战役PC
+python -m nanobot.dnd.db.cli character list --type npc                # NPC库
+python -m nanobot.dnd.db.cli character show --character <id>          # 详情
+```
 ```
 
 ---

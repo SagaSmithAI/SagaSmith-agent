@@ -8,6 +8,7 @@ from nanobot.dnd.db.module_content import ModuleImportService
 from nanobot.dnd.db.module_progress import ModuleProgressService
 from nanobot.dnd.db.snapshots import CampaignSnapshotService
 from nanobot.dnd.db.undo import UndoManager
+from nanobot.dnd.db.world import WorldService
 
 __all__ = [
     "Base",
@@ -19,6 +20,7 @@ __all__ = [
     "ModuleImportService",
     "ModuleProgressService",
     "UndoManager",
+    "WorldService",
     "default_database_url",
     "sqlite_database_url",
 ]

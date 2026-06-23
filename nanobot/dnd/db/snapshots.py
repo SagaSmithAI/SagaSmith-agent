@@ -108,6 +108,7 @@ _STATE_MODELS: tuple[tuple[str, type, tuple[str, ...]], ...] = (
         Character,
         (
             "id",
+            "character_type",
             "campaign_id",
             "party_id",
             "name",
@@ -118,6 +119,18 @@ _STATE_MODELS: tuple[tuple[str, type, tuple[str, ...]], ...] = (
             "max_hp",
             "armor_class",
             "sheet_json",
+            "race",
+            "background",
+            "alignment",
+            "personality_traits",
+            "ideals",
+            "bonds",
+            "flaws",
+            "appearance",
+            "backstory",
+            "goals",
+            "notes",
+            "portrait_url",
             "schema_version",
             "state_version",
         ),
@@ -396,10 +409,14 @@ class CampaignSnapshotService:
         campaign = cls._campaign(session, campaign_id)
         state: dict[str, list[dict[str, Any]]] = {}
         for key, model, fields in _STATE_MODELS:
+            conditions = [model.campaign_id == campaign_id]
+            # Only capture PCs in snapshots — NPCs live in the global library.
+            if key == "characters":
+                conditions.append(model.character_type == "pc")
             state[key] = [
                 _row(item, fields)
                 for item in session.scalars(
-                    select(model).where(model.campaign_id == campaign_id).order_by(model.id)
+                    select(model).where(*conditions).order_by(model.id)
                 )
             ]
 
@@ -435,7 +452,12 @@ class CampaignSnapshotService:
         session.execute(delete(CampaignEvent).where(CampaignEvent.campaign_id == campaign_id))
         session.execute(delete(PlotSummary).where(PlotSummary.campaign_id == campaign_id))
         session.execute(delete(Combat).where(Combat.campaign_id == campaign_id))
-        session.execute(delete(Character).where(Character.campaign_id == campaign_id))
+        # Only restore PCs — NPCs live in the global library and are never deleted on restore.
+        session.execute(
+            delete(Character).where(
+                Character.campaign_id == campaign_id, Character.character_type == "pc"
+            )
+        )
         session.execute(delete(Party).where(Party.campaign_id == campaign_id))
         session.execute(delete(WorldState).where(WorldState.campaign_id == campaign_id))
 

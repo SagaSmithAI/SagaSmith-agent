@@ -221,8 +221,10 @@ dnd_save action=export campaign_id=<id> slot=1 output="save.json"
 ```
 
 Before a save whose label or surrounding conversation claims that character creation is
-complete, run `character list` for the campaign. If an expected character is absent, stop
-and persist it using the character-creation procedure; never create a misleading empty save.
+complete, check `dnd_character action=list campaign_id=<id>`. If an expected character is
+absent, stop and persist it via `dnd_character action=create` before saving. PC characters
+are bound to campaigns; NPCs live in the global library (`dnd_character action=list type=npc`).
+Never create a misleading empty save.
 
 The CLI below is the maintenance fallback:
 
