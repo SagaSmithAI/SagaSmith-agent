@@ -97,6 +97,9 @@ nano.*.save
 .env.*
 !.env.example
 
+# Local config (keep example tracked)
+config/config.json
+
 # Logs & temp
 *.log
 logs/
