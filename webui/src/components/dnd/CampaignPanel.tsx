@@ -82,6 +82,15 @@ export function CampaignPanel({ token }: Props) {
               <span>{c.module_name || "—"}</span>
               <span>·</span>
               <span>{t("dnd.saves", "Saves")}: {c.save_count}</span>
+              {c.status === "active" && (
+                <a
+                  href={`#/room/${c.id}`}
+                  className="ml-2 px-2 py-0.5 rounded bg-primary/10 text-primary hover:bg-primary/20 text-xs font-medium"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  Join Room
+                </a>
+              )}
             </div>
           </button>
           {expanded === c.id && detail && (

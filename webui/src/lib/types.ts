@@ -860,7 +860,9 @@ export type InboundEvent =
       detail?: string;
       provider?: string;
     }
-  | { event: "error"; chat_id?: string; detail?: string; reason?: string };
+  | { event: "error"; chat_id?: string; detail?: string; reason?: string }
+  | { event: "peer_message"; chat_id: string; text: string; player: DndRoomPlayer; timestamp?: string }
+  | { event: "room_presence"; chat_id: string; players: DndRoomPlayer[] };
 
 /** Base64-encoded image attached to an outbound ``message`` envelope.
  *
