@@ -50,7 +50,7 @@ A complete walkthrough from zero to running a D&D session. Each phase shows both
 
 ```powershell
 # CLI: first-run SRD ingestion
-python -m nanobot.dnd.db.cli rules ingest-srd
+uv run python -m nanobot.dnd.db.cli rules ingest-srd
 ```
 
 ```
@@ -83,8 +83,8 @@ Agent:
 Or via CLI:
 
 ```powershell
-python -m nanobot.dnd.db.cli module import --campaign <id> --path "D:\modules\bgdia\" --name "BGDIA"
-python -m nanobot.dnd.db.cli module index --campaign <id>
+uv run python -m nanobot.dnd.db.cli module import --campaign <id> --path "D:\modules\bgdia\" --name "BGDIA"
+uv run python -m nanobot.dnd.db.cli module index --campaign <id>
 ```
 
 ### 3. Campaign Start
@@ -316,17 +316,17 @@ Agent:
 ## Quick Start
 
 ```powershell
-# 1. Install
-pip install -e .
+# 1. Install (uv-managed editable install)
+uv sync
 
 # 2. Initialize workspace
-nanobot onboard --wizard
+uv run nanobot onboard --wizard
 
 # 3. Import SRD rulebooks
-python -m nanobot.dnd.db.cli rules ingest-srd
+uv run python -m nanobot.dnd.db.cli rules ingest-srd
 
 # 4. Launch gateway + QQ
-.\scripts\start-all.ps1 -Quick
+.\scripts\start-all.bat
 ```
 
 WebUI at `http://127.0.0.1:18765`.
@@ -340,11 +340,8 @@ WebUI at `http://127.0.0.1:18765`.
 QQ connects via NapCat (OneBot v11 Forward WebSocket). First run auto-installs:
 
 ```powershell
-# One-click launch (no QR scan + GPU)
-.\scripts\start-quick.bat
-
-# Or: full launch
-.\scripts\start-all.ps1
+# One-click launch (uv-managed)
+.\scripts\start-all.bat
 ```
 
 **Config** `~/.nanobot/config.json`:
@@ -388,7 +385,7 @@ QQ connects via NapCat (OneBot v11 Forward WebSocket). First run auto-installs:
 Supports Markdown, PDF, DOCX, PPTX, XLSX. PDF uses a dedicated structural parser (page-aware + bookmark recovery + CJK reflow + TOC filtering):
 
 ```powershell
-python -m nanobot.dnd.db.cli module import --campaign <id> --path "<module dir>" --name "Module Name"
+uv run python -m nanobot.dnd.db.cli module import --campaign <id> --path "<module dir>" --name "Module Name"
 ```
 
 Chunking: 1,200-char max, ≈100-char overlap, no cross-heading boundaries, page ranges preserved.
@@ -400,8 +397,8 @@ Chunking: 1,200-char max, ≈100-char overlap, no cross-heading boundaries, page
 2,700+ SRD chunks indexed with `BAAI/bge-m3` (1,024-dim) semantic vectors:
 
 ```powershell
-python -m nanobot.dnd.db.cli rules status
-python -m nanobot.dnd.db.cli rules search --campaign <id> --query "grapple escape" --top-k 5
+uv run python -m nanobot.dnd.db.cli rules status
+uv run python -m nanobot.dnd.db.cli rules search --campaign <id> --query "grapple escape" --top-k 5
 ```
 
 GPU acceleration: `$env:DND_EMBEDDING_DEVICE="cuda"`.
@@ -413,10 +410,10 @@ GPU acceleration: `$env:DND_EMBEDDING_DEVICE="cuda"`.
 Database is the single source of truth. Snapshots cover campaign metadata, world, party, characters, combat, plot summary, and event log — module source documents are never duplicated.
 
 ```powershell
-python -m nanobot.dnd.db.cli campaign create --name "Baldur's Gate" --module "BGDIA"
-python -m nanobot.dnd.db.cli save create --campaign <id> --label "Initial State"
-python -m nanobot.dnd.db.cli save list --campaign <id>
-python -m nanobot.dnd.db.cli save load --campaign <id> --slot <n>
+uv run python -m nanobot.dnd.db.cli campaign create --name "Baldur's Gate" --module "BGDIA"
+uv run python -m nanobot.dnd.db.cli save create --campaign <id> --label "Initial State"
+uv run python -m nanobot.dnd.db.cli save list --campaign <id>
+uv run python -m nanobot.dnd.db.cli save load --campaign <id> --slot <n>
 ```
 
 ---
@@ -448,8 +445,8 @@ SagaSmith-agent/
 │   └── templates/             #   System prompt templates (identity · SOUL · platform)
 ├── tools/napcat/              # NapCat + portable QQ runtime
 ├── scripts/                   # Setup & launch scripts
-│   ├── setup-napcat.ps1       #   One-click NapCat install
-│   └── start-all.ps1          #   One-click launch
+│   ├── install.sh / install.ps1  #   One-click install
+│   └── start-all.bat          #   One-click launch (uv-managed)
 └── tests/                     # Tests
 ```
 
