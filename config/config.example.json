@@ -263,7 +263,7 @@
       "tokenIssuePath": "",
       "tokenIssueSecret": "",
       "tokenTtlS": 300,
-      "websocketRequiresToken": true,
+      "websocketRequiresToken": false,
       "allowFrom": [
         "*"
       ],
