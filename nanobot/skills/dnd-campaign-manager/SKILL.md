@@ -1,6 +1,6 @@
 ---
 name: dnd-campaign-manager
-description: Manage NanoBot D&D campaigns stored in the shared database. Use for creating, listing, selecting, archiving, saving, verifying, loading, or undoing campaigns and complete database snapshots, including campaign-scoped player-role notes synchronized with USER.md.
+description: Manage D&D campaigns stored in the shared database. Use for creating, listing, selecting, archiving, saving, verifying, loading, or undoing campaigns and complete database snapshots, including campaign-scoped player-role notes synchronized with USER.md. Supports character library (PC/NPC), rule set selection, and ChromaDB vector storage.
 ---
 
 # D&D Campaign Manager
@@ -9,10 +9,10 @@ Use the deterministic JSON CLI. Do not compose SQL or call the legacy
 `dnd_engine.save.io` file-save functions.
 
 ```powershell
-python -m nanobot.dnd.db.cli <command>
+python -m <domain-cli> <command>
 ```
 
-Pass the current NanoBot workspace with `--workspace <absolute-path>` when
+Pass the current workspace with `--workspace <absolute-path>` when
 saving, loading, or undoing. This synchronizes only the current campaign's
 managed player-role block in `USER.md`; it never replaces the whole file.
 
@@ -22,12 +22,12 @@ managed player-role block in `USER.md`; it never replaces the whole file.
 2. Otherwise list active campaigns:
 
    ```powershell
-   python -m nanobot.dnd.db.cli campaign list --status active
+   python -m <domain-cli> campaign list --status active
    ```
 
 3. If exactly one active campaign exists, select it. If multiple exist, ask the
    user which campaign to use. Never infer from save slot numbers.
-4. Treat “switch campaign” as selecting another campaign ID for the current
+4. Treat "switch campaign" as selecting another campaign ID for the current
    conversation. This version deliberately has no channel binding.
 
 ## Manage campaigns
@@ -98,13 +98,13 @@ dnd_module action=status campaign_id=<id>
 ### 分步操作（维护后备）
 
 ```powershell
-python -m nanobot.dnd.db.cli campaign create --name "战役名称" --module "模组名称"
+python -m <domain-cli> campaign create --name "战役名称" --module "模组名称"
 ```
 
 **创建战役后必须立即创建初始 Snapshot**，作为第一个恢复点：
 
 ```powershell
-python -m nanobot.dnd.db.cli save create --campaign <campaign-id> --label "初始状态" --workspace "<workspace>"
+python -m <domain-cli> save create --campaign <campaign-id> --label "初始状态" --workspace "<workspace>"
 ```
 
 If a rules corpus is already installed, creation automatically pins the active
@@ -112,17 +112,49 @@ core rules release. For a campaign created before rules were indexed, bind it
 once before adjudication:
 
 ```powershell
-python -m nanobot.dnd.db.cli rules bind --campaign <campaign-id>
+python -m <domain-cli> rules bind --campaign <campaign-id>
 ```
 
 Inspect or archive (also available via `dnd_campaign show` / `set_status`):
 
 ```powershell
-python -m nanobot.dnd.db.cli campaign show --campaign <campaign-id>
-python -m nanobot.dnd.db.cli campaign status --campaign <campaign-id> --set archived
+python -m <domain-cli> campaign show --campaign <campaign-id>
+python -m <domain-cli> campaign status --campaign <campaign-id> --set archived
 ```
 
 Do not save into or load an archived campaign until it is explicitly reactivated.
+
+## Character library
+
+Characters are decoupled from campaigns: PCs are campaign-bound, NPCs live in
+a global library.
+
+```
+# Campaign PCs
+dnd_character action=list campaign_id=<id>
+
+# Global NPC library
+dnd_character action=list type=npc
+
+# Create PC (bound to campaign)
+dnd_character action=create type=pc campaign_id=<id> name="角色名" player="玩家名" ...
+
+# Create NPC (global library)
+dnd_character action=create type=npc name="NPC名" race="..." alignment="..." ...
+
+# Get details
+dnd_character action=get character_id=<id>
+```
+
+CLI fallback:
+
+```powershell
+python -m <domain-cli> character create --type pc --campaign <id> --name "..." --player "..."
+python -m <domain-cli> character create --type npc --name "..." --race "..." --alignment "..."
+python -m <domain-cli> character list --campaign <id>
+python -m <domain-cli> character list --type npc
+python -m <domain-cli> character show --character <id>
+```
 
 ## Import module content
 
@@ -141,14 +173,14 @@ through MarkItDown before storage and Dense indexing:
 
 ```powershell
 # Check first
-python -m nanobot.dnd.db.cli module list --campaign <campaign-id>
+python -m <domain-cli> module list --campaign <campaign-id>
 
 # Only if missing:
-python -m nanobot.dnd.db.cli module import `
+python -m <domain-cli> module import `
   --campaign <campaign-id> `
   --name "模组名称" `
   --path "<absolute-module-directory>"
-python -m nanobot.dnd.db.cli module index --campaign <campaign-id>
+python -m <domain-cli> module index --campaign <campaign-id>
 ```
 
 Channel attachments are downloaded to local media paths and appear in the turn as
@@ -174,7 +206,7 @@ replace, or duplicate imported module content.
 Load only the scene required for the current turn, using the scene ID returned by `module index`:
 
 ```powershell
-python -m nanobot.dnd.db.cli module scene `
+python -m <domain-cli> module scene `
   --campaign <campaign-id> `
   --scene <scene-id>
 ```
@@ -185,9 +217,9 @@ configured, falling back to in-memory numpy). Expand the selected chunk before r
 the complete scene. Use the CLI only for maintenance:
 
 ```powershell
-python -m nanobot.dnd.db.cli module search --campaign <campaign-id> `
+python -m <domain-cli> module search --campaign <campaign-id> `
   --query "<地点、NPC、事件或线索>" --top-k 5
-python -m nanobot.dnd.db.cli vector status
+python -m <domain-cli> vector status
 ```
 
 ## Run module progress
@@ -229,7 +261,7 @@ Never create a misleading empty save.
 The CLI below is the maintenance fallback:
 
 ```powershell
-python -m nanobot.dnd.db.cli save create `
+python -m <domain-cli> save create `
   --campaign <campaign-id> `
   --label "进入地城前" `
   --workspace "<workspace>"
@@ -240,8 +272,8 @@ Report the returned campaign ID, slot, label, chapter, location, and hash prefix
 ## List and verify saves
 
 ```powershell
-python -m nanobot.dnd.db.cli save list --campaign <campaign-id>
-python -m nanobot.dnd.db.cli save verify --campaign <campaign-id> --slot <slot>
+python -m <domain-cli> save list --campaign <campaign-id>
+python -m <domain-cli> save verify --campaign <campaign-id> --slot <slot>
 ```
 
 Slots are campaign-local. Campaign A slot 1 and Campaign B slot 1 are unrelated.
@@ -253,7 +285,7 @@ not specify a slot, list saves and ask. If they explicitly named a slot, load it
 without an extra confirmation.
 
 ```powershell
-python -m nanobot.dnd.db.cli save load `
+python -m <domain-cli> save load `
   --campaign <campaign-id> `
   --slot <slot> `
   --workspace "<workspace>"
@@ -269,7 +301,7 @@ Undo restores the state that existed before the latest audited mutation,
 including a snapshot load. Respect the configured audit limit.
 
 ```powershell
-python -m nanobot.dnd.db.cli undo `
+python -m <domain-cli> undo `
   --campaign <campaign-id> `
   --count 1 `
   --workspace "<workspace>"

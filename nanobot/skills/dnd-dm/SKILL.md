@@ -1,11 +1,7 @@
 ---
 name: dnd-dm
-description: "NanoBot 默认 D&D 5e 地下城主能力。使用内置 dnd-engine 进行骰子、检定、战斗和模组计算，使用数据库管理多战役状态与完整 Snapshot。"
+description: "D&D 5e 地下城主能力。使用内置引擎进行骰子、检定、战斗和模组计算，使用数据库管理多战役状态与完整 Snapshot，支持 ChromaDB 向量检索、角色库与世界状态管理。"
 always: true
-metadata:
-  nanobot:
-    emoji: "🎲"
-    always: true
 ---
 
 # D&D 5e 地下城主
@@ -15,7 +11,7 @@ metadata:
 
 ## 权威边界
 
-- **规则计算**：只使用内置 `dnd-engine/src/dnd_engine/` 与当前战役绑定的规则集（通过 `CampaignRuleProfile` 锁定版本与出版物）。
+- **规则计算**：只使用内置引擎与当前战役绑定的规则集（通过 `CampaignRuleProfile` 锁定版本与出版物）。
 - **战役状态**：数据库是唯一权威源；所有状态必须带 `campaign_id`。
 - **战役与存读档**：使用 `dnd-campaign-manager` Skill 和完整数据库 Snapshot。
 - **模组事实**：以当前战役绑定的模组原文和数据库场景状态为准。
@@ -40,7 +36,7 @@ metadata:
 
 ## 引擎调用
 
-通过 `nanobot.dnd.engine.load_engine_module()` 加载内置模块。不要依赖进程当前目录。
+通过平台提供的引擎加载机制加载内置模块。不要依赖进程当前目录。
 
 ### 骰子与检定
 
@@ -66,7 +62,7 @@ metadata:
 - `party.xp.calc_noncombat_xp(...)`
 - `party.xp.get_level_up_xp_requirement(...)`
 
-引擎中的文件型状态辅助模块仅是上游计算兼容代码，不是 NanoBot 战役状态权威源。
+引擎中的文件型状态辅助模块仅是上游计算兼容代码，不是战役状态权威源。
 调用计算函数后，必须通过数据库集成保存完整输入、输出和状态变化。
 
 ## 战役与 Snapshot
@@ -81,6 +77,27 @@ metadata:
 
 恢复 Snapshot 只替换目标战役当前状态，不删除历史 Snapshot 与审计记录。禁止把一个
 战役的 Snapshot 当作另一个战役的普通读档；复制战役必须走独立的克隆流程。
+
+## 角色库（Character Library）
+
+PC 角色绑定战役，NPC 角色存在全局库中不指定战役。
+
+优先使用 `dnd_character` 工具：
+
+- `action=create`：创建角色。PC 需指定 `campaign_id`，NPC 不指定战役，填写 `character_type=npc`。
+- `action=list`：列出角色。PC 按 `campaign_id=<id>` 查询，NPC 按 `type=npc` 查询。
+- `action=get`：按 `character_id` 查看详情。
+- `action=update`：更新角色的属性和 lore 字段。
+- `action=bind` / `action=unbind`：绑定/解绑 PC 与战役。
+
+CLI 后备：
+
+```powershell
+python -m <domain-cli> character create --type pc --campaign <id> --name "..."
+python -m <domain-cli> character create --type npc --name "..." --race "..." --alignment "..."
+python -m <domain-cli> character list --campaign <id>
+python -m <domain-cli> character list --type npc
+```
 
 ## 数据库规则检索
 
@@ -100,9 +117,9 @@ metadata:
 只有在工具不可用或进行人工维护时才使用 JSON CLI：
 
 ```powershell
-python -m nanobot.dnd.db.cli rules search --campaign <campaign-id> --query "关键词" --top-k 5
-python -m nanobot.dnd.db.cli rules expand --chunk <chunk-id> --mode section
-python -m nanobot.dnd.db.cli vector status
+python -m <domain-cli> rules search --campaign <campaign-id> --query "关键词" --top-k 5
+python -m <domain-cli> rules expand --chunk <chunk-id> --mode section
+python -m <domain-cli> vector status
 ```
 
 ## 模组 Dense 检索
@@ -124,6 +141,20 @@ python -m nanobot.dnd.db.cli vector status
 D&D 术语会追加对应英文 SRD 术语，但精确检索仍使用原始名称。命中后按
 段落或章节展开，并引用返回的规则版本、规则书、标题路径和字符范围。不得跨规则版本
 搜索后让模型自行判断版本。
+
+## 派系与 NPC 态度（World Service）
+
+世界状态中管理派系关系（-5 死仇 到 +5 盟友）、NPC 态度和信任/恐惧值。
+每次发生影响派系或 NPC 关系的事件时更新态度数值。
+
+优先通过 `dnd_rules` / `dnd_module` 等常驻工具间接操作；CLI 后备：
+
+```powershell
+python -m <domain-cli> world factions --campaign <campaign-id>
+python -m <domain-cli> world npc-attitude --campaign <campaign-id> --npc "<NPC名>" --delta <值>
+python -m <domain-cli> world quest --campaign <campaign-id> --quest "<任务名>" --status 进行中
+python -m <domain-cli> world summary --campaign <campaign-id>
+```
 
 ## 上下文加载
 
