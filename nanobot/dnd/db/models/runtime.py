@@ -87,3 +87,32 @@ class CampaignEvent(Base):
     importance: Mapped[int] = mapped_column(Integer, default=3)
     metadata_json: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, index=True)
+
+
+class CampaignMemory(TimestampMixin, Base):
+    """Campaign-scoped narrative long-term memory."""
+
+    __tablename__ = "campaign_memories"
+    __table_args__ = (
+        UniqueConstraint(
+            "campaign_id", "entity_type", "entity_id", "fact_type",
+            name="uq_campaign_memory_entity_fact",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    campaign_id: Mapped[str] = mapped_column(
+        ForeignKey("campaigns.id", ondelete="CASCADE"), index=True
+    )
+    kind: Mapped[str] = mapped_column(String, nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    priority: Mapped[str] = mapped_column(String, default="medium")
+    status: Mapped[str] = mapped_column(String, default="candidate")
+    entity_type: Mapped[str | None] = mapped_column(String)
+    entity_id: Mapped[str | None] = mapped_column(String)
+    fact_type: Mapped[str | None] = mapped_column(String)
+    supersedes: Mapped[str | None] = mapped_column(String)
+    source_save_id: Mapped[str | None] = mapped_column(String)
+    score: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now)

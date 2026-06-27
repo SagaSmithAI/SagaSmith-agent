@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import asdict
+from datetime import UTC, datetime
 from typing import Any
+
+from loguru import logger
+from sqlalchemy import select
 
 from nanobot.agent.tools.base import Tool, tool_parameters
 from nanobot.agent.tools.context import current_request_context
 from nanobot.dnd.db.campaigns import CampaignNotFoundError
 from nanobot.dnd.db.database import Database
+from nanobot.dnd.db.models.runtime import CampaignSave
 from nanobot.dnd.db.snapshots import (
     CampaignSnapshotService,
     InvalidSnapshotError,
@@ -23,20 +27,24 @@ from nanobot.dnd.db.snapshots import (
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["create", "list", "verify", "restore", "delete", "export"],
+                "enum": [
+                    "create", "list", "verify", "restore", "delete", "export",
+                    "regenerate_recap",
+                ],
                 "description": (
-                    "create: save current campaign state. "
+                    "create: save current campaign state with auto recap. "
                     "list: list all saves for a campaign. "
                     "verify: check snapshot integrity. "
                     "restore: load a snapshot (auto-saves current state first). "
                     "delete: remove a snapshot slot. "
-                    "export: dump snapshot to a JSON file."
+                    "export: dump snapshot to a JSON file. "
+                    "regenerate_recap: re-run recap generation for an existing save."
                 ),
             },
             "campaign_id": {"type": "string", "description": "Campaign ID."},
             "slot": {
                 "type": "integer",
-                "description": "Snapshot slot number for verify/restore/delete/export.",
+                "description": "Snapshot slot number for verify/restore/delete/export/regenerate_recap.",
             },
             "label": {"type": "string", "description": "Human-readable save label."},
             "output": {"type": "string", "description": "Output path for export action."},
@@ -55,17 +63,34 @@ class DndSaveTool(Tool):
     description = (
         "Create, list, verify, restore, export, and delete campaign snapshots. "
         "Snapshots contain only mutable game state — module documents and embeddings "
-        "are never duplicated. Restore auto-saves current state before loading."
+        "are never duplicated. Restore auto-saves current state before loading. "
+        "Each create action generates a narrative recap comparing against the "
+        "previous save, and triggers long-term memory recording."
     )
     _scopes = {"core", "subagent"}
 
     @classmethod
     def create(cls, ctx: Any) -> Tool:
-        return cls(Database())
+        recap_generator = None
+        if ctx.provider_snapshot_loader:
+            try:
+                snapshot = ctx.provider_snapshot_loader()
+                from nanobot.dnd.db.recap import RecapGenerator
+                recap_generator = RecapGenerator(snapshot.provider, snapshot.model)
+            except Exception:
+                logger.warning("Failed to initialize RecapGenerator; recap will be skipped")
+        return cls(Database(), recap_generator=recap_generator)
 
-    def __init__(self, database: Database) -> None:
+    def __init__(
+        self,
+        database: Database,
+        recap_generator: Any = None,
+    ) -> None:
         self.database = database
-        self._service = CampaignSnapshotService(database)
+        self.recap_generator = recap_generator
+        self._service = CampaignSnapshotService(
+            database, recap_generator=recap_generator,
+        )
 
     @property
     def read_only(self) -> bool:
@@ -77,10 +102,13 @@ class DndSaveTool(Tool):
         ctx = current_request_context()
 
         if action == "create":
+            # Generate recap asynchronously before the sync save
+            recap = await self._generate_recap(campaign_id)
             result = self._service.create(
                 campaign_id,
                 label=args.get("label", ""),
                 actor_id=ctx.actor_id if ctx else None,
+                recap=recap,
             )
             return asdict(result)
 
@@ -89,7 +117,16 @@ class DndSaveTool(Tool):
                 saves = self._service.list(campaign_id)
             except CampaignNotFoundError as exc:
                 return {"error": "campaign_not_found", "detail": str(exc)}
-            return {"saves": [asdict(s) for s in saves]}
+            result = []
+            for s in saves:
+                d = asdict(s)
+                if s.recap:
+                    summary = s.recap.get("summary", "")
+                    if len(summary) > 100:
+                        summary = summary[:100] + "..."
+                    d["recap_summary"] = summary
+                result.append(d)
+            return {"saves": result}
 
         if action == "verify":
             try:
@@ -103,6 +140,7 @@ class DndSaveTool(Tool):
                 "campaign_id": payload["campaign_id"],
                 "schema_version": payload["schema_version"],
                 "captured_at": payload["captured_at"],
+                "recap": payload.get("recap"),
             }
 
         if action == "restore":
@@ -131,7 +169,87 @@ class DndSaveTool(Tool):
                 return {"error": type(exc).__name__, "detail": str(exc)}
             return {"exported": True, "output": args["output"], "slot": args["slot"]}
 
+        if action == "regenerate_recap":
+            return await self._regenerate_recap(campaign_id, args["slot"])
+
         return {"error": "unknown_action", "detail": action}
 
     async def _execute_sync(self, args: dict[str, Any]) -> dict[str, Any]:
         return await self._execute(args)
+
+    # -- Recap helpers --------------------------------------------------------
+
+    async def _generate_recap(self, campaign_id: str) -> dict | None:
+        """Generate a recap dict by comparing current state to previous save."""
+        if self.recap_generator is None:
+            return None
+
+        try:
+            with self.database.transaction() as session:
+                previous_save = session.scalar(
+                    select(CampaignSave)
+                    .where(CampaignSave.campaign_id == campaign_id)
+                    .order_by(CampaignSave.slot.desc())
+                    .limit(1)
+                )
+
+                current_payload = CampaignSnapshotService.capture_from_session(
+                    session, campaign_id,
+                )
+
+            recap = await self.recap_generator.generate(
+                campaign_id=campaign_id,
+                previous_save=previous_save,
+                current_payload=current_payload,
+            )
+            return recap
+
+        except Exception as exc:
+            logger.warning("Recap generation failed: {}", exc)
+            return {
+                "version": 1,
+                "baseline": False,
+                "from_save_id": None,
+                "to_save_id": None,
+                "generated_at": datetime.now(UTC).isoformat(),
+                "language": "zh-CN",
+                "summary": "存档完成，暂无法生成剧情摘要。",
+                "source": {"mode": "failed", "error": str(exc)},
+            }
+
+    async def _regenerate_recap(
+        self, campaign_id: str, slot: int
+    ) -> dict[str, Any]:
+        """Re-generate recap for an existing save."""
+        if self.recap_generator is None:
+            return {"error": "no_recap_generator", "detail": "RecapGenerator not available"}
+
+        try:
+            with self.database.transaction() as session:
+                save = self._service._save(session, campaign_id, slot)
+                payload = dict(save.snapshot_json)
+
+                previous_save = session.scalar(
+                    select(CampaignSave)
+                    .where(
+                        CampaignSave.campaign_id == campaign_id,
+                        CampaignSave.slot < slot,
+                    )
+                    .order_by(CampaignSave.slot.desc())
+                    .limit(1)
+                )
+
+            recap = await self.recap_generator.generate(
+                campaign_id=campaign_id,
+                previous_save=previous_save,
+                current_payload=payload,
+            )
+
+            result = self._service.regenerate_recap(campaign_id, slot, recap)
+            return asdict(result)
+
+        except (SnapshotNotFoundError, CampaignNotFoundError) as exc:
+            return {"error": type(exc).__name__, "detail": str(exc)}
+        except Exception as exc:
+            logger.warning("Recap regeneration failed: {}", exc)
+            return {"error": "recap_regeneration_failed", "detail": str(exc)}
