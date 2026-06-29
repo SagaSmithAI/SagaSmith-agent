@@ -11,7 +11,7 @@ import pytest
 from nanobot.dnd.db.database import Database, sqlite_database_url
 from nanobot.dnd.db.memory import CampaignMemoryService, trigger_memory_from_recap
 from nanobot.dnd.db.models import Campaign, CampaignEvent, Character, Party, PlotSummary, WorldState
-from nanobot.dnd.db.models.runtime import CampaignMemory, CampaignSave
+from nanobot.dnd.db.models.runtime import CampaignSave
 from nanobot.dnd.db.recap import RecapGenerator
 from nanobot.dnd.db.snapshots import CampaignSnapshotService
 from nanobot.providers.base import LLMResponse
@@ -234,157 +234,123 @@ class TestRecapGenerator:
 
 
 # ---------------------------------------------------------------------------
-# CampaignMemoryService tests
+# Branch-aware campaign memory tests
 # ---------------------------------------------------------------------------
 
 class TestCampaignMemoryService:
-    def test_upsert_creates_new_memory(self, database):
+    def test_record_creates_fact_and_save_revision(self, database):
         _seed_campaign(database, "c_mem")
+        save = CampaignSnapshotService(database).create("c_mem")
         service = CampaignMemoryService(database)
-        mid = service.upsert(
-            "c_mem", kind="npc_relation", text="Met innkeeper.",
-            priority="high", status="permanent",
-            entity_type="npc", entity_id="innkeeper_01", fact_type="met",
-        )
-        assert mid.startswith("mem_")
 
-        memories = service.get_active("c_mem")
-        assert len(memories) == 1
-        assert memories[0]["text"] == "Met innkeeper."
-        assert memories[0]["status"] == "permanent"
-
-    def test_upsert_updates_existing_by_key(self, database):
-        _seed_campaign(database, "c_mem2")
-        service = CampaignMemoryService(database)
-        mid1 = service.upsert(
-            "c_mem2", kind="npc_relation", text="Met innkeeper.",
-            priority="medium", status="candidate",
-            entity_type="npc", entity_id="innkeeper_01", fact_type="met",
+        memory_id, revision_id = service.record(
+            "c_mem",
+            save.id,
+            kind="npc_relation",
+            text="The innkeeper trusts the party.",
+            priority="high",
+            status="permanent",
+            entity_type="npc",
+            entity_id="npc_innkeeper",
+            fact_type="relationship",
         )
-        mid2 = service.upsert(
-            "c_mem2", kind="npc_relation", text="Innkeeper became an ally.",
-            priority="high", status="permanent",
-            entity_type="npc", entity_id="innkeeper_01", fact_type="met",
-        )
-        assert mid1 == mid2  # Same id — updated in place
 
-        # After update, status is now permanent — get_active should return it
-        active = service.get_active("c_mem2")
+        assert memory_id.startswith("mem_")
+        assert revision_id.startswith("memrev_")
+        active = service.get_active("c_mem")
         assert len(active) == 1
-        assert active[0]["text"] == "Innkeeper became an ally."
-        assert active[0]["status"] == "permanent"
+        assert active[0]["text"] == "The innkeeper trusts the party."
+        assert active[0]["source_save_id"] == save.id
 
-    def test_get_active_filters_by_status(self, database):
-        _seed_campaign(database, "c_mem3")
+    def test_nearest_revision_wins_on_same_lineage(self, database):
+        _seed_campaign(database, "c_mem2")
+        snapshots = CampaignSnapshotService(database)
         service = CampaignMemoryService(database)
-        service.upsert("c_mem3", kind="plot_commitment", text="Stable fact.",
-                       priority="medium", status="stable")
-        service.upsert("c_mem3", kind="plot_commitment", text="Permanent fact.",
-                       priority="high", status="permanent")
-        service.upsert("c_mem3", kind="plot_commitment", text="Candidate fact.",
-                       priority="medium", status="candidate")
+        first = snapshots.create("c_mem2")
+        memory_id, _ = service.record(
+            "c_mem2", first.id,
+            kind="npc_relation", text="Mira is neutral.",
+            priority="medium", status="candidate",
+            entity_type="npc", entity_id="npc_mira", fact_type="relationship",
+        )
+        second = snapshots.create("c_mem2")
+        same_memory_id, _ = service.record(
+            "c_mem2", second.id,
+            kind="npc_relation", text="Mira is hostile.",
+            priority="high", status="permanent",
+            entity_type="npc", entity_id="npc_mira", fact_type="relationship",
+        )
 
-        active = service.get_active("c_mem3")
-        assert len(active) == 2
-        texts = {m["text"] for m in active}
-        assert "Stable fact." in texts
-        assert "Permanent fact." in texts
-        assert "Candidate fact." not in texts
+        assert same_memory_id == memory_id
+        effective = service.get_effective("c_mem2", save_id=second.id)
+        assert len(effective) == 1
+        assert effective[0]["text"] == "Mira is hostile."
 
-    def test_prune_removes_low_score_candidates(self, database):
-        _seed_campaign(database, "c_mem4")
+    def test_sibling_branch_memories_are_isolated(self, database):
+        _seed_campaign(database, "c_branch")
+        snapshots = CampaignSnapshotService(database)
         service = CampaignMemoryService(database)
-        service.upsert("c_mem4", kind="plot_commitment", text="Low score.",
-                       priority="medium", status="candidate")
-        # Set the score manually
-        with database.transaction() as session:
-            mem = session.scalars(
-                __import__("sqlalchemy").select(CampaignMemory).where(
-                    CampaignMemory.campaign_id == "c_mem4",
-                )
-            ).first()
-            if mem:
-                mem.score = 2
 
-        count = service.prune("c_mem4", min_score=3)
-        assert count == 1
+        root = snapshots.create("c_branch", label="root")
+        service.record(
+            "c_branch", root.id,
+            kind="npc_relation", text="Mira is neutral.",
+            priority="medium", status="candidate",
+            entity_type="npc", entity_id="npc_mira", fact_type="relationship",
+        )
 
+        left = snapshots.create("c_branch", label="left")
+        service.record(
+            "c_branch", left.id,
+            kind="npc_relation", text="Mira is hostile.",
+            priority="high", status="permanent",
+            entity_type="npc", entity_id="npc_mira", fact_type="relationship",
+        )
 
-# ---------------------------------------------------------------------------
-# trigger_memory_from_recap tests
-# ---------------------------------------------------------------------------
+        snapshots.restore("c_branch", root.slot, auto_save=False)
+        right = snapshots.create("c_branch", label="right")
+        service.record(
+            "c_branch", right.id,
+            kind="npc_relation", text="Mira is an ally.",
+            priority="high", status="permanent",
+            entity_type="npc", entity_id="npc_mira", fact_type="relationship",
+        )
+
+        left_memory = service.get_effective("c_branch", save_id=left.id)
+        right_memory = service.get_effective("c_branch", save_id=right.id)
+        assert left_memory[0]["text"] == "Mira is hostile."
+        assert right_memory[0]["text"] == "Mira is an ally."
+
+        scope = service.scope("c_branch", save_id=right.id)
+        included_ids = {row["id"] for row in scope["included_saves"]}
+        assert included_ids == {root.id, right.id}
+        assert left.id not in included_ids
+
 
 class TestTriggerMemoryFromRecap:
-    def test_p0_high_priority_writes_permanent(self, database):
+    def test_priority_and_future_impact_create_revisions(self, database):
         _seed_campaign(database, "c_trigger")
+        save = CampaignSnapshotService(database).create("c_trigger")
         recap = _make_recap(memory_candidates=[
-            {"kind": "plot_commitment", "text": "Important plot fact.", "priority": "high"},
-        ])
-        actions = trigger_memory_from_recap(database, "c_trigger", "save_001", recap)
-        assert len(actions) >= 1
-        high_actions = [a for a in actions if a.get("priority") == "high"]
-        assert len(high_actions) >= 1
-        assert high_actions[0]["status"] == "permanent"
-
-    def test_p2_low_priority_skipped(self, database):
-        _seed_campaign(database, "c_trigger2")
-        recap = _make_recap(memory_candidates=[
+            {
+                "kind": "plot_commitment",
+                "text": "Important plot fact.",
+                "priority": "high",
+                "entity_type": "plot",
+                "entity_id": "main_plot",
+                "fact_type": "commitment",
+            },
             {"kind": "item_fact", "text": "Bought ale.", "priority": "low"},
         ])
-        actions = trigger_memory_from_recap(database, "c_trigger2", "save_002", recap)
-        skipped = [a for a in actions if a.get("action") == "skipped"]
-        assert len(skipped) == 1
 
-    def test_future_impact_writes_as_candidate(self, database):
-        _seed_campaign(database, "c_trigger3")
-        recap = _make_recap(
-            memory_candidates=[],
-            future_impact=["The innkeeper may offer a quest."],
-        )
-        actions = trigger_memory_from_recap(database, "c_trigger3", "save_003", recap)
-        upserts = [a for a in actions if a.get("action") == "upsert"]
-        assert len(upserts) >= 1
+        actions = trigger_memory_from_recap(database, "c_trigger", save.id, recap)
 
-    def test_duplicate_entity_fact_updates(self, database):
-        _seed_campaign(database, "c_trigger4")
-        service = CampaignMemoryService(database)
-        # Insert via service directly (entity_id set, dedup works)
-        mid1 = service.upsert(
-            "c_trigger4", kind="npc_relation", text="Met innkeeper.",
-            priority="medium", status="candidate",
-            entity_type="npc", entity_id="innkeeper_01", fact_type="met",
-        )
-        mid2 = service.upsert(
-            "c_trigger4", kind="npc_relation", text="Innkeeper now an ally.",
-            priority="medium", status="candidate",
-            entity_type="npc", entity_id="innkeeper_01", fact_type="met",
-        )
-        assert mid1 == mid2  # Same id — updated in place
-
-        all_mems = service.list_by_status("c_trigger4", ["candidate", "permanent", "stable"])
-        npc_mems = [m for m in all_mems if m["kind"] == "npc_relation"]
-        assert len(npc_mems) == 1  # Updated, not duplicated
-        assert "ally" in npc_mems[0]["text"]
-
-    def test_trigger_dedupes_candidates_without_explicit_entity_id(self, database):
-        _seed_campaign(database, "c_trigger5")
-        recap = _make_recap(
-            memory_candidates=[
-                {"kind": "plot_commitment", "text": "The party promised to help Mira.", "priority": "medium"},
-            ],
-            future_impact=[],
-        )
-
-        first = trigger_memory_from_recap(database, "c_trigger5", "save_005", recap)
-        second = trigger_memory_from_recap(database, "c_trigger5", "save_006", recap)
-
-        first_upsert = next(a for a in first if a.get("action") == "upsert")
-        second_upsert = next(a for a in second if a.get("action") == "upsert")
-        assert first_upsert["memory_id"] == second_upsert["memory_id"]
-
-        memories = CampaignMemoryService(database).list_by_status("c_trigger5", ["candidate"])
-        assert len(memories) == 1
-        assert memories[0]["source_save_id"] == "save_006"
+        high = next(action for action in actions if action.get("priority") == "high")
+        skipped = next(action for action in actions if action.get("action") == "skipped")
+        assert high["status"] == "permanent"
+        assert high["revision_id"].startswith("memrev_")
+        assert skipped["priority"] == "low"
+        assert len(CampaignMemoryService(database).get_by_save(save.id)) == 2
 
 
 # ---------------------------------------------------------------------------

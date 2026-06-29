@@ -252,6 +252,7 @@ Each `create` action now automatically:
 ```
 dnd_save action=create campaign_id=<id> label="进入地城前"
 dnd_save action=list campaign_id=<id>
+dnd_save action=lineage campaign_id=<id>
 dnd_save action=verify campaign_id=<id> slot=1
 dnd_save action=restore campaign_id=<id> slot=1 [auto_save=true]
 dnd_save action=delete campaign_id=<id> slot=3
@@ -283,10 +284,30 @@ re-runs the LLM recap generation, updating the snapshot in place.
 
 ### Campaign memory
 
-Narrative facts from high-priority recaps are written to the `campaign_memories`
-database table. This is separate from USER.md — USER.md only stores player-role
-name mappings (`dnd-campaign:<id>:players` block). Never write campaign narrative,
-NPC relationships, plot facts, or quest state to USER.md.
+Each save is a DAG node with `parent_save_id`. The mutable campaign runtime keeps
+an active save head. Restoring an older save moves that head; the next save becomes
+a new child branch instead of inheriting memories from a sibling branch.
+
+`campaign_memories` stores stable fact identities. Save-scoped values live in
+`campaign_memory_revisions`. The effective memory set for a slot is resolved from
+that slot and its ancestors, with the nearest revision winning for each fact.
+ChromaDB indexes revisions but is never the source of truth.
+
+For natural-language questions about campaign continuity, always use `dnd_memory`
+instead of relying on chat/session memory:
+
+```
+dnd_memory action=search campaign_id=<id> query="我们答应过哪些 NPC？"
+dnd_memory action=scope campaign_id=<id>
+dnd_memory action=get campaign_id=<id> [save_id=<save-id>]
+dnd_memory action=status
+dnd_memory action=reindex campaign_id=<id>
+```
+
+`scope.included_saves` is the exact root-to-current range used for semantic
+retrieval. Results from sibling branches must never be included. Campaign memory
+is separate from USER.md — USER.md only stores player-role name mappings
+(`dnd-campaign:<id>:players` block).
 
 ## List and verify saves
 

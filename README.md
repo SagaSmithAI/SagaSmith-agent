@@ -189,7 +189,7 @@ SagaSmith 将三类容易混淆的数据分开管理：
 |------|--------|----------|------|
 | Agent session 记忆 | 当前聊天/session | NanoBot session history 与压缩摘要 | 保持近期对话连续性 |
 | Snapshot | 单个战役、单个存档点 | `campaign_saves.snapshot_json` | 保存可恢复的权威战役状态 |
-| Campaign memory | 单个战役 | `campaign_memories` | 保存跨 session 使用的长期叙事事实 |
+| Campaign memory | 单个战役、当前存档分支 | `campaign_memories` + `campaign_memory_revisions` | 保存跨 session 使用、可随分支演化的长期叙事事实 |
 
 创建存档时，Agent 只需发送一个简短工具调用：
 
@@ -197,7 +197,20 @@ SagaSmith 将三类容易混淆的数据分开管理：
 dnd_save action=create campaign_id=<id> label="进入地城前"
 ```
 
-工具会捕获当前世界、队伍、PC、战斗、剧情、事件、场景和频道绑定，生成相对上一个存档的 recap，将 recap 写入 snapshot，并从 `memory_candidates` 与 `future_impact` 派生战役长期记忆。高优先级事实写为 `permanent`，中优先级写为 `candidate`，低优先级只保留在 recap 中。
+工具会捕获当前世界、队伍、PC、战斗、剧情、事件、场景和频道绑定，生成相对父存档的 recap，将 recap 写入 snapshot，并从 `memory_candidates` 与 `future_impact` 派生战役长期记忆。高优先级事实写为 `permanent`，中优先级写为 `candidate`，低优先级只保留在 recap 中。
+
+每个存档保存 `parent_save_id`，整条时间线形成 DAG；读档会把 active head 移到目标存档，之后的新存档从该节点建立新分支。`campaign_memories` 只保存稳定的事实身份，事实在不同存档上的文本、优先级和状态保存在 `campaign_memory_revisions`。查询某个存档时，系统只沿其“根节点 → 当前节点”的祖先路径取最近 revision，因此兄弟分支的记忆不会串线。
+
+查看 DAG 或自然语言查询记忆：
+
+```text
+dnd_save action=lineage campaign_id=<id>
+dnd_memory action=scope campaign_id=<id>
+dnd_memory action=search campaign_id=<id> query="米拉现在与队伍是什么关系？"
+dnd_memory action=search campaign_id=<id> slot=3 query="这个存档里谁知道密门的位置？"
+```
+
+启用 ChromaDB 时，向量库保存 memory revision 的语义索引；DAG 祖先路径与有效 revision ID 仍由关系数据库精确计算，再限制 Chroma 的候选集合。ChromaDB 不决定分支，也不是权威存档。
 
 读档使用：
 
@@ -208,6 +221,8 @@ dnd_save action=restore campaign_id=<id> slot=3
 `restore` 默认启用 `auto_save=true`，代码会先创建一个 `auto-before-restore` 存档，再恢复目标 slot。这个读档前备份是代码强制行为；长休、升级、章节结束等节点的自动存档目前由 skill 指示 Agent 主动调用 `dnd_save action=create`，不是数据库事件或定时器硬触发。
 
 存档和读档只修改数据库中的战役状态、snapshot、recap 与 campaign memory，不会改写工作区文件或 `USER.md`。只有显式使用 `action=export` 时才会向指定路径写出 JSON 文件。
+
+本版 memory schema 是破坏性更新：迁移会重建旧版 `campaign_memories`，不会导入旧版可变 memory 数据。
 
 ---
 
@@ -289,6 +304,7 @@ SagaSmith-skills/
 ├── tools/                      # Agent 工具（Python）
 │   ├── dnd_campaign.py         #   战役 CRUD + 一键开团
 │   ├── dnd_save.py             #   存档管理
+│   ├── dnd_memory.py           #   分支记忆范围与自然语言检索
 │   ├── dnd_module.py           #   模组导入/检索/场景进度
 │   └── dnd_rules.py            #   规则混合检索（精确 + FTS + Dense）
 ├── domain/                     # 业务逻辑（纯 Python，零框架依赖）

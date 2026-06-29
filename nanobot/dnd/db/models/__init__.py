@@ -21,13 +21,25 @@ from nanobot.dnd.db.models.module import (
     SceneIndex,
     SceneState,
 )
-from nanobot.dnd.db.models.runtime import CampaignEvent, CampaignMemory, CampaignSave, Combat, PlotSummary
+from nanobot.dnd.db.models.runtime import (
+    CampaignEvent,
+    CampaignMemory,
+    CampaignMemoryRevision,
+    CampaignSave,
+    CampaignSaveAncestor,
+    CampaignTimelineHead,
+    Combat,
+    PlotSummary,
+)
 
 __all__ = [
     "Campaign",
     "CampaignEvent",
     "CampaignMemory",
+    "CampaignMemoryRevision",
     "CampaignSave",
+    "CampaignSaveAncestor",
+    "CampaignTimelineHead",
     "CampaignRuleProfile",
     "CampaignRulePublication",
     "ChannelBinding",

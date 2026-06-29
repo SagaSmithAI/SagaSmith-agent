@@ -190,7 +190,7 @@ SagaSmith keeps three commonly confused kinds of data separate:
 |------|-------|---------|---------|
 | Agent session memory | Current chat/session | NanoBot session history and compacted summaries | Maintains recent conversational continuity |
 | Snapshot | One campaign and save point | `campaign_saves.snapshot_json` | Stores authoritative, restorable campaign state |
-| Campaign memory | One campaign | `campaign_memories` | Stores long-lived narrative facts across sessions |
+| Campaign memory | One campaign and active save branch | `campaign_memories` + `campaign_memory_revisions` | Stores long-lived facts that can evolve independently on each branch |
 
 Creating a save requires only a short tool call:
 
@@ -198,7 +198,20 @@ Creating a save requires only a short tool call:
 dnd_save action=create campaign_id=<id> label="Before entering the dungeon"
 ```
 
-The tool captures the current world, party, PCs, combat, plot, events, scenes, and channel bindings. It then generates a recap relative to the previous save, stores that recap in the snapshot, and derives long-term campaign memories from `memory_candidates` and `future_impact`. High-priority facts become `permanent`, medium-priority facts become `candidate`, and low-priority facts remain only in the recap.
+The tool captures the current world, party, PCs, combat, plot, events, scenes, and channel bindings. It then generates a recap relative to the parent save, stores that recap in the snapshot, and derives long-term campaign memories from `memory_candidates` and `future_impact`. High-priority facts become `permanent`, medium-priority facts become `candidate`, and low-priority facts remain only in the recap.
+
+Every save records a `parent_save_id`, forming a DAG. Restoring a save moves the active head to that node; the next save creates a new child branch. `campaign_memories` stores stable fact identities, while `campaign_memory_revisions` stores each save's text, priority, and status. A query walks only the root-to-target ancestor path and selects the nearest revision, so memories from sibling branches cannot leak into the result.
+
+Inspect the DAG or ask campaign-memory questions in natural language:
+
+```text
+dnd_save action=lineage campaign_id=<id>
+dnd_memory action=scope campaign_id=<id>
+dnd_memory action=search campaign_id=<id> query="What is Mira's current relationship with the party?"
+dnd_memory action=search campaign_id=<id> slot=3 query="Who knew where the secret door was at this save?"
+```
+
+When ChromaDB is enabled, it holds the semantic index for memory revisions. The relational database still computes the exact DAG ancestor path and effective revision IDs before constraining the Chroma candidate set. ChromaDB neither chooses the branch nor acts as the authoritative save store.
 
 Restoring a save uses:
 
@@ -209,6 +222,8 @@ dnd_save action=restore campaign_id=<id> slot=3
 `restore` defaults to `auto_save=true`: the code first creates an `auto-before-restore` snapshot, then restores the requested slot. This pre-restore backup is enforced by code. Saves after a long rest, level-up, or chapter transition are currently skill-driven instructions for the Agent to call `dnd_save action=create`; they are not hard-wired database events or timers.
 
 Save and restore operations modify campaign state, snapshots, recaps, and campaign memory in the database. They do not rewrite workspace files or `USER.md`. Only an explicit `action=export` writes a JSON file to the requested path.
+
+This memory schema is intentionally breaking: migration rebuilds the legacy `campaign_memories` table and does not import legacy mutable memory rows.
 
 ---
 
@@ -290,6 +305,7 @@ SagaSmith-skills/
 ├── tools/                      # Agent tools (Python)
 │   ├── dnd_campaign.py         #   Campaign CRUD + one-shot start
 │   ├── dnd_save.py             #   Snapshot management
+│   ├── dnd_memory.py           #   Branch scopes and natural-language memory search
 │   ├── dnd_module.py           #   Module import/search/scene progress
 │   └── dnd_rules.py            #   Hybrid rule search (exact + FTS + Dense)
 ├── domain/                     # Business logic (pure Python, zero framework deps)

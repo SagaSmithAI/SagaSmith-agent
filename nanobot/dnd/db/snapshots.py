@@ -20,6 +20,8 @@ from nanobot.dnd.db.models import (
     Campaign,
     CampaignEvent,
     CampaignSave,
+    CampaignSaveAncestor,
+    CampaignTimelineHead,
     ChannelBinding,
     Character,
     Combat,
@@ -66,6 +68,9 @@ class SnapshotInfo:
     recap: dict | None = None
     memory_actions: list[dict] | None = None
     warnings: list[str] | None = None
+    parent_save_id: str | None = None
+    depth: int = 0
+    active: bool = False
 
 
 @dataclass(frozen=True)
@@ -312,6 +317,7 @@ class CampaignSnapshotService:
             "current_scene", ""
         )
         chapter = str(world_json.get("current_chapter", ""))
+        parent_save = self._active_save(session, campaign_id)
 
         memory_actions: list[dict] = []
         warnings: list[str] = []
@@ -334,26 +340,45 @@ class CampaignSnapshotService:
             created_by=actor_id,
             schema_version=SNAPSHOT_SCHEMA_VERSION,
             state_version=self._snapshot_state_version(payload),
+            parent_save_id=parent_save.id if parent_save else None,
+            depth=(parent_save.depth + 1) if parent_save else 0,
         )
         session.add(save)
         session.flush()
+        self._record_lineage(session, save, parent_save)
 
         if recap is not None:
+            recap["baseline"] = parent_save is None
+            recap["from_save_id"] = parent_save.id if parent_save else None
             recap["to_save_id"] = save.id
+            source = dict(recap.get("source") or {})
+            source["previous_save_id"] = parent_save.id if parent_save else None
+            if source.get("mode") not in {"failed", "json_parse_failed"}:
+                source["mode"] = (
+                    "baseline" if parent_save is None else "delta_from_previous_snapshot"
+                )
+            recap["source"] = source
             payload["recap"] = recap
             save.snapshot_json = payload
             save.snapshot_hash = _snapshot_hash(payload)
             try:
                 from nanobot.dnd.db.memory import trigger_memory_from_recap_in_session
 
-                memory_actions = trigger_memory_from_recap_in_session(
-                    session, campaign_id, save.id, recap,
-                )
+                with session.begin_nested():
+                    memory_actions = trigger_memory_from_recap_in_session(
+                        session, campaign_id, save.id, recap,
+                    )
             except Exception as exc:
                 logger.warning("Memory trigger failed: {}", exc)
                 warnings.append(f"Memory trigger failed: {exc}")
 
-        return self._info(save, memory_actions=memory_actions, warnings=warnings)
+        self._set_active_save(session, campaign_id, save.id)
+        return self._info(
+            save,
+            memory_actions=memory_actions,
+            warnings=warnings,
+            active_save_id=save.id,
+        )
 
     def list(self, campaign_id: str) -> list[SnapshotInfo]:
         with self.database.transaction() as session:
@@ -363,7 +388,11 @@ class CampaignSnapshotService:
                 .where(CampaignSave.campaign_id == campaign_id)
                 .order_by(CampaignSave.slot)
             )
-            return [self._info(save) for save in saves]
+            active_save_id = self._active_save_id(session, campaign_id)
+            return [
+                self._info(save, active_save_id=active_save_id)
+                for save in saves
+            ]
 
     def get(self, campaign_id: str, slot: int) -> dict[str, Any]:
         with self.database.transaction() as session:
@@ -392,6 +421,7 @@ class CampaignSnapshotService:
             payload = self._validated_payload(save, campaign_id)
             before = self.capture_from_session(session, campaign_id)
             self.restore_in_session(session, payload, expected_campaign_id=campaign_id)
+            self._set_active_save(session, campaign_id, save.id)
             after = self.capture_from_session(session, campaign_id)
 
             audit_id = f"audit_restore_{uuid.uuid4().hex}"
@@ -449,19 +479,99 @@ class CampaignSnapshotService:
             try:
                 from nanobot.dnd.db.memory import trigger_memory_from_recap_in_session
 
-                memory_actions = trigger_memory_from_recap_in_session(
-                    session, campaign_id, save.id, recap,
-                )
+                with session.begin_nested():
+                    memory_actions = trigger_memory_from_recap_in_session(
+                        session, campaign_id, save.id, recap,
+                    )
             except Exception as exc:
                 logger.warning("Memory trigger failed during recap regeneration: {}", exc)
                 warnings.append(f"Memory trigger failed: {exc}")
             session.flush()
-            return self._info(save, memory_actions=memory_actions, warnings=warnings)
+            return self._info(
+                save,
+                memory_actions=memory_actions,
+                warnings=warnings,
+                active_save_id=self._active_save_id(session, campaign_id),
+            )
+
+    def lineage(self, campaign_id: str) -> dict[str, Any]:
+        """Return the immutable save DAG and the current active head."""
+        with self.database.transaction() as session:
+            self._campaign(session, campaign_id)
+            active_save_id = self._active_save_id(session, campaign_id)
+            saves = session.scalars(
+                select(CampaignSave)
+                .where(CampaignSave.campaign_id == campaign_id)
+                .order_by(CampaignSave.slot)
+            ).all()
+            return {
+                "campaign_id": campaign_id,
+                "active_save_id": active_save_id,
+                "nodes": [
+                    {
+                        "id": save.id,
+                        "slot": save.slot,
+                        "label": save.label,
+                        "parent_save_id": save.parent_save_id,
+                        "depth": save.depth,
+                        "active": save.id == active_save_id,
+                        "created_at": save.created_at.isoformat(),
+                    }
+                    for save in saves
+                ],
+            }
+
+    def scope(self, campaign_id: str, save_id: str | None = None) -> dict[str, Any]:
+        """Return the save slots included in a save's ancestor scope."""
+        with self.database.transaction() as session:
+            target_id = save_id or self._active_save_id(session, campaign_id)
+            if target_id is None:
+                return {
+                    "campaign_id": campaign_id,
+                    "save_id": None,
+                    "included_saves": [],
+                }
+            target = session.get(CampaignSave, target_id)
+            if target is None or target.campaign_id != campaign_id:
+                raise SnapshotNotFoundError(
+                    f"snapshot not found: campaign={campaign_id}, save_id={target_id}"
+                )
+            rows = session.execute(
+                select(CampaignSaveAncestor.distance, CampaignSave)
+                .join(
+                    CampaignSave,
+                    CampaignSave.id == CampaignSaveAncestor.ancestor_save_id,
+                )
+                .where(CampaignSaveAncestor.descendant_save_id == target_id)
+                .order_by(CampaignSaveAncestor.distance.desc())
+            ).all()
+            return {
+                "campaign_id": campaign_id,
+                "save_id": target_id,
+                "included_saves": [
+                    {
+                        "id": save.id,
+                        "slot": save.slot,
+                        "label": save.label,
+                        "distance": distance,
+                    }
+                    for distance, save in rows
+                ],
+            }
 
     def delete(self, campaign_id: str, slot: int) -> None:
         with self.database.transaction() as session:
             self._campaign(session, campaign_id)
             save = self._save(session, campaign_id, slot)
+            child = session.scalar(
+                select(CampaignSave.id).where(CampaignSave.parent_save_id == save.id).limit(1)
+            )
+            if child is not None:
+                raise SnapshotError(
+                    f"cannot delete snapshot with child saves: {save.id}"
+                )
+            if self._active_save_id(session, campaign_id) == save.id:
+                self._set_active_save(session, campaign_id, save.parent_save_id)
             session.delete(save)
 
     def export(self, campaign_id: str, slot: int, output_path: str | Path) -> dict[str, Any]:
@@ -631,6 +741,83 @@ class CampaignSnapshotService:
             )
         return save
 
+    @staticmethod
+    def _active_save_id(session: Session, campaign_id: str) -> str | None:
+        head = session.get(CampaignTimelineHead, campaign_id)
+        return head.active_save_id if head else None
+
+    @classmethod
+    def _active_save(cls, session: Session, campaign_id: str) -> CampaignSave | None:
+        active_save_id = cls._active_save_id(session, campaign_id)
+        if active_save_id:
+            save = session.get(CampaignSave, active_save_id)
+            if save is not None and save.campaign_id == campaign_id:
+                return save
+        return session.scalar(
+            select(CampaignSave)
+            .where(CampaignSave.campaign_id == campaign_id)
+            .order_by(CampaignSave.slot.desc())
+            .limit(1)
+        )
+
+    @staticmethod
+    def _set_active_save(
+        session: Session,
+        campaign_id: str,
+        save_id: str | None,
+    ) -> None:
+        head = session.get(CampaignTimelineHead, campaign_id)
+        if head is None:
+            session.add(
+                CampaignTimelineHead(
+                    campaign_id=campaign_id,
+                    active_save_id=save_id,
+                )
+            )
+        else:
+            head.active_save_id = save_id
+        session.flush()
+
+    @staticmethod
+    def _record_lineage(
+        session: Session,
+        save: CampaignSave,
+        parent: CampaignSave | None,
+    ) -> None:
+        session.add(
+            CampaignSaveAncestor(
+                descendant_save_id=save.id,
+                ancestor_save_id=save.id,
+                campaign_id=save.campaign_id,
+                distance=0,
+            )
+        )
+        if parent is not None:
+            parent_ancestors = session.scalars(
+                select(CampaignSaveAncestor)
+                .where(CampaignSaveAncestor.descendant_save_id == parent.id)
+                .order_by(CampaignSaveAncestor.distance)
+            ).all()
+            if not parent_ancestors:
+                parent_ancestors = [
+                    CampaignSaveAncestor(
+                        descendant_save_id=parent.id,
+                        ancestor_save_id=parent.id,
+                        campaign_id=parent.campaign_id,
+                        distance=0,
+                    )
+                ]
+            for ancestor in parent_ancestors:
+                session.add(
+                    CampaignSaveAncestor(
+                        descendant_save_id=save.id,
+                        ancestor_save_id=ancestor.ancestor_save_id,
+                        campaign_id=save.campaign_id,
+                        distance=ancestor.distance + 1,
+                    )
+                )
+        session.flush()
+
     @classmethod
     def _validated_payload(
         cls, save: CampaignSave, campaign_id: str
@@ -649,6 +836,7 @@ class CampaignSnapshotService:
         save: CampaignSave,
         memory_actions: list[dict] | None = None,
         warnings: list[str] | None = None,
+        active_save_id: str | None = None,
     ) -> SnapshotInfo:
         snapshot = save.snapshot_json or {}
         return SnapshotInfo(
@@ -663,4 +851,7 @@ class CampaignSnapshotService:
             recap=snapshot.get("recap"),
             memory_actions=memory_actions,
             warnings=warnings,
+            parent_save_id=save.parent_save_id,
+            depth=save.depth,
+            active=save.id == active_save_id,
         )

@@ -7,7 +7,6 @@ from datetime import UTC, datetime
 from typing import Any
 
 from loguru import logger
-from sqlalchemy import select
 
 from nanobot.agent.tools.base import Tool, tool_parameters
 from nanobot.agent.tools.context import current_request_context
@@ -17,6 +16,7 @@ from nanobot.dnd.db.models.runtime import CampaignSave
 from nanobot.dnd.db.snapshots import (
     CampaignSnapshotService,
     InvalidSnapshotError,
+    SnapshotError,
     SnapshotNotFoundError,
 )
 
@@ -28,12 +28,13 @@ from nanobot.dnd.db.snapshots import (
             "action": {
                 "type": "string",
                 "enum": [
-                    "create", "list", "verify", "restore", "delete", "export",
+                    "create", "list", "lineage", "verify", "restore", "delete", "export",
                     "regenerate_recap",
                 ],
                 "description": (
                     "create: save current campaign state with auto recap. "
                     "list: list all saves for a campaign. "
+                    "lineage: return the save DAG and active head. "
                     "verify: check snapshot integrity. "
                     "restore: load a snapshot (auto-saves current state first). "
                     "delete: remove a snapshot slot. "
@@ -107,9 +108,10 @@ class DndSaveTool(Tool):
             result = self._service.create(
                 campaign_id,
                 label=args.get("label", ""),
-                actor_id=ctx.actor_id if ctx else None,
+                actor_id=getattr(ctx, "actor_id", None),
                 recap=recap,
             )
+            self._index_memory_actions(result.memory_actions)
             return asdict(result)
 
         if action == "list":
@@ -127,6 +129,12 @@ class DndSaveTool(Tool):
                     d["recap_summary"] = summary
                 result.append(d)
             return {"saves": result}
+
+        if action == "lineage":
+            try:
+                return self._service.lineage(campaign_id)
+            except CampaignNotFoundError as exc:
+                return {"error": "campaign_not_found", "detail": str(exc)}
 
         if action == "verify":
             try:
@@ -148,7 +156,7 @@ class DndSaveTool(Tool):
                 result = self._service.restore(
                     campaign_id,
                     args["slot"],
-                    actor_id=ctx.actor_id if ctx else None,
+                    actor_id=getattr(ctx, "actor_id", None),
                     auto_save=args.get("auto_save", True),
                 )
             except (SnapshotNotFoundError, InvalidSnapshotError, CampaignNotFoundError) as exc:
@@ -158,7 +166,7 @@ class DndSaveTool(Tool):
         if action == "delete":
             try:
                 self._service.delete(campaign_id, args["slot"])
-            except (SnapshotNotFoundError, CampaignNotFoundError) as exc:
+            except (SnapshotError, CampaignNotFoundError) as exc:
                 return {"error": type(exc).__name__, "detail": str(exc)}
             return {"deleted": True, "campaign_id": campaign_id, "slot": args["slot"]}
 
@@ -174,8 +182,9 @@ class DndSaveTool(Tool):
 
         return {"error": "unknown_action", "detail": action}
 
-    async def _execute_sync(self, args: dict[str, Any]) -> dict[str, Any]:
-        return await self._execute(args)
+    async def execute(self, **kwargs: Any) -> dict[str, Any]:
+        """Run one campaign snapshot operation."""
+        return await self._execute(kwargs)
 
     # -- Recap helpers --------------------------------------------------------
 
@@ -186,12 +195,7 @@ class DndSaveTool(Tool):
 
         try:
             with self.database.transaction() as session:
-                previous_save = session.scalar(
-                    select(CampaignSave)
-                    .where(CampaignSave.campaign_id == campaign_id)
-                    .order_by(CampaignSave.slot.desc())
-                    .limit(1)
-                )
+                previous_save = self._service._active_save(session, campaign_id)
 
                 current_payload = CampaignSnapshotService.capture_from_session(
                     session, campaign_id,
@@ -228,15 +232,10 @@ class DndSaveTool(Tool):
             with self.database.transaction() as session:
                 save = self._service._save(session, campaign_id, slot)
                 payload = dict(save.snapshot_json)
-
-                previous_save = session.scalar(
-                    select(CampaignSave)
-                    .where(
-                        CampaignSave.campaign_id == campaign_id,
-                        CampaignSave.slot < slot,
-                    )
-                    .order_by(CampaignSave.slot.desc())
-                    .limit(1)
+                previous_save = (
+                    session.get(CampaignSave, save.parent_save_id)
+                    if save.parent_save_id
+                    else None
                 )
 
             recap = await self.recap_generator.generate(
@@ -246,6 +245,7 @@ class DndSaveTool(Tool):
             )
 
             result = self._service.regenerate_recap(campaign_id, slot, recap)
+            self._index_memory_actions(result.memory_actions)
             return asdict(result)
 
         except (SnapshotNotFoundError, CampaignNotFoundError) as exc:
@@ -253,3 +253,18 @@ class DndSaveTool(Tool):
         except Exception as exc:
             logger.warning("Recap regeneration failed: {}", exc)
             return {"error": "recap_regeneration_failed", "detail": str(exc)}
+
+    def _index_memory_actions(self, actions: list[dict] | None) -> None:
+        revision_ids = [
+            str(action["revision_id"])
+            for action in actions or []
+            if action.get("action") == "upsert" and action.get("revision_id")
+        ]
+        if not revision_ids:
+            return
+        try:
+            from nanobot.dnd.memory_search import CampaignMemorySearchService
+
+            CampaignMemorySearchService(self.database).index_revision_ids(revision_ids)
+        except Exception as exc:
+            logger.warning("Campaign memory vector indexing failed: {}", exc)

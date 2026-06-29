@@ -5,7 +5,17 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from nanobot.dnd.db.database import Base
@@ -53,6 +63,43 @@ class CampaignSave(TimestampMixin, Base):
     created_by: Mapped[str | None] = mapped_column(String, index=True)
     schema_version: Mapped[int] = mapped_column(Integer, default=2)
     state_version: Mapped[int] = mapped_column(Integer, default=1)
+    parent_save_id: Mapped[str | None] = mapped_column(
+        ForeignKey("campaign_saves.id", ondelete="SET NULL"), index=True
+    )
+    depth: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class CampaignTimelineHead(TimestampMixin, Base):
+    """Current save lineage used by the mutable campaign runtime."""
+
+    __tablename__ = "campaign_timeline_heads"
+
+    campaign_id: Mapped[str] = mapped_column(
+        ForeignKey("campaigns.id", ondelete="CASCADE"), primary_key=True
+    )
+    active_save_id: Mapped[str | None] = mapped_column(
+        ForeignKey("campaign_saves.id", ondelete="SET NULL"), index=True
+    )
+
+
+class CampaignSaveAncestor(Base):
+    """Transitive closure for fast save-lineage queries."""
+
+    __tablename__ = "campaign_save_ancestors"
+    __table_args__ = (
+        Index("ix_campaign_save_ancestors_ancestor", "ancestor_save_id"),
+    )
+
+    descendant_save_id: Mapped[str] = mapped_column(
+        ForeignKey("campaign_saves.id", ondelete="CASCADE"), primary_key=True
+    )
+    ancestor_save_id: Mapped[str] = mapped_column(
+        ForeignKey("campaign_saves.id", ondelete="CASCADE"), primary_key=True
+    )
+    campaign_id: Mapped[str] = mapped_column(
+        ForeignKey("campaigns.id", ondelete="CASCADE"), index=True
+    )
+    distance: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
 class PlotSummary(TimestampMixin, Base):
@@ -90,7 +137,7 @@ class CampaignEvent(Base):
 
 
 class CampaignMemory(TimestampMixin, Base):
-    """Campaign-scoped narrative long-term memory."""
+    """Stable identity of one campaign-scoped narrative fact."""
 
     __tablename__ = "campaign_memories"
     __table_args__ = (
@@ -105,14 +152,33 @@ class CampaignMemory(TimestampMixin, Base):
         ForeignKey("campaigns.id", ondelete="CASCADE"), index=True
     )
     kind: Mapped[str] = mapped_column(String, nullable=False)
+    entity_type: Mapped[str] = mapped_column(String, nullable=False)
+    entity_id: Mapped[str] = mapped_column(String, nullable=False)
+    fact_type: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now)
+
+
+class CampaignMemoryRevision(Base):
+    """Immutable-per-save value of a logical campaign memory fact."""
+
+    __tablename__ = "campaign_memory_revisions"
+    __table_args__ = (
+        UniqueConstraint("memory_id", "save_id", name="uq_campaign_memory_revision_save"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    campaign_id: Mapped[str] = mapped_column(
+        ForeignKey("campaigns.id", ondelete="CASCADE"), index=True
+    )
+    memory_id: Mapped[str] = mapped_column(
+        ForeignKey("campaign_memories.id", ondelete="CASCADE"), index=True
+    )
+    save_id: Mapped[str] = mapped_column(
+        ForeignKey("campaign_saves.id", ondelete="CASCADE"), index=True
+    )
+    operation: Mapped[str] = mapped_column(String, default="set")
     text: Mapped[str] = mapped_column(Text, nullable=False)
     priority: Mapped[str] = mapped_column(String, default="medium")
     status: Mapped[str] = mapped_column(String, default="candidate")
-    entity_type: Mapped[str | None] = mapped_column(String)
-    entity_id: Mapped[str | None] = mapped_column(String)
-    fact_type: Mapped[str | None] = mapped_column(String)
-    supersedes: Mapped[str | None] = mapped_column(String)
-    source_save_id: Mapped[str | None] = mapped_column(String)
-    score: Mapped[int | None] = mapped_column(Integer)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, index=True)

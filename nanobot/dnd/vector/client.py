@@ -18,7 +18,7 @@ from nanobot.config.paths import get_runtime_subdir
 
 logger = logging.getLogger(__name__)
 
-_COLLECTION_NAMES = ("dnd_rules", "dnd_modules")
+_COLLECTION_NAMES = ("dnd_rules", "dnd_modules", "dnd_campaign_memories")
 _COLLECTION_METADATA = {
     "hnsw:space": "cosine",
 }

@@ -96,7 +96,13 @@ Archived 战役拒绝 save/load 操作。
 每次创建 Snapshot 时，系统自动生成剧情 Recap（对比上一存档的差量），内容包括：
 剧情推进、新角色/场景、触发事件、后续影响、玩家选择、记忆候选。
 Recap 写入 snapshot JSON，不修改 USER.md。高优先级叙事事实写入
-`campaign_memories` 数据库表（P0=permanent, P1=candidate, P2=仅 snapshot）。
+`campaign_memory_revisions` 数据库表（P0=permanent, P1=candidate, P2=仅 snapshot）。
+每个 Snapshot 是带 `parent_save_id` 的 DAG 节点；读档会切换 active head，从旧档再次
+保存会创建新分支。当前有效记忆只来自 active head 的祖先链，禁止混入兄弟分支。
+
+玩家询问 NPC 关系、承诺、任务历史、已发现线索或其他战役连续性事实时，必须先调用
+`dnd_memory action=search`。需要解释检索范围时调用 `dnd_memory action=scope`；
+不得仅凭当前聊天 session 推断战役长期事实。
 
 每次保存创建新槽位，不覆盖旧槽位。标签应简短说明节点。保存成功后报告槽位、章节、
 地点和校验值前缀。

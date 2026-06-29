@@ -48,6 +48,10 @@ def test_migration_creates_v2_domain_schema_without_legacy_mode_tables(
         "characters",
         "combats",
         "campaign_saves",
+        "campaign_save_ancestors",
+        "campaign_timeline_heads",
+        "campaign_memories",
+        "campaign_memory_revisions",
         "plot_summaries",
         "campaign_events",
         "module_sources",
@@ -71,7 +75,7 @@ def test_migration_creates_v2_domain_schema_without_legacy_mode_tables(
     assert "lobby_session_states" not in tables
     assert "task_sessions" not in tables
     assert "agent_jobs" not in tables
-    assert current_revision(database.url) == "20260624_07"
+    assert current_revision(database.url) == "20260629_09"
 
 
 def test_skill_aggregate_state_round_trip(database: Database) -> None:
