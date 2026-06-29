@@ -15,13 +15,19 @@ from nanobot.dnd.db.models import (
     CampaignRuleProfile,
     CampaignRulePublication,
     CompendiumEntry,
+    EmbeddingModel,
     RuleChunk,
     RulePublication,
     RuleSection,
     RuleSet,
     RuleSource,
 )
-from nanobot.dnd.rules.embedding import BgeM3Embedder, Embedder
+from nanobot.dnd.rules.embedding import (
+    BgeM3Embedder,
+    Embedder,
+    detect_text_language,
+    profile_for_model,
+)
 from nanobot.dnd.rules.ingest import DEFAULT_RULE_SET_ID
 from nanobot.dnd.vector.client import VectorStore
 from nanobot.dnd.vector.search import chroma_dense_search
@@ -100,7 +106,7 @@ class RuleSearchService:
     def __init__(self, database: Database, *, embedder: Embedder | None = None) -> None:
         self.database = database
         self.embedder = embedder
-        self._dense_cache: dict[SearchScope, tuple[list[str], np.ndarray]] = {}
+        self._dense_cache: dict[tuple[SearchScope, str], tuple[list[str], np.ndarray]] = {}
 
     def search(
         self,
@@ -130,11 +136,24 @@ class RuleSearchService:
             )
             dense_ranked: list[str] = []
             if dense:
-                embedder = self.embedder or BgeM3Embedder()
-                query_vector = embedder.encode([retrieval_query])[0]
-                dense_ranked = self._dense_ids(
-                    session, query_vector, scope, limit=max(top_k * 10, 50)
-                )
+                dense_fusion: dict[str, float] = {}
+                for embedder, model_id in self._embedders_for_scope(
+                    session, scope, retrieval_query
+                ):
+                    query_vector = embedder.encode([retrieval_query])[0]
+                    ranked = self._dense_ids(
+                        session,
+                        query_vector,
+                        scope,
+                        model_id=model_id,
+                        embedder=embedder,
+                        limit=max(top_k * 10, 50),
+                    )
+                    for rank, chunk_id in enumerate(ranked, start=1):
+                        dense_fusion[chunk_id] = dense_fusion.get(chunk_id, 0.0) + 1 / (
+                            60 + rank
+                        )
+                dense_ranked = sorted(dense_fusion, key=dense_fusion.get, reverse=True)
 
             scores: dict[str, float] = {}
             channels: dict[str, set[str]] = {}
@@ -390,7 +409,14 @@ class RuleSearchService:
         )
 
     def _dense_ids(
-        self, session, query_vector: list[float], scope: SearchScope, *, limit: int
+        self,
+        session,
+        query_vector: list[float],
+        scope: SearchScope,
+        *,
+        model_id: str,
+        embedder: Embedder,
+        limit: int,
     ) -> list[str]:
         # ── ChromaDB path ──────────────────────────────────────────
         if VectorStore().enabled:
@@ -398,15 +424,20 @@ class RuleSearchService:
             if scope.publication_ids:
                 where["publication_id"] = {"$in": list(scope.publication_ids)}
             results = chroma_dense_search(
-                "dnd_rules", query_vector, where, limit=limit
+                "dnd_rules",
+                query_vector,
+                where,
+                profile=embedder.profile,
+                limit=limit,
             )
             return [chunk_id for chunk_id, _ in results]
 
         # ── PostgreSQL pgvector path ───────────────────────────────
-        if session.bind.dialect.name == "postgresql":
+        if session.bind.dialect.name == "postgresql" and len(query_vector) == 1024:
             params: dict[str, Any] = {
                 "vector": json.dumps(query_vector),
                 "rule_set_id": scope.rule_set_id,
+                "model_id": model_id,
                 "limit": limit,
             }
             publication_sql = ""
@@ -422,7 +453,8 @@ class RuleSearchService:
                     "SELECT rc.id, 1 - (rc.embedding_vector <=> CAST(:vector AS vector)) AS score "
                     "FROM rule_chunks rc JOIN rule_sources rs ON rs.id = rc.source_id "
                     "WHERE rs.rule_set_id = :rule_set_id "
-                    f"{publication_sql} AND rc.embedding_vector IS NOT NULL "
+                    f"{publication_sql} AND rc.embedding_model_id = :model_id "
+                    "AND rc.embedding_vector IS NOT NULL "
                     "ORDER BY rc.embedding_vector <=> CAST(:vector AS vector) LIMIT :limit"
                 ),
                 params,
@@ -430,7 +462,8 @@ class RuleSearchService:
             return [str(row[0]) for row in rows]
 
         # ── SQLite numpy brute-force path ──────────────────────────
-        cached = self._dense_cache.get(scope)
+        cache_key = (scope, model_id)
+        cached = self._dense_cache.get(cache_key)
         if cached is None:
             rows = list(
                 session.execute(
@@ -438,6 +471,7 @@ class RuleSearchService:
                     .join(RuleSource, RuleSource.id == RuleChunk.source_id)
                     .where(
                         *self._scope_condition(scope),
+                        RuleChunk.embedding_model_id == model_id,
                         RuleChunk.embedding_json.is_not(None),
                     )
                 )
@@ -445,7 +479,7 @@ class RuleSearchService:
             chunk_ids = [str(row[0]) for row in rows]
             matrix = np.asarray([row[1] for row in rows], dtype=np.float32)
             cached = (chunk_ids, matrix)
-            self._dense_cache[scope] = cached
+            self._dense_cache[cache_key] = cached
         chunk_ids, matrix = cached
         if matrix.size == 0:
             return []
@@ -455,6 +489,57 @@ class RuleSearchService:
         indexes = np.argpartition(scores, -candidate_count)[-candidate_count:]
         indexes = indexes[np.argsort(scores[indexes])[::-1]]
         return [chunk_ids[int(index)] for index in indexes]
+
+    def _embedders_for_scope(
+        self,
+        session,
+        scope: SearchScope,
+        query: str,
+    ) -> list[tuple[Embedder, str]]:
+        rows = list(
+            session.scalars(
+                select(EmbeddingModel)
+                .join(RuleChunk, RuleChunk.embedding_model_id == EmbeddingModel.id)
+                .join(RuleSource, RuleSource.id == RuleChunk.source_id)
+                .where(*self._scope_condition(scope))
+                .distinct()
+            )
+        )
+        if self.embedder is not None:
+            if rows and any(
+                row.model_name != self.embedder.model_name
+                or row.dimensions != self.embedder.dimensions
+                for row in rows
+            ):
+                raise RuleSearchError(
+                    "query embedder does not match the model used to build this rule index"
+                )
+            model_id = rows[0].id if rows else getattr(
+                self.embedder, "model_id", "embedding-bge-m3"
+            )
+            return [(self.embedder, model_id)]
+        if not rows:
+            return [
+                (
+                    BgeM3Embedder(language=detect_text_language(query)),
+                    "embedding-bge-m3",
+                )
+            ]
+
+        query_language = detect_text_language(query)
+        selected = rows
+        if len(rows) > 1 and query_language != "mixed":
+            matching = [
+                row
+                for row in rows
+                if profile_for_model(row.model_name).language in {query_language, "multi"}
+            ]
+            if matching:
+                selected = matching
+        return [
+            (BgeM3Embedder(model_name=row.model_name), row.id)
+            for row in selected
+        ]
 
     def _materialize(
         self,

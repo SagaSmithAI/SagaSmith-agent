@@ -12,7 +12,6 @@ from nanobot.agent.tools.base import Tool, tool_parameters
 from nanobot.agent.tools.context import current_request_context
 from nanobot.dnd.db.database import Database
 from nanobot.dnd.db.models import RuleChunk, RulePublication, RuleSet
-from nanobot.dnd.rules.embedding import BgeM3Embedder
 from nanobot.dnd.rules.ingest import ensure_bundled_rules_ingested
 from nanobot.dnd.rules.search import RuleSearchService
 from nanobot.dnd.vector.client import VectorStore
@@ -62,7 +61,7 @@ class DndRulesTool(Tool):
         self.database = database
         self._migrate = migrate
         self._ready = False
-        self.search_service = RuleSearchService(database, embedder=BgeM3Embedder())
+        self.search_service = RuleSearchService(database)
 
     @property
     def read_only(self) -> bool:

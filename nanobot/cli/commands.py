@@ -765,6 +765,13 @@ def _run_gateway(
     from nanobot.session.webui_turns import WebuiTurnCoordinator
     from nanobot.webui.token_usage import TokenUsageHook
 
+    os.environ.setdefault("DND_EMBEDDING_MODE", config.embedding.mode)
+    os.environ.setdefault(
+        "DND_EMBEDDING_PROFILES", ",".join(config.embedding.profiles)
+    )
+    os.environ.setdefault(
+        "DND_EMBEDDING_BATCH_SIZE", str(config.embedding.batch_size)
+    )
     port = port if port is not None else config.gateway.port
 
     console.print(f"{__logo__} Starting nanobot gateway version {__version__} on port {port}...")

@@ -49,6 +49,16 @@ class TranscriptionConfig(Base):
     max_upload_mb: int = Field(default=25, ge=1, le=100)
 
 
+class EmbeddingConfig(Base):
+    """D&D retrieval embedding choices; device and model are independent."""
+
+    mode: Literal["auto", "cpu", "gpu"] = "auto"
+    profiles: list[
+        Literal["bge_m3", "bge_small_zh_v1_5", "bge_small_en_v1_5"]
+    ] = Field(default_factory=lambda: ["bge_m3"], min_length=1)
+    batch_size: int = Field(default=8, ge=1, le=128)
+
+
 class DreamConfig(Base):
     """Dream memory consolidation configuration."""
 
@@ -347,6 +357,7 @@ class Config(BaseSettings):
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
     transcription: TranscriptionConfig = Field(default_factory=TranscriptionConfig)
+    embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     api: ApiConfig = Field(default_factory=ApiConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)

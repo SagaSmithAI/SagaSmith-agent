@@ -13,10 +13,9 @@ from nanobot.agent.tools.context import current_request_context
 from nanobot.dnd.db.database import Database
 from nanobot.dnd.db.models import ModuleChunk, ModuleSource
 from nanobot.dnd.db.module_content import ModuleImportService
-from nanobot.dnd.vector.client import VectorStore
 from nanobot.dnd.db.module_progress import ModuleProgressService
 from nanobot.dnd.modules.search import ModuleSearchService
-from nanobot.dnd.rules.embedding import BgeM3Embedder
+from nanobot.dnd.vector.client import VectorStore
 
 
 @tool_parameters(
@@ -72,10 +71,9 @@ class DndModuleTool(Tool):
         self.database = database
         self._migrate = migrate
         self._ready = False
-        embedder = BgeM3Embedder()
-        self.import_service = ModuleImportService(database, embedder=embedder)
+        self.import_service = ModuleImportService(database)
         self.progress_service = ModuleProgressService(database)
-        self.search_service = ModuleSearchService(database, embedder=embedder)
+        self.search_service = ModuleSearchService(database)
 
     @property
     def read_only(self) -> bool:

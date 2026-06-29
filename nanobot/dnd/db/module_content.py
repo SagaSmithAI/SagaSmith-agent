@@ -8,7 +8,7 @@ import re
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, cast
+from typing import Any, Callable, cast
 
 from sqlalchemy import func, select
 
@@ -31,7 +31,7 @@ from nanobot.dnd.modules.scene_utils import (
     merge_bilingual_scenes,
     preamble_title,
 )
-from nanobot.dnd.rules.embedding import BgeM3Embedder, Embedder
+from nanobot.dnd.rules.embedding import BgeM3Embedder, Embedder, detect_text_language
 from nanobot.dnd.vector.client import VectorStore
 
 logger = logging.getLogger(__name__)
@@ -297,9 +297,9 @@ def _scenes(lines: list[str]) -> list[dict[str, object]]:
         pend = int(scenes[0]["start_line"]) - 1
         ptitle = preamble_title(lines, pend)
         pheadings = [
-            l.lstrip("# ").strip()
-            for l in lines[:pend]
-            if sub_prefix and l.startswith(sub_prefix)
+            line.lstrip("# ").strip()
+            for line in lines[:pend]
+            if sub_prefix and line.startswith(sub_prefix)
         ]
         scenes.insert(
             0,
@@ -512,8 +512,6 @@ class ModuleImportService:
         module_name = (name or source.stem if source.is_file() else name or source.name).strip()
         if not module_name:
             raise ModuleImportError("module name must not be empty")
-        embedder = self.embedder or (BgeM3Embedder(show_progress=True) if embed else None)
-
         digest = hashlib.sha256()
         parsed: list[_ChapterDocument] = []
         for fallback, path in enumerate(files, start=1):
@@ -538,6 +536,10 @@ class ModuleImportService:
                     )
                 )
         parsed.sort(key=lambda item: item.order_key)
+        language = detect_text_language("\n".join(item.content for item in parsed))
+        embedder = self.embedder or (
+            BgeM3Embedder(language=language, show_progress=True) if embed else None
+        )
         return self._finish_import(
             campaign_id, module_name, str(source), digest, parsed,
             embedder, embed, activate, actor_id,
@@ -689,13 +691,11 @@ class ModuleImportService:
             raise ModuleImportError("module name must not be empty")
         module_name = name.strip()
 
-        embedder = self.embedder or (BgeM3Embedder(show_progress=True) if embed else None)
-
         # Split text into chapters by H1 headings
         lines = text.splitlines()
         h1_positions = [
-            i for i, l in enumerate(lines)
-            if l.startswith("# ") and not l.startswith("## ")
+            i for i, line in enumerate(lines)
+            if line.startswith("# ") and not line.startswith("## ")
         ]
 
         if not h1_positions:
@@ -724,6 +724,10 @@ class ModuleImportService:
                 )
             )
         parsed.sort(key=lambda item: item.order_key)
+        language = detect_text_language(text)
+        embedder = self.embedder or (
+            BgeM3Embedder(language=language, show_progress=True) if embed else None
+        )
         return self._finish_import(
             campaign_id, module_name, str(source), digest, parsed,
             embedder, embed, activate, actor_id,
@@ -772,10 +776,15 @@ class ModuleImportService:
 
             model_row = None
             if embedder is not None:
-                model_row = session.get(EmbeddingModel, DEFAULT_EMBEDDING_MODEL_ID)
+                model_id = getattr(
+                    embedder,
+                    "model_id",
+                    f"embedding-{hashlib.sha256(embedder.model_name.encode()).hexdigest()[:16]}",
+                )
+                model_row = session.get(EmbeddingModel, model_id)
                 if model_row is None:
                     model_row = EmbeddingModel(
-                        id=DEFAULT_EMBEDDING_MODEL_ID,
+                        id=model_id,
                         provider="sentence-transformers",
                         model_name=embedder.model_name,
                         dimensions=embedder.dimensions,
@@ -801,6 +810,12 @@ class ModuleImportService:
                     "format": format_label,
                     "chapter_count": len(parsed),
                     "source_extensions": source_extensions or [".gen"],
+                    "embedding_model": embedder.model_name if embedder else None,
+                    "embedding_language": (
+                        getattr(getattr(embedder, "profile", None), "language", "unknown")
+                        if embedder
+                        else None
+                    ),
                 },
             )
             session.add(module)
@@ -1032,7 +1047,7 @@ class ModuleImportService:
         if chroma_enabled and chroma_batches and embedder is not None:
             try:
                 store = VectorStore()
-                coll = store.collection("dnd_modules")
+                coll = store.collection_for("dnd_modules", embedder.profile)
                 for batch in chroma_batches:
                     vectors = embedder.encode(batch["texts"])
                     ids = [row[0] for row in batch["rows"]]
@@ -1148,7 +1163,6 @@ class ModuleImportService:
                 ).all()
                 for chapter in chapters:
                     content = chapter.content
-                    lines = content.splitlines(keepends=True)
                     raw_lines = content.splitlines()
                     parsed = _parse_scene_index(raw_lines)
                     store_key = f"{module.name}:{chapter.title}"

@@ -10,7 +10,13 @@ import numpy as np
 from sqlalchemy import func, or_, select
 
 from nanobot.dnd.db.database import Database
-from nanobot.dnd.db.models import ModuleChapter, ModuleChunk, ModuleSource, SceneIndex
+from nanobot.dnd.db.models import (
+    EmbeddingModel,
+    ModuleChapter,
+    ModuleChunk,
+    ModuleSource,
+    SceneIndex,
+)
 from nanobot.dnd.rules.embedding import BgeM3Embedder, Embedder
 from nanobot.dnd.vector.client import VectorStore
 from nanobot.dnd.vector.search import chroma_dense_search
@@ -46,7 +52,7 @@ class ModuleSearchService:
     def __init__(self, database: Database, *, embedder: Embedder | None = None) -> None:
         self.database = database
         self.embedder = embedder
-        self._dense_cache: dict[str, tuple[list[str], np.ndarray]] = {}
+        self._dense_cache: dict[tuple[str, str], tuple[list[str], np.ndarray]] = {}
 
     def clear_cache(self) -> None:
         """Invalidate the in-memory dense-vector cache."""
@@ -81,10 +87,16 @@ class ModuleSearchService:
             dense_ids: list[str] = []
             dense_scores: dict[str, float] = {}
             if dense:
-                embedder = self.embedder or BgeM3Embedder()
+                embedder, model_id = self._embedder_for_chunks(session, allowed)
                 vector = embedder.encode([query])[0]
                 dense_ids, dense_scores = self._dense_ids(
-                    session, vector, campaign_id, allowed, limit=max(top_k * 10, 50)
+                    session,
+                    vector,
+                    campaign_id,
+                    allowed,
+                    model_id=model_id,
+                    embedder=embedder,
+                    limit=max(top_k * 10, 50),
                 )
 
             scores: dict[str, float] = {}
@@ -166,6 +178,8 @@ class ModuleSearchService:
         campaign_id: str,
         allowed: list[str],
         *,
+        model_id: str,
+        embedder: Embedder,
         limit: int,
     ) -> tuple[list[str], dict[str, float]]:
         # ── ChromaDB path ──────────────────────────────────────────
@@ -174,6 +188,7 @@ class ModuleSearchService:
                 "dnd_modules",
                 query_vector,
                 {"campaign_id": campaign_id},
+                profile=embedder.profile,
                 limit=limit,
             )
             # Post-filter: only return chunks that also exist in the
@@ -188,12 +203,14 @@ class ModuleSearchService:
             return ordered, scores
 
         # ── SQLite / PostgreSQL numpy brute-force path ─────────────
-        cached = self._dense_cache.get(campaign_id)
+        cache_key = (campaign_id, model_id)
+        cached = self._dense_cache.get(cache_key)
         if cached is None:
             rows = list(
                 session.execute(
                     select(ModuleChunk.id, ModuleChunk.embedding_json).where(
                         ModuleChunk.id.in_(allowed),
+                        ModuleChunk.embedding_model_id == model_id,
                         ModuleChunk.embedding_json.is_not(None),
                     )
                 )
@@ -201,7 +218,7 @@ class ModuleSearchService:
             chunk_ids = [str(row[0]) for row in rows]
             matrix = np.asarray([row[1] for row in rows], dtype=np.float32)
             cached = (chunk_ids, matrix)
-            self._dense_cache[campaign_id] = cached
+            self._dense_cache[cache_key] = cached
         chunk_ids, matrix = cached
         if matrix.size == 0:
             return [], {}
@@ -214,6 +231,41 @@ class ModuleSearchService:
         return ordered, {
             chunk_ids[int(index)]: float(scores[int(index)]) for index in indexes
         }
+
+    def _embedder_for_chunks(
+        self,
+        session,
+        allowed: list[str],
+    ) -> tuple[Embedder, str]:
+        rows = list(
+            session.scalars(
+                select(EmbeddingModel)
+                .join(ModuleChunk, ModuleChunk.embedding_model_id == EmbeddingModel.id)
+                .where(ModuleChunk.id.in_(allowed))
+                .distinct()
+            )
+        )
+        if len(rows) > 1:
+            raise ModuleSearchError(
+                "active module contains multiple embedding models; rebuild it with one profile"
+            )
+        if self.embedder is not None:
+            if rows and (
+                rows[0].model_name != self.embedder.model_name
+                or rows[0].dimensions != self.embedder.dimensions
+            ):
+                raise ModuleSearchError(
+                    "query embedder does not match the model used to build this module index"
+                )
+            return self.embedder, (
+                rows[0].id
+                if rows
+                else getattr(self.embedder, "model_id", "embedding-bge-m3")
+            )
+        if rows:
+            return BgeM3Embedder(model_name=rows[0].model_name), rows[0].id
+        embedder = BgeM3Embedder()
+        return embedder, embedder.model_id
 
     @staticmethod
     def _materialize(

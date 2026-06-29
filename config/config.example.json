@@ -34,6 +34,13 @@
       }
     }
   },
+  "embedding": {
+    "mode": "auto",
+    "profiles": [
+      "bge_m3"
+    ],
+    "batchSize": 8
+  },
   "channels": {
     "sendProgress": true,
     "sendToolHints": false,

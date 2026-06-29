@@ -11,7 +11,14 @@ from sqlalchemy import select
 from nanobot.dnd.db.database import Database
 from nanobot.dnd.db.memory import CampaignMemoryService
 from nanobot.dnd.db.models.runtime import CampaignMemory, CampaignMemoryRevision
-from nanobot.dnd.rules.embedding import BgeM3Embedder
+from nanobot.dnd.rules.embedding import (
+    BgeM3Embedder,
+    EmbeddingProfile,
+    collection_name,
+    configured_profiles,
+    detect_text_language,
+    profile_for_language,
+)
 from nanobot.dnd.vector.client import VectorStore
 
 COLLECTION_NAME = "dnd_campaign_memories"
@@ -99,11 +106,18 @@ class CampaignMemorySearchService:
         if not self.vector_store.enabled:
             return 0
         if campaign_id:
-            self.vector_store.collection(COLLECTION_NAME).delete(
-                where={"campaign_id": campaign_id}
-            )
+            for profile in self._profiles():
+                self._collection(profile).delete(where={"campaign_id": campaign_id})
         else:
-            self.vector_store.drop_collection(COLLECTION_NAME)
+            for profile in self._profiles():
+                self.vector_store.drop_collection(
+                    (
+                        collection_name(COLLECTION_NAME, profile)
+                        if hasattr(self.vector_store, "collection_for")
+                        and self.embedder is None
+                        else COLLECTION_NAME
+                    )
+                )
         with self.database.transaction() as session:
             statement = (
                 select(CampaignMemoryRevision, CampaignMemory)
@@ -124,23 +138,44 @@ class CampaignMemorySearchService:
     def index_rows(self, rows: list[dict[str, Any]]) -> int:
         if not rows or not self.vector_store.enabled:
             return 0
-        texts = [_embedding_text(row) for row in rows]
-        vectors = self._embedder().encode(texts)
-        collection = self.vector_store.collection(COLLECTION_NAME)
-        collection.upsert(
-            ids=[str(row["revision_id"]) for row in rows],
-            embeddings=vectors,
-            documents=texts,
-            metadatas=[_metadata(row) for row in rows],
-        )
+        grouped: dict[EmbeddingProfile, list[dict[str, Any]]] = {}
+        if self.embedder is not None:
+            grouped[next(iter(self._profiles()))] = rows
+        else:
+            for row in rows:
+                text = _embedding_text(row)
+                profile = profile_for_language(detect_text_language(text))
+                grouped.setdefault(profile, []).append(row)
+        for profile, profile_rows in grouped.items():
+            texts = [_embedding_text(row) for row in profile_rows]
+            embedder = self.embedder or BgeM3Embedder(profile=profile)
+            vectors = embedder.encode(texts)
+            self._collection(profile).upsert(
+                ids=[str(row["revision_id"]) for row in profile_rows],
+                embeddings=vectors,
+                documents=texts,
+                metadatas=[_metadata(row) for row in profile_rows],
+            )
         return len(rows)
 
     def status(self) -> dict[str, Any]:
         return {
             "enabled": self.vector_store.enabled,
-            "collection": self.vector_store.collection_stats(COLLECTION_NAME)
-            if self.vector_store.enabled
-            else None,
+            "collections": (
+                [
+                    self.vector_store.collection_stats(
+                        (
+                            collection_name(COLLECTION_NAME, profile)
+                            if hasattr(self.vector_store, "collection_for")
+                            and self.embedder is None
+                            else COLLECTION_NAME
+                        )
+                    )
+                    for profile in self._profiles()
+                ]
+                if self.vector_store.enabled
+                else []
+            ),
         }
 
     def _dense_scores(
@@ -148,14 +183,17 @@ class CampaignMemorySearchService:
         query: str,
         rows: list[dict[str, Any]],
     ) -> list[tuple[float, dict[str, Any]]]:
-        collection = self.vector_store.collection(COLLECTION_NAME)
+        profile = next(iter(self._profiles())) if self.embedder else profile_for_language(
+            detect_text_language(query)
+        )
+        collection = self._collection(profile)
         ids = [str(row["revision_id"]) for row in rows]
         result = collection.get(ids=ids, include=["embeddings"])
         returned_ids = [str(value) for value in result.get("ids") or []]
         embeddings = result.get("embeddings")
         if embeddings is None:
             return self._lexical_scores(query, rows)
-        query_vector = self._embedder().encode([query])[0]
+        query_vector = (self.embedder or BgeM3Embedder(profile=profile)).encode([query])[0]
         row_by_id = {str(row["revision_id"]): row for row in rows}
         scored = [
             (_cosine(query_vector, vector), row_by_id[revision_id])
@@ -195,10 +233,18 @@ class CampaignMemorySearchService:
         )
         return scored
 
-    def _embedder(self) -> Embedder:
-        if self.embedder is None:
-            self.embedder = BgeM3Embedder()
-        return self.embedder
+    def _profiles(self) -> tuple[EmbeddingProfile, ...]:
+        if self.embedder is not None:
+            profile = getattr(self.embedder, "profile", None)
+            if profile is None:
+                profile = profile_for_language("en")
+            return (profile,)
+        return configured_profiles()
+
+    def _collection(self, profile: EmbeddingProfile):
+        if hasattr(self.vector_store, "collection_for") and self.embedder is None:
+            return self.vector_store.collection_for(COLLECTION_NAME, profile)
+        return self.vector_store.collection(COLLECTION_NAME)
 
 
 def _joined_revision_row(
