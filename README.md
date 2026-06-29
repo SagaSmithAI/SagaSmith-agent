@@ -1,15 +1,15 @@
-# 🐉 SagaSmith
+# 🐉 SagaSmith Agent
 
 [中文](README.md) | [English](README-en.md)
 
 <p align="center"><img src="images/Sagasmith.png" alt="SagaSmith" width="200"></p>
 
-**自主 D&D 5e AI 地下城主** — 战役管理 · 模组生成 · 自主带团
+**自主 AI 地下城主运行时** — 基于 [NanoBot](https://github.com/HKUDS/nanobot) 构建，具备完整 D&D 5e DM 能力。
 
 > *"规则书为经文，模组为地图，骰子为审判官。"*  
 > — 明萨拉·班瑞，SagaSmith 默认 DM
 
-SagaSmith 是一个跨平台 AI 跑团主持人运行时。它把完整的 D&D 5e DM 能力——战役生命周期管理、SRD 规则裁判、模组自动生成、角色创建与升级——打包为可安装的 AI agent，支持 NanoBot / OpenClaw / Hermes / Claude Code 等任意兼容 SKILL.md 标准的平台。
+SagaSmith Agent 是一个完整的、可运行的 AI DM 系统。连接 QQ (NapCat)、Telegram 或 WebSocket——玩家在聊天中发送消息，DM 负责响应。后端由 SQLite/PostgreSQL 战役数据库、ChromaDB 向量库（可选）、BGE-M3 规则检索引擎、d20 战斗引擎，以及守序邪恶的卓尔 DM 人格驱动。
 
 ---
 
@@ -27,11 +27,15 @@ SagaSmith 是一个跨平台 AI 跑团主持人运行时。它把完整的 D&D 5
 
 大多数 D&D AI 工具只做一件事：掷骰、查规则、或者写一段描述。SagaSmith 是**完整的 DM**：
 
-- 🏛️ **战役管理** — SQLite/PostgreSQL 数据库驱动，完整的 campaign CRUD、Snapshot 存档/读档/校验/撤销、事件日志、模组进度追踪
-- 🎲 **规则裁判** — BGE-M3 Dense Vector 检索 SRD 5.2.1（20 个规则文件，CC-BY-4.0），精确+全文+语义混合搜索
-- ✍️ **模组生成** — 5 种类型（one-shot / short / medium / long / sandbox）× 25 种叙事范式，多步渐进生成，自动入库
-- ⚔️ **战斗引擎** — d20 真实掷骰、先攻/回合/命中/伤害/豁免计算、XP 与升级
-- 🎭 **明萨拉人格** — 守序邪恶 DM，严格但不失冷幽默，从不放水、从不泄露隐藏信息
+| 系统 | 描述 |
+|------|------|
+| 🎲 **规则引擎** | BGE-M3 Dense Vector 检索，8,000+ SRD 规则块，3 层混合搜索（精确 + FTS + 语义）。ChromaDB HNSW 加速，numpy/pgvector 降级方案。惰性自动摄入。 |
+| ⚔️ **战斗引擎** | 真实 d20 掷骰、先攻/命中/伤害/豁免/暴击、回合追踪、XP 计算 |
+| 🏛️ **战役管理** | 青铜龙的时间线修正器——SQLite/PostgreSQL 驱动，DAG 存档树（任意分支读档）、Snapshot 存档/读档/校验、战役记忆（per-branch revision 模型）、ChromaDB 向量语义搜索、事件日志、模组进度追踪 |
+| 📖 **模组管理** | PDF/HTML/DOCX 导入、结构感知分块、场景索引、Dense 检索 |
+| 🧠 **战役记忆** | 分支感知长期记忆——事实身份稳定，每个存档分支有独立 revision。自然语言查询，沿 DAG 祖先路径精准计算有效记忆，兄弟分支互不串线。 |
+| 🎭 **明萨拉人格** | 守序邪恶 DM，2024 规则绝对主义，冷幽默，绝不泄露隐藏信息 |
+| 💬 **多平台接入** | 16 个聊天平台（QQ/Telegram/Discord/Slack/飞书/WhatsApp/Matrix/Signal...）|
 
 ---
 
@@ -257,31 +261,41 @@ SagaSmith 通过 channels 接入各大聊天平台。**私聊**直接响应；**
 
 ---
 
-## 快速安装
+## 快速开始
 
-### Claude Code / Codex / Cursor / Copilot（推荐）
+```powershell
+# 1. 安装（uv 管理）
+uv sync
 
-```bash
-npx skills add dajiaohuang/SagaSmith-skills
+# 2. 初始化工作区 + 自动发现平台
+uv run nanobot onboard --wizard
+
+# 3. SRD 在首次规则访问时自动摄入——无需手动 CLI
+#    可选：预摄入
+uv run python -m nanobot.dnd.db.cli rules ingest-srd
+
+# 4. （可选）启用 ChromaDB 加速向量搜索
+$env:CHROMA_DB_PATH = "$env:APPDATA\nanobot\dnd\chroma_db"
+
+# 5. 启动网关 + QQ
+.\scripts\start-all.bat
 ```
 
-### ClawHub
+WebUI 地址：`http://127.0.0.1:18765`。
 
-```bash
-npx clawhub install sagasmith
-```
+---
 
-### 手动安装（NanoBot）
+## 规则集
 
-```bash
-git clone https://github.com/dajiaohuang/SagaSmith-skills.git
-cp -r SagaSmith-skills/skills/*    ~/.nanobot/skills/
-cp -r SagaSmith-skills/templates/* ~/.nanobot/templates/
-cp -r SagaSmith-skills/tools/*.py  ~/.nanobot/agent/tools/
-cp -r SagaSmith-skills/domain/*    ~/.nanobot/dnd/
-cp -r SagaSmith-skills/data/srd    ~/.nanobot/dnd/data/srd/
-python -m <domain-cli> rules ingest-srd
-```
+内置 3 套规则集，首次访问规则时自动摄入（惰性，无需手动 CLI）：
+
+| 规则集 ID | 版本 | 语言 | 规则块数 | 来源 |
+|---|---|---|---|---|
+| `dnd5e-2024-srd-5.2.1` | 2024 | EN | 2,684 | 内置 SRD 5.2.1 |
+| `dnd5e-2014-srd-5.1-en` | 2014 | EN | 3,524 | 内置 SRD 5.1 |
+| `dnd5e-2014-srd-5.1-zh-v2` | 2014 | ZH-CN | ~2,000 | 内置中文翻译 |
+
+启用 ChromaDB 时（`CHROMA_DB_PATH` 或 `CHROMA_DB_URL`），向量通过 HNSW 索引存储。
 
 ---
 
@@ -318,33 +332,48 @@ python -m <domain-cli> rules ingest-srd
 
 ---
 
-## 目录结构
+## 架构
 
 ```
-SagaSmith-skills/
-├── skills/                     # 3 个 Skill（纯 Markdown，跨平台）
-│   ├── dnd-dm/                 #   核心 DM + 20 个 SRD 文件
-│   ├── dnd-campaign-manager/   #   战役管理 + 数据库约定
-│   └── dnd-module-gen/         #   模组生成
-├── templates/                  # DM 人格模板
-│   ├── SOUL.md                 #   明萨拉·班瑞人格
-│   ├── IDENTITY.md             #   身份约束与规则源
-│   ├── AGENTS.md               #   会话启动协议
-│   ├── agent/identity.md       #   运行时 identity 注入
-│   └── memory/MEMORY.md        #   长期记忆模板
-├── tools/                      # Agent 工具（Python）
-│   ├── dnd_campaign.py         #   战役 CRUD + 一键开团
-│   ├── dnd_save.py             #   存档管理
-│   ├── dnd_memory.py           #   分支记忆范围与自然语言检索
-│   ├── dnd_module.py           #   模组导入/检索/场景进度
-│   └── dnd_rules.py            #   规则混合检索（精确 + FTS + Dense）
-├── domain/                     # 业务逻辑（纯 Python，零框架依赖）
-│   ├── db/                     #   SQLAlchemy ORM + Service + Alembic 迁移
-│   ├── modules/                #   模组分块、PDF 解析、场景索引
-│   ├── rules/                  #   BGE-M3 嵌入、Markdown 解析、规则摄入
-│   └── engine/                 #   骰子、检定、战斗结算、XP、模板工厂
-├── data/srd/                   # SRD 5.2.1 英文源文件（20 × CC-BY-4.0）
-└── data/srd-zh/                # SRD 中文翻译（可选子模块）
+QQ / Telegram / Discord / Slack / Feishu / WhatsApp / Matrix ...
+        │
+        ▼
+NanoBot Runtime  (Provider · Agent Loop · Session · Memory · 19 Channels)
+        │
+        ▼
+D&D Adapter       (dnd_rules search · dnd-engine calc · Campaign DB · Memory Search)
+        │
+        ├── SQLite / PostgreSQL  (Rule index · Campaign state · Snapshot DAG · Memory revisions)
+        └── ChromaDB (optional)   (HNSW vector index · dnd_rules + dnd_memories collections)
+```
+
+---
+
+## 上下文管理
+
+| 机制 | 描述 |
+|------|------|
+| Session JSONL | 实时对话日志 |
+| Auto-Compact | Token 预算达到 30% 时触发压缩 |
+| Dream (每 2 小时) | 长期记忆摘要 → MEMORY.md |
+
+---
+
+## 项目结构
+
+```
+SagaSmith-agent/
+├── nanobot/                   # Agent 运行时
+│   ├── agent/                 #   Agent Loop · Context · Memory · Runner
+│   ├── channels/              #   19 个平台接入（QQ/Telegram/Discord/...）
+│   ├── dnd/                   #   D&D 适配器（rules · db · engine · modules）
+│   ├── skills/                #   dnd-dm · dnd-campaign-manager · napcat-qq
+│   └── templates/             #   系统提示模板（identity · SOUL · platform）
+├── scripts/                   # 启动脚本
+│   ├── start-all.bat          #   一键启动（uv 管理）
+│   └── install.ps1            #   安装脚本
+├── tests/                     # 测试
+└── pyproject.toml             # uv 项目配置
 ```
 
 ---
@@ -360,23 +389,13 @@ SagaSmith-skills/
 
 ---
 
-## 注册表
-
-[![ClawHub](https://img.shields.io/badge/ClawHub-sagasmith-blue)](https://clawhub.ai)
-[![skills.sh](https://img.shields.io/badge/skills.sh-dajiaohuang%2FSagaSmith--skill-green)](https://skills.sh)
-[![License](https://img.shields.io/badge/license-MIT-orange)](LICENSE)
-[![SRD](https://img.shields.io/badge/SRD_5.2.1-CC--BY--4.0-lightgrey)](https://creativecommons.org/licenses/by/4.0/)
-
-已发布至 **ClawHub**、**skills.sh**（72 agent 兼容）。  
-LobeHub 可通过 [agentskill.sh/submit](https://agentskill.sh/submit) 提交。
-
----
-
 ## 致谢
 
 - [ackiles/dnd-dm-skill](https://github.com/ackiles/dnd-dm-skill) — D&D DM skill 先驱，SagaSmith 的灵感与设计参考
+- [NanoBot](https://github.com/HKUDS/nanobot) — 轻量级 AI agent 框架
 - [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) — SKILL.md 生态标准推动者
 - D&D 5e SRD 5.2.1 © Wizards of the Coast，以 [CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/) 授权使用
+- [SagiriWWW/DND.SRD.zh-CN](https://github.com/SagiriWWW/DND.SRD.zh-CN) — D&D 5e SRD 5.1 中文翻译
 
 ---
 

@@ -1,15 +1,15 @@
-# 🐉 SagaSmith
+# 🐉 SagaSmith Agent
 
 [中文](README.md) | [English](README-en.md)
 
 <p align="center"><img src="images/Sagasmith.png" alt="SagaSmith" width="200"></p>
 
-**Autonomous D&D 5e AI Dungeon Master** — campaign management · module generation · autonomous DMing
+**Autonomous AI Dungeon Master runtime** — built on [NanoBot](https://github.com/HKUDS/nanobot), with full D&D 5e DM capabilities.
 
 > *"The rulebooks are scripture, the module is the map, the dice are the judge."*  
 > — Minthara Baenre, SagaSmith default DM
 
-SagaSmith is a cross-platform AI DM runtime. It bundles complete D&D 5e DM capabilities — campaign lifecycle management, SRD rule adjudication, automatic module generation, character creation & leveling — into an installable AI agent, compatible with NanoBot, OpenClaw, Hermes, Claude Code, and any platform supporting the SKILL.md standard.
+SagaSmith Agent is a complete, runnable AI DM system. Connect QQ (NapCat), Telegram, or WebSocket — players send messages in chat, the DM responds. Backed by a SQLite/PostgreSQL campaign database, ChromaDB vector store (optional), BGE-M3 rule search engine, d20 combat engine, and a Lawful Evil drow DM persona.
 
 ---
 
@@ -27,11 +27,15 @@ SagaSmith is a cross-platform AI DM runtime. It bundles complete D&D 5e DM capab
 
 Most D&D AI tools do one thing: roll dice, look up a rule, or write a paragraph. SagaSmith is the **full DM**:
 
-- 🏛️ **Campaign Management** — SQLite/PostgreSQL-backed, full campaign CRUD, Snapshot save/load/verify/undo, event log, module progress tracking
-- 🎲 **Rule Adjudication** — BGE-M3 Dense Vector search over SRD 5.2.1 (20 rule files, CC-BY-4.0), exact-name + full-text + semantic hybrid retrieval
-- ✍️ **Module Generation** — 5 types (one-shot / short / medium / long / sandbox) × 25 narrative paradigms, multi-step progressive generation, auto-import into database
-- ⚔️ **Combat Engine** — True d20 rolls, initiative/turn/hit/damage/save calculation, XP & leveling
-- 🎭 **Minthara Persona** — Lawful Evil DM, strict yet cold-humored, never pulls punches, never leaks hidden info
+| System | Description |
+|--------|-------------|
+| 🎲 **Rule Engine** | BGE-M3 Dense Vector over 8,000+ SRD chunks across 3 editions. 3-layer hybrid (exact + FTS + semantic). ChromaDB HNSW when configured, numpy/pgvector fallback. Auto-ingest on first use. |
+| ⚔️ **Combat Engine** | True d20 rolls, initiative/hit/damage/save/crit, turn tracking, XP |
+| 🏛️ **Campaign Management** | Bronze Dragon's Timeline Corrector — SQLite/PostgreSQL-backed, DAG save tree (branch-aware loading), Snapshot save/load/verify, campaign memory (per-branch revision model), ChromaDB vector semantic search, event log, module progress tracking |
+| 📖 **Module Mgmt** | PDF/HTML/DOCX import, structure-aware chunking, scene index, Dense retrieval |
+| 🧠 **Campaign Memory** | Branch-aware long-term memory — stable fact identities, independent revisions per save branch. Natural language query, exact effective memory calculation along DAG ancestor path, no cross-branch leakage. |
+| 🎭 **Minthara Persona** | Lawful Evil DM, 2024-rules absolutist, cold wit, never leaks hidden info |
+| 💬 **Multi-Channel** | 16 chat platforms (QQ/Telegram/Discord/Slack/Feishu/WhatsApp/Matrix/Signal...) |
 
 ---
 
@@ -258,31 +262,41 @@ SagaSmith connects to major chat platforms via channels. **DM** responds directl
 
 ---
 
-## Quick Install
+## Quick Start
 
-### Claude Code / Codex / Cursor / Copilot (recommended)
+```powershell
+# 1. Install (uv-managed)
+uv sync
 
-```bash
-npx skills add dajiaohuang/SagaSmith-skills
+# 2. Initialize workspace + auto-discover platforms
+uv run nanobot onboard --wizard
+
+# 3. SRD auto-ingested on first rules access — no manual CLI needed
+#    Optional: pre-ingest
+uv run python -m nanobot.dnd.db.cli rules ingest-srd
+
+# 4. (Optional) Enable ChromaDB for fast vector search
+$env:CHROMA_DB_PATH = "$env:APPDATA\nanobot\dnd\chroma_db"
+
+# 5. Launch gateway + QQ
+.\scripts\start-all.bat
 ```
 
-### ClawHub
+WebUI at `http://127.0.0.1:18765`.
 
-```bash
-npx clawhub install sagasmith
-```
+---
 
-### Manual (NanoBot)
+## Rule Sets
 
-```bash
-git clone https://github.com/dajiaohuang/SagaSmith-skills.git
-cp -r SagaSmith-skills/skills/*    ~/.nanobot/skills/
-cp -r SagaSmith-skills/templates/* ~/.nanobot/templates/
-cp -r SagaSmith-skills/tools/*.py  ~/.nanobot/agent/tools/
-cp -r SagaSmith-skills/domain/*    ~/.nanobot/dnd/
-cp -r SagaSmith-skills/data/srd    ~/.nanobot/dnd/data/srd/
-python -m <domain-cli> rules ingest-srd
-```
+Three rule sets bundled and auto-ingested on first rules access (lazy, no manual CLI):
+
+| Rule Set ID | Edition | Locale | Chunks | Source |
+|---|---|---|---|---|
+| `dnd5e-2024-srd-5.2.1` | 2024 | EN | 2,684 | Bundled SRD 5.2.1 |
+| `dnd5e-2014-srd-5.1-en` | 2014 | EN | 3,524 | Bundled SRD 5.1 |
+| `dnd5e-2014-srd-5.1-zh-v2` | 2014 | ZH-CN | ~2,000 | Bundled Chinese translation |
+
+With ChromaDB configured (`CHROMA_DB_PATH` or `CHROMA_DB_URL`), vectors are stored via HNSW indexing.
 
 ---
 
@@ -319,33 +333,48 @@ Default campaign: *Baldur's Gate: Descent into Avernus*. Adaptable to any advent
 
 ---
 
-## Directory Structure
+## Architecture
 
 ```
-SagaSmith-skills/
-├── skills/                     # 3 Skills (pure Markdown, cross-platform)
-│   ├── dnd-dm/                 #   Core DM + 20 SRD files
-│   ├── dnd-campaign-manager/   #   Campaign management + DB contract
-│   └── dnd-module-gen/         #   Module generation
-├── templates/                  # DM persona templates
-│   ├── SOUL.md                 #   Minthara Baenre persona
-│   ├── IDENTITY.md             #   Identity constraints & rule sources
-│   ├── AGENTS.md               #   Session startup protocol
-│   ├── agent/identity.md       #   Runtime identity injection
-│   └── memory/MEMORY.md        #   Long-term memory template
-├── tools/                      # Agent tools (Python)
-│   ├── dnd_campaign.py         #   Campaign CRUD + one-shot start
-│   ├── dnd_save.py             #   Snapshot management
-│   ├── dnd_memory.py           #   Branch scopes and natural-language memory search
-│   ├── dnd_module.py           #   Module import/search/scene progress
-│   └── dnd_rules.py            #   Hybrid rule search (exact + FTS + Dense)
-├── domain/                     # Business logic (pure Python, zero framework deps)
-│   ├── db/                     #   SQLAlchemy ORM + Service + Alembic migrations
-│   ├── modules/                #   Module chunking, PDF parsing, scene indexing
-│   ├── rules/                  #   BGE-M3 embeddings, Markdown parsing, rule ingestion
-│   └── engine/                 #   Dice, checks, combat resolution, XP, template factory
-├── data/srd/                   # SRD 5.2.1 English source files (20 × CC-BY-4.0)
-└── data/srd-zh/                # SRD Chinese translation (optional submodule)
+QQ / Telegram / Discord / Slack / Feishu / WhatsApp / Matrix ...
+        │
+        ▼
+NanoBot Runtime  (Provider · Agent Loop · Session · Memory · 19 Channels)
+        │
+        ▼
+D&D Adapter       (dnd_rules search · dnd-engine calc · Campaign DB · Memory Search)
+        │
+        ├── SQLite / PostgreSQL  (Rule index · Campaign state · Snapshot DAG · Memory revisions)
+        └── ChromaDB (optional)   (HNSW vector index · dnd_rules + dnd_memories collections)
+```
+
+---
+
+## Context Management
+
+| Mechanism | Description |
+|-----------|-------------|
+| Session JSONL | Real-time conversation log |
+| Auto-Compact | Triggers at 30% token budget |
+| Dream (every 2h) | Long-term memory summary → MEMORY.md |
+
+---
+
+## Project Structure
+
+```
+SagaSmith-agent/
+├── nanobot/                   # Agent runtime
+│   ├── agent/                 #   Agent Loop · Context · Memory · Runner
+│   ├── channels/              #   19 platforms (QQ/Telegram/Discord/...)
+│   ├── dnd/                   #   D&D adapter (rules · db · engine · modules)
+│   ├── skills/                #   dnd-dm · dnd-campaign-manager · napcat-qq
+│   └── templates/             #   System prompt templates (identity · SOUL · platform)
+├── scripts/                   # Launch scripts
+│   ├── start-all.bat          #   One-click launch (uv-managed)
+│   └── install.ps1            #   Setup script
+├── tests/                     # Tests
+└── pyproject.toml             # uv project config
 ```
 
 ---
@@ -361,23 +390,13 @@ SagaSmith-skills/
 
 ---
 
-## Registries
-
-[![ClawHub](https://img.shields.io/badge/ClawHub-sagasmith-blue)](https://clawhub.ai)
-[![skills.sh](https://img.shields.io/badge/skills.sh-dajiaohuang%2FSagaSmith--skill-green)](https://skills.sh)
-[![License](https://img.shields.io/badge/license-MIT-orange)](LICENSE)
-[![SRD](https://img.shields.io/badge/SRD_5.2.1-CC--BY--4.0-lightgrey)](https://creativecommons.org/licenses/by/4.0/)
-
-Published on **ClawHub** and **skills.sh** (72 agent compatible).  
-LobeHub: submit at [agentskill.sh/submit](https://agentskill.sh/submit).
-
----
-
 ## Credits
 
 - [ackiles/dnd-dm-skill](https://github.com/ackiles/dnd-dm-skill) — D&D DM skill pioneer, inspiration and design reference for SagaSmith
+- [NanoBot](https://github.com/HKUDS/nanobot) — Lightweight agent framework
 - [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) — SKILL.md ecosystem standard driver
 - D&D 5e SRD 5.2.1 © Wizards of the Coast, used under [CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/)
+- [SagiriWWW/DND.SRD.zh-CN](https://github.com/SagiriWWW/DND.SRD.zh-CN) — D&D 5e SRD 5.1 Chinese translation ([CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/))
 
 ---
 
