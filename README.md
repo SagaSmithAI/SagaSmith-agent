@@ -9,7 +9,7 @@
 > *"规则书为经文，模组为地图，骰子为审判官。"*  
 > — 明萨拉·班瑞，SagaSmith 默认 DM
 
-SagaSmith 是一个跨平台 AI 跑团主持人 skill 包。它把完整的 D&D 5e DM 能力——战役生命周期管理、SRD 规则裁判、模组自动生成、角色创建与升级——打包为可安装的 AI agent skill，支持 NanoBot / OpenClaw / Hermes / Claude Code 等任意兼容 SKILL.md 标准的平台。
+SagaSmith 是一个跨平台 AI 跑团主持人运行时。它把完整的 D&D 5e DM 能力——战役生命周期管理、SRD 规则裁判、模组自动生成、角色创建与升级——打包为可安装的 AI agent，支持 NanoBot / OpenClaw / Hermes / Claude Code 等任意兼容 SKILL.md 标准的平台。
 
 ---
 
@@ -17,8 +17,8 @@ SagaSmith 是一个跨平台 AI 跑团主持人 skill 包。它把完整的 D&D 
 
 | 仓库 | 定位 |
 |------|------|
-| 📦 **SagaSmith-skills**（本仓库） | 全家桶 skill 插件包 |
-| 🎲 [SagaSmith-agent](https://github.com/dajiaohuang/SagaSmith-agent) | 完整 AI DM 运行时 |
+| 🎲 **SagaSmith-agent**（本仓库） | 完整 AI DM 运行时 |
+| 📦 [SagaSmith-skills](https://github.com/dajiaohuang/SagaSmith-skills) | Skill 插件包 |
 | ✍️ [SagaSmith-module-gen-skills](https://github.com/dajiaohuang/SagaSmith-module-gen-skills) | 独立模组生成器 |
 
 ---
@@ -223,6 +223,37 @@ dnd_save action=restore campaign_id=<id> slot=3
 存档和读档只修改数据库中的战役状态、snapshot、recap 与 campaign memory，不会改写工作区文件或 `USER.md`。只有显式使用 `action=export` 时才会向指定路径写出 JSON 文件。
 
 本版 memory schema 是破坏性更新：迁移会重建旧版 `campaign_memories`，不会导入旧版可变 memory 数据。
+
+---
+
+## 支持平台
+
+SagaSmith 通过 channels 接入各大聊天平台。**私聊**直接响应；**群聊**默认需要 @机器人 才能触发（可配置为开放模式）。
+
+| 平台 | Channel | 私聊 | 群聊策略 | 备注 |
+|------|---------|:----:|----------|------|
+| Telegram | [telegram.py](nanobot/channels/telegram.py) | ✅ | mention（可配置 open） | 支持流式输出、inline keyboards |
+| Discord | [discord.py](nanobot/channels/discord.py) | ✅ | mention | Webhook 推送 |
+| Slack | [slack.py](nanobot/channels/slack.py) | ✅ | mention | |
+| 飞书 | [feishu.py](nanobot/channels/feishu.py) | ✅ | mention | 支持 emoji reaction |
+| QQ (Napcat) | [napcat.py](nanobot/channels/napcat.py) | ✅ | mention / open | OneBot v11 协议，WebSocket |
+| QQ (Bot) | [qq.py](nanobot/channels/qq.py) | ✅ | mention | botpy SDK |
+| 企业微信 | [wecom.py](nanobot/channels/wecom.py) | ✅ | mention | |
+| 个人微信 | [weixin.py](nanobot/channels/weixin.py) | ✅ | — | HTTP 长轮询 |
+| WhatsApp | [whatsapp.py](nanobot/channels/whatsapp.py) | ✅ | mention（可配置 open） | Bridge WebSocket |
+| Signal | [signal.py](nanobot/channels/signal.py) | ✅ | allowlist + mention | 支持 DM 和群组 |
+| Matrix | [matrix.py](nanobot/channels/matrix.py) | ✅ | mention | |
+| 钉钉 | [dingtalk.py](nanobot/channels/dingtalk.py) | ✅ | — | |
+| MoChat | [mochat.py](nanobot/channels/mochat.py) | ✅ | — | |
+| MS Teams | [msteams.py](nanobot/channels/msteams.py) | ✅ | — | |
+| Email | [email.py](nanobot/channels/email.py) | ✅ | — | IMAP/SMTP |
+| WebSocket | [websocket.py](nanobot/channels/websocket.py) | ✅ | — | 每连接独立 session，支持 Token 认证 |
+| WebUI | — | ✅ | — | 内置 Web 界面，WebSocket 直连 |
+
+**群聊说明：**
+- `mention`：需要 @机器人 或回复机器人消息才响应
+- `open`：所有消息都响应（可能产生噪音）
+- 私聊无限制，未授权用户会收到配对码
 
 ---
 

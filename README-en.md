@@ -9,7 +9,7 @@
 > *"The rulebooks are scripture, the module is the map, the dice are the judge."*  
 > — Minthara Baenre, SagaSmith default DM
 
-SagaSmith is a cross-platform AI DM skill pack. It bundles complete D&D 5e DM capabilities — campaign lifecycle management, SRD rule adjudication, automatic module generation, character creation & leveling — into an installable AI agent skill, compatible with NanoBot, OpenClaw, Hermes, Claude Code, and any platform supporting the SKILL.md standard.
+SagaSmith is a cross-platform AI DM runtime. It bundles complete D&D 5e DM capabilities — campaign lifecycle management, SRD rule adjudication, automatic module generation, character creation & leveling — into an installable AI agent, compatible with NanoBot, OpenClaw, Hermes, Claude Code, and any platform supporting the SKILL.md standard.
 
 ---
 
@@ -17,8 +17,8 @@ SagaSmith is a cross-platform AI DM skill pack. It bundles complete D&D 5e DM ca
 
 | Repo | Role |
 |------|------|
-| 📦 **SagaSmith-skills** (this repo) | Full skill pack (3 skills + domain code) |
-| 🎲 [SagaSmith-agent](https://github.com/dajiaohuang/SagaSmith-agent) | Complete AI DM runtime |
+| 🎲 **SagaSmith-agent** (this repo) | Complete AI DM runtime |
+| 📦 [SagaSmith-skills](https://github.com/dajiaohuang/SagaSmith-skills) | Skill plugin pack |
 | ✍️ [SagaSmith-module-gen-skills](https://github.com/dajiaohuang/SagaSmith-module-gen-skills) | Standalone module generator |
 
 ---
@@ -224,6 +224,37 @@ dnd_save action=restore campaign_id=<id> slot=3
 Save and restore operations modify campaign state, snapshots, recaps, and campaign memory in the database. They do not rewrite workspace files or `USER.md`. Only an explicit `action=export` writes a JSON file to the requested path.
 
 This memory schema is intentionally breaking: migration rebuilds the legacy `campaign_memories` table and does not import legacy mutable memory rows.
+
+---
+
+## Supported Platforms
+
+SagaSmith connects to major chat platforms via channels. **DM** responds directly; **Group** defaults to requiring @mention (configurable to open mode).
+
+| Platform | Channel | DM | Group Policy | Notes |
+|----------|---------|:--:|--------------|-------|
+| Telegram | [telegram.py](nanobot/channels/telegram.py) | ✅ | mention (configurable to open) | Streaming, inline keyboards |
+| Discord | [discord.py](nanobot/channels/discord.py) | ✅ | mention | Webhook push |
+| Slack | [slack.py](nanobot/channels/slack.py) | ✅ | mention | |
+| Feishu/Lark | [feishu.py](nanobot/channels/feishu.py) | ✅ | mention | Emoji reaction support |
+| QQ (Napcat) | [napcat.py](nanobot/channels/napcat.py) | ✅ | mention / open | OneBot v11, WebSocket |
+| QQ (Bot) | [qq.py](nanobot/channels/qq.py) | ✅ | mention | botpy SDK |
+| WeCom | [wecom.py](nanobot/channels/wecom.py) | ✅ | mention | |
+| WeChat (Personal) | [weixin.py](nanobot/channels/weixin.py) | ✅ | — | HTTP long-poll |
+| WhatsApp | [whatsapp.py](nanobot/channels/whatsapp.py) | ✅ | mention (configurable to open) | Bridge WebSocket |
+| Signal | [signal.py](nanobot/channels/signal.py) | ✅ | allowlist + mention | DM and group support |
+| Matrix | [matrix.py](nanobot/channels/matrix.py) | ✅ | mention | |
+| DingTalk | [dingtalk.py](nanobot/channels/dingtalk.py) | ✅ | — | |
+| MoChat | [mochat.py](nanobot/channels/mochat.py) | ✅ | — | |
+| MS Teams | [msteams.py](nanobot/channels/msteams.py) | ✅ | — | |
+| Email | [email.py](nanobot/channels/email.py) | ✅ | — | IMAP/SMTP |
+| WebSocket | [websocket.py](nanobot/channels/websocket.py) | ✅ | — | Per-connection session, Token auth |
+| WebUI | — | ✅ | — | Built-in web interface, WebSocket |
+
+**Group Policy Notes:**
+- `mention`: Requires @bot or reply to bot message
+- `open`: Responds to all messages (may cause noise)
+- DM has no restrictions; unauthorized users receive a pairing code
 
 ---
 
