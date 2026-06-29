@@ -27,15 +27,15 @@ SagaSmith Agent is a complete, runnable AI DM system. Connect QQ (NapCat), Teleg
 
 Most D&D AI tools do one thing: roll dice, look up a rule, or write a paragraph. SagaSmith is the **full DM**:
 
-| System | Description |
-|--------|-------------|
-| 🎲 **Rule Engine** | BGE-M3 Dense Vector over 8,000+ SRD chunks across 3 editions. 3-layer hybrid (exact + FTS + semantic). ChromaDB HNSW when configured, numpy/pgvector fallback. Auto-ingest on first use. |
-| ⚔️ **Combat Engine** | True d20 rolls, initiative/hit/damage/save/crit, turn tracking, XP |
-| 🏛️ **Campaign Management** | Bronze Dragon's Timeline Corrector — SQLite/PostgreSQL-backed, DAG save tree (branch-aware loading), Snapshot save/load/verify, campaign memory (per-branch revision model), ChromaDB vector semantic search, event log, module progress tracking |
-| 📖 **Module Mgmt** | PDF/HTML/DOCX import, structure-aware chunking, scene index, Dense retrieval |
-| 🧠 **Campaign Memory** | Branch-aware long-term memory — stable fact identities, independent revisions per save branch. Natural language query, exact effective memory calculation along DAG ancestor path, no cross-branch leakage. |
-| 🎭 **Minthara Persona** | Lawful Evil DM, 2024-rules absolutist, cold wit, never leaks hidden info |
-| 💬 **Multi-Channel** | 16 chat platforms (QQ/Telegram/Discord/Slack/Feishu/WhatsApp/Matrix/Signal...) |
+| Module | Core Capabilities |
+|--------|-------------------|
+| 🎲 **Rule Engine** | BGE-M3 Dense Vector · 8,000+ SRD chunks · 3-layer hybrid search (exact + FTS + semantic) · ChromaDB HNSW · numpy/pgvector fallback · lazy auto-ingest |
+| ⚔️ **Combat Engine** | True d20 rolls · initiative/hit/damage/save/crit · turn tracking · XP |
+| 🏛️ **Campaign Mgmt** | Bronze Dragon's Timeline Corrector — DAG save tree (branch-aware loads) · Snapshot save/load/verify · campaign memory (per-branch revision) · ChromaDB vector semantic search · event log · module progress tracking · Alembic migrations · SQLite/PostgreSQL dual backend |
+| 📖 **Module Mgmt** | PDF/HTML/DOCX import · structure-aware chunking · scene index · Dense retrieval |
+| 🧠 **Campaign Memory** | Branch-aware long-term memory — stable fact identities · per-branch independent revisions · natural language query · exact DAG ancestor path calculation · zero cross-branch leakage · ChromaDB vector acceleration |
+| 🎭 **Minthara Persona** | Lawful Evil DM · 2024 rules absolutist · cold wit · never leaks hidden info |
+| 💬 **Multi-Channel** | 16 chat platforms — QQ / Telegram / Discord / Slack / Feishu / WhatsApp / Matrix / Signal / DingTalk / WeCom / WeChat / MS Teams / MoChat / Email / WebSocket / WebUI |
 
 ---
 

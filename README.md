@@ -27,15 +27,15 @@ SagaSmith Agent 是一个完整的、可运行的 AI DM 系统。连接 QQ (NapC
 
 大多数 D&D AI 工具只做一件事：掷骰、查规则、或者写一段描述。SagaSmith 是**完整的 DM**：
 
-| 系统 | 描述 |
-|------|------|
-| 🎲 **规则引擎** | BGE-M3 Dense Vector 检索，8,000+ SRD 规则块，3 层混合搜索（精确 + FTS + 语义）。ChromaDB HNSW 加速，numpy/pgvector 降级方案。惰性自动摄入。 |
-| ⚔️ **战斗引擎** | 真实 d20 掷骰、先攻/命中/伤害/豁免/暴击、回合追踪、XP 计算 |
-| 🏛️ **战役管理** | 青铜龙的时间线修正器——SQLite/PostgreSQL 驱动，DAG 存档树（任意分支读档）、Snapshot 存档/读档/校验、战役记忆（per-branch revision 模型）、ChromaDB 向量语义搜索、事件日志、模组进度追踪 |
-| 📖 **模组管理** | PDF/HTML/DOCX 导入、结构感知分块、场景索引、Dense 检索 |
-| 🧠 **战役记忆** | 分支感知长期记忆——事实身份稳定，每个存档分支有独立 revision。自然语言查询，沿 DAG 祖先路径精准计算有效记忆，兄弟分支互不串线。 |
-| 🎭 **明萨拉人格** | 守序邪恶 DM，2024 规则绝对主义，冷幽默，绝不泄露隐藏信息 |
-| 💬 **多平台接入** | 16 个聊天平台（QQ/Telegram/Discord/Slack/飞书/WhatsApp/Matrix/Signal...）|
+| 模块 | 核心能力 |
+|------|----------|
+| 🎲 **规则引擎** | BGE-M3 Dense Vector · 8,000+ SRD 规则块 · 3 层混合搜索（精确 + FTS + 语义） · ChromaDB HNSW · numpy/pgvector 降级 · 惰性自动摄入 |
+| ⚔️ **战斗引擎** | 真实 d20 掷骰 · 先攻/命中/伤害/豁免/暴击 · 回合追踪 · XP 计算 |
+| 🏛️ **战役管理** | 青铜龙的时间线修正器 — DAG 存档树（任意分支读档）· Snapshot 存档/读档/校验 · 战役记忆（per-branch revision）· ChromaDB 向量语义搜索 · 事件日志 · 模组进度追踪 · Alembic 迁移 · SQLite/PostgreSQL 双后端 |
+| 📖 **模组管理** | PDF/HTML/DOCX 导入 · 结构感知分块 · 场景索引 · Dense 检索 |
+| 🧠 **战役记忆** | 分支感知长期记忆 — 事实身份稳定 · 每分支独立 revision · 自然语言查询 · DAG 祖先路径精准计算 · 兄弟分支零串线 · ChromaDB 向量加速 |
+| 🎭 **明萨拉人格** | 守序邪恶 DM · 2024 规则绝对主义 · 冷幽默 · 绝不泄露隐藏信息 |
+| 💬 **多平台接入** | 16 个聊天平台 — QQ / Telegram / Discord / Slack / 飞书 / WhatsApp / Matrix / Signal / 钉钉 / 企业微信 / 个人微信 / MS Teams / MoChat / Email / WebSocket / WebUI |
 
 ---
 
