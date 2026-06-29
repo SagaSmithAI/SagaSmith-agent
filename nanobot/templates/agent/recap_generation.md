@@ -72,7 +72,10 @@ Return a single JSON object (no markdown wrapper) with these fields:
     {
       "kind": "string (plot_commitment/npc_relation/location_fact/quest_state/item_fact/faction_relation)",
       "text": "string (atomic fact worth remembering across sessions)",
-      "priority": "string (high/medium/low)"
+      "priority": "string (high/medium/low)",
+      "entity_type": "string (optional: npc/plot/location/quest/item/faction)",
+      "entity_id": "string (optional stable lowercase id for the affected entity, e.g. npc_innkeeper)",
+      "fact_type": "string (optional stable fact name, e.g. relationship/current_status/promise)"
     }
   ]
 }
@@ -95,6 +98,8 @@ Return a single JSON object (no markdown wrapper) with these fields:
   "medium" = important NPC intro, quest commitment, discovered clue.
   "low" = minor detail, flavor, temporary combat result. (Low-priority candidates
   may be skipped from long-term storage.)
+  When possible include stable `entity_type`, `entity_id`, and `fact_type` so later
+  recaps update the same memory instead of creating near-duplicates.
 
 ## Priority Examples
 - "high": character death, signing a devil's contract, destroying a major artifact,

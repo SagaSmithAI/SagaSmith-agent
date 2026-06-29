@@ -1,192 +1,219 @@
 # 🐉 SagaSmith
 
-[English](README.md) | [中文](README-cn.md)
+[中文](README.md) | [English](README-en.md)
 
 <p align="center"><img src="images/Sagasmith.png" alt="SagaSmith" width="200"></p>
 
-**Autonomous D&D 5e AI Dungeon Master** — campaign management · module generation · autonomous DMing
+**自主 D&D 5e AI 地下城主** — 战役管理 · 模组生成 · 自主带团
 
-> *"The rulebooks are scripture, the module is the map, the dice are the judge."*  
-> — Minthara Baenre, SagaSmith default DM
+> *"规则书为经文，模组为地图，骰子为审判官。"*  
+> — 明萨拉·班瑞，SagaSmith 默认 DM
 
-SagaSmith is a cross-platform AI DM skill pack. It bundles complete D&D 5e DM capabilities — campaign lifecycle management, SRD rule adjudication, automatic module generation, character creation & leveling — into an installable AI agent skill, compatible with NanoBot, OpenClaw, Hermes, Claude Code, and any platform supporting the SKILL.md standard.
+SagaSmith 是一个跨平台 AI 跑团主持人 skill 包。它把完整的 D&D 5e DM 能力——战役生命周期管理、SRD 规则裁判、模组自动生成、角色创建与升级——打包为可安装的 AI agent skill，支持 NanoBot / OpenClaw / Hermes / Claude Code 等任意兼容 SKILL.md 标准的平台。
 
 ---
 
-## Ecosystem
+## 生态
 
-| Repo | Role |
+| 仓库 | 定位 |
 |------|------|
-| 📦 **SagaSmith-skills** (this repo) | Full skill pack (3 skills + domain code) |
-| 🎲 [SagaSmith-agent](https://github.com/dajiaohuang/SagaSmith-agent) | Complete AI DM runtime |
-| ✍️ [SagaSmith-module-gen-skills](https://github.com/dajiaohuang/SagaSmith-module-gen-skills) | Standalone module generator |
+| 📦 **SagaSmith-skills**（本仓库） | 全家桶 skill 插件包 |
+| 🎲 [SagaSmith-agent](https://github.com/dajiaohuang/SagaSmith-agent) | 完整 AI DM 运行时 |
+| ✍️ [SagaSmith-module-gen-skills](https://github.com/dajiaohuang/SagaSmith-module-gen-skills) | 独立模组生成器 |
 
 ---
 
-## Why SagaSmith
+## 为什么是 SagaSmith
 
-Most D&D AI tools do one thing: roll dice, look up a rule, or write a paragraph. SagaSmith is the **full DM**:
+大多数 D&D AI 工具只做一件事：掷骰、查规则、或者写一段描述。SagaSmith 是**完整的 DM**：
 
-- 🏛️ **Campaign Management** — SQLite/PostgreSQL-backed, full campaign CRUD, Snapshot save/load/verify/undo, event log, module progress tracking
-- 🎲 **Rule Adjudication** — BGE-M3 Dense Vector search over SRD 5.2.1 (20 rule files, CC-BY-4.0), exact-name + full-text + semantic hybrid retrieval
-- ✍️ **Module Generation** — 5 types (one-shot / short / medium / long / sandbox) × 25 narrative paradigms, multi-step progressive generation, auto-import into database
-- ⚔️ **Combat Engine** — True d20 rolls, initiative/turn/hit/damage/save calculation, XP & leveling
-- 🎭 **Minthara Persona** — Lawful Evil DM, strict yet cold-humored, never pulls punches, never leaks hidden info
-
----
-
-## Usage Examples
-
-Load SagaSmith into any compatible agent. The 8 phases below cover the full lifecycle.
-
-### 1. Rulebook Import
-
-```
-User: Import SRD rulebooks
-
-Agent:
-📚 Parsing SRD 5.2.1 (20 files)...
-   Chunks: 2,847 · BGE-M3 embeddings: 2,847 (1024-dim)
-   Books: PHB (2024) · DMG (2024) · Monster Manual (2025)
-   ✅ Index ready
-```
-
-### 2. Module Import
-
-PDF/DOCX/PPTX/XLSX → MarkItDown. PDF uses dedicated structural parser:
-
-```
-User: [Upload Baldurs_Gate_Avernus.pdf]
-
-Agent:
-📄 Parsing — bookmarks: 42 anchors · CJK reflow · TOC filtered
-📦 Baldur's Gate: Descent into Avernus (BGDIA)
-   5 chapters · 62 scenes · 847 chunks · 847 vectors · ✅ ready
-```
-
-### 3. Campaign Start
-
-```
-User: Start a new campaign with BGDIA
-
-Agent:
-🎲 Campaign Setup
-   ✅ Created: campaign_7a3f
-   ✅ Rules bound: 2024 Core
-   ✅ Module bound: BGDIA Ch.1 unlocked
-   ✅ Initial snapshot: slot 1 "Initial State"
-
-   🎉 Campaign ready! Create characters or say "random roll."
-```
-
-### 4. Character Creation
-
-```
-User: Build me a half-elf ranger
-
-Agent:
-📜 Character Creation — Half-Elf Ranger
-   1️⃣ Race: Half-Elf (+2 CHA, Darkvision)
-   2️⃣ Class: Ranger (d10, Favored Enemy, Natural Explorer)
-   3️⃣ Abilities: DEX 16 · CON 14 · WIS 14 (27 point-buy)
-
-User: Confirm
-
-Agent:
-✅ Varis Moonshadow — Half-Elf Ranger 1 · Chaotic Good
-   HP 12 · AC 14 · Longbow (1d8) · Saved to database
-```
-
-### 5. Module Generation
-
-```
-User: Generate a sewer side quest for this campaign
-
-Agent:
-✅ Generated: The Sewer Shadows (One-shot · Five-Room Dungeon)
-   S1 Entrance Guard · S2 Skill Challenge (DC 12) · S3 Twist · S4 Boss · S5 Reward
-   📝 modules/sewer_shadows.md · ✅ Imported: 5 scenes, 47 chunks
-```
-
-### 6. DM Gameplay
-
-```
-Agent:
-【Time: 1492 DR, dusk】【Location: Waterdeep · The Elfsong Tavern】
-
-What do you do?
-
-User: Approach the hooded figure
-
-Agent:
-🎲 A drow woman — Zara Do'Urden, Flaming Fist captain.
-"Three murders. Temple District. Go investigate."
-
-【Clue: Death Three activity map】【Quest: Investigate murders】
-
-User: Ask the innkeeper
-
-Agent:
-🎲 Alanna: "Back alley... a figure whose shadow had no fingers."
-【Clue: Fingerless shadow】
-
-⚔️ 🅰️ Alley tonight  🅱️ Rest, morning  🅲️ HQ archives
-
-User: 🅱️
-
-Agent:
-🌙 Long rest complete. 📁 Auto-saved [slot 2: "After Elfsong rest"]
-```
-
-### 7. Rules Q&A
-
-```
-User: Frost Giant AC?
-
-Agent: 🔍 Frost Giant · CR 8 · AC 15 · Cold Immune · Multiattack (2×Greataxe +12, 3d12+6)
-       Source: Monster Manual (2025) p.187
-
-
-User: Paladin 5 spell slots?
-
-Agent: 🔍 1st: 4 · 2nd: 2. Spells known: CHA mod + ½ level.
-       Source: Player's Handbook (2024) Ch.3
-
-
-User: Fireball?
-
-Agent: 🔥 Fireball · 3rd-level · 150ft · 20ft radius · 8d6 fire · DEX save half
-       Source: Player's Handbook (2024) Ch.11
-```
-
-### 8. Campaign Management
-
-```
-User: List campaigns
-
-Agent:
-📋 campaign_7a3f  BGDIA         Ch.1  Lv2  Saves: 2
-   campaign_b21   Icewind Dale  Ch.3  Lv5  Saves: 7
-
-User: Switch to Icewind Dale
-
-Agent: ✅ Switched · 📍 Ch.3 Scene 4
-
-User: Save
-
-Agent: ✅ slot 8 "Before Frost Giant's Gate" · 🔑 a3f2c...
-
-User: Load slot 5
-
-Agent: ⚠️ Auto-saving current → ⏪ Restored slot 5
-   ✅ World / Party / Combat / Plot / Events — all restored
-```
+- 🏛️ **战役管理** — SQLite/PostgreSQL 数据库驱动，完整的 campaign CRUD、Snapshot 存档/读档/校验/撤销、事件日志、模组进度追踪
+- 🎲 **规则裁判** — BGE-M3 Dense Vector 检索 SRD 5.2.1（20 个规则文件，CC-BY-4.0），精确+全文+语义混合搜索
+- ✍️ **模组生成** — 5 种类型（one-shot / short / medium / long / sandbox）× 25 种叙事范式，多步渐进生成，自动入库
+- ⚔️ **战斗引擎** — d20 真实掷骰、先攻/回合/命中/伤害/豁免计算、XP 与升级
+- 🎭 **明萨拉人格** — 守序邪恶 DM，严格但不失冷幽默，从不放水、从不泄露隐藏信息
 
 ---
 
-## Quick Install
+## 使用示例
 
-### Claude Code / Codex / Cursor / Copilot (recommended)
+加载 SagaSmith 到任意兼容 Agent 后，以下 8 个阶段展示完整生命周期。
+
+### 1. 规则书导入
+
+```
+用户: 导入 SRD 规则书
+
+Agent:
+📚 解析 SRD 5.2.1 (20 文件)...
+   规则块: 2,847 · BGE-M3 嵌入: 2,847 (1024 维)
+   规则书: 玩家手册(2024) · 城主指南(2024) · 怪物图鉴(2025)
+   ✅ 索引就绪
+```
+
+### 2. 模组导入
+
+PDF/DOCX/PPTX/XLSX → MarkItDown 转换，PDF 走专有结构解析：
+
+```
+用户: [上传 Baldurs_Gate_Avernus.pdf]
+
+Agent:
+📄 解析中 — 书签恢复: 42 锚点 · CJK 重排 · 目录过滤
+📦 博德之门：坠入阿弗纳斯 (BGDIA)
+   5 章 · 62 场景 · 847 块 · 847 向量 · ✅ 就绪
+```
+
+### 3. 开团流程
+
+```
+用户: 开个新团，用 BGDIA
+
+Agent:
+🎲 开团向导
+   ✅ 战役创建: campaign_7a3f
+   ✅ 规则绑定: 2024 Core
+   ✅ 模组绑定: BGDIA Ch.1 解锁
+   ✅ 初始存档: slot 1 "初始状态"
+
+   🎉 战役就绪！请创建角色或说"随机生成"。
+```
+
+### 4. 角色创建
+
+```
+用户: 帮我建一个半精灵游侠
+
+Agent:
+📜 角色创建 — 半精灵游侠
+   1️⃣ 种族: 半精灵 (+2 CHA, 黑暗视觉)
+   2️⃣ 职业: 游侠 (d10, 宿敌, 自然探索者)
+   3️⃣ 属性: DEX 16 · CON 14 · WIS 14 (27 point-buy)
+
+用户: 确认
+
+Agent:
+✅ 瓦里斯·月影 — 半精灵游侠 1 级 · 混乱善良
+   HP 12 · AC 14 · 长弓 (1d8) · 已录入数据库
+```
+
+### 5. 模组创作
+
+```
+用户: 给当前战役生成一个下水道支线
+
+Agent:
+✅ 生成支线模组：下水道的阴影 (One-shot · Five-Room Dungeon)
+   S1 入口守卫 · S2 技能挑战(DC 12) · S3 反转 · S4 Boss · S5 奖励
+   📝 modules/sewer_shadows.md · ✅ 已导入: 5 场景 47 块
+```
+
+### 6. 带团过程
+
+```
+Agent:
+【时间：1492 DR，黄昏】【地点：深水城 · 精灵之歌酒馆】
+
+你们做什么？
+
+用户: 找兜帽人搭话
+
+Agent:
+🎲 卓尔女性——札拉·多乌尔登，焰拳队长。
+"三起谋杀案，神殿区。去查。"
+
+【线索: 死亡三神活动地图】【任务: 调查谋杀案】
+
+用户: 问问老板娘
+
+Agent:
+🎲 阿兰娜："后巷人影...火把照过去，影子没有手指。"
+【线索: 无指阴影】
+
+⚔️ 🅰️ 连夜后巷  🅱️ 休息明早去  🅲️ 总部档案
+
+用户: 🅱️
+
+Agent:
+🌙 长休完成。📁 自动存档 [slot 2: "精灵之歌休息后"]
+```
+
+### 7. 规则提问
+
+```
+用户: 冰巨人的 AC？
+
+Agent: 🔍 Frost Giant · CR 8 · AC 15 · 寒冰抗性 · 多重攻击(2×巨斧 +12, 3d12+6)
+       来源: 怪物图鉴(2025) p.187
+
+
+用户: 圣武士 5 级几个法术位？
+
+Agent: 🔍 一环 4 · 二环 2。来源: 玩家手册(2024) Ch.3
+
+
+用户: 火球术伤害？
+
+Agent: 🔥 Fireball · 三环 · 150ft · 20ft半径 · 8d6 火焰 · DEX 豁免减半
+       来源: 玩家手册(2024) Ch.11
+```
+
+### 8. 战役管理
+
+```
+用户: 查看战役
+
+Agent:
+📋 campaign_7a3f  BGDIA  Ch.1  2级  存档 2
+   campaign_b21   冰风谷  Ch.3  5级  存档 7
+
+用户: 切到冰风谷
+
+Agent: ✅ 已切换 campaign_b21 · 📍 Ch.3 Scene 4
+
+用户: 存档
+
+Agent: ✅ slot 8 "进入冰巨人之门前" · 🔑 a3f2c...
+
+用户: 读档 slot 5
+
+Agent: ⚠️ 自动保存当前 → ⏪ 恢复 slot 5 "冰巨人之门开启前"
+   ✅ 世界/队伍/战斗/剧情/事件 全部恢复
+```
+
+## 存档、Recap 与记忆
+
+SagaSmith 将三类容易混淆的数据分开管理：
+
+| 数据 | 作用域 | 存储位置 | 用途 |
+|------|--------|----------|------|
+| Agent session 记忆 | 当前聊天/session | NanoBot session history 与压缩摘要 | 保持近期对话连续性 |
+| Snapshot | 单个战役、单个存档点 | `campaign_saves.snapshot_json` | 保存可恢复的权威战役状态 |
+| Campaign memory | 单个战役 | `campaign_memories` | 保存跨 session 使用的长期叙事事实 |
+
+创建存档时，Agent 只需发送一个简短工具调用：
+
+```text
+dnd_save action=create campaign_id=<id> label="进入地城前"
+```
+
+工具会捕获当前世界、队伍、PC、战斗、剧情、事件、场景和频道绑定，生成相对上一个存档的 recap，将 recap 写入 snapshot，并从 `memory_candidates` 与 `future_impact` 派生战役长期记忆。高优先级事实写为 `permanent`，中优先级写为 `candidate`，低优先级只保留在 recap 中。
+
+读档使用：
+
+```text
+dnd_save action=restore campaign_id=<id> slot=3
+```
+
+`restore` 默认启用 `auto_save=true`，代码会先创建一个 `auto-before-restore` 存档，再恢复目标 slot。这个读档前备份是代码强制行为；长休、升级、章节结束等节点的自动存档目前由 skill 指示 Agent 主动调用 `dnd_save action=create`，不是数据库事件或定时器硬触发。
+
+存档和读档只修改数据库中的战役状态、snapshot、recap 与 campaign memory，不会改写工作区文件或 `USER.md`。只有显式使用 `action=export` 时才会向指定路径写出 JSON 文件。
+
+---
+
+## 快速安装
+
+### Claude Code / Codex / Cursor / Copilot（推荐）
 
 ```bash
 npx skills add dajiaohuang/SagaSmith-skills
@@ -198,7 +225,7 @@ npx skills add dajiaohuang/SagaSmith-skills
 npx clawhub install sagasmith
 ```
 
-### Manual (NanoBot)
+### 手动安装（NanoBot）
 
 ```bash
 git clone https://github.com/dajiaohuang/SagaSmith-skills.git
@@ -212,101 +239,101 @@ python -m <domain-cli> rules ingest-srd
 
 ---
 
-## Skill Breakdown
+## 技能拆解
 
-| Skill | SKILL.md | Role |
-|-------|----------|------|
-| 🎲 **dnd-dm** | [SKILL.md](skills/dnd-dm/SKILL.md) | Core DM persona (always-on), rule adjudication, combat engine, SRD retrieval (adapted from [ackiles/dnd-dm-skill](https://github.com/ackiles/dnd-dm-skill)) |
-| 📋 **dnd-campaign-manager** | [SKILL.md](skills/dnd-campaign-manager/SKILL.md) | Campaign lifecycle, Snapshot save/load, module import, USER.md sync |
-| ✍️ **dnd-module-gen** | [SKILL.md](skills/dnd-module-gen/SKILL.md) | Module generation: one-shot → short → medium → long → sandbox, 25 paradigms |
+| 技能 | SKILL.md | 职责 |
+|------|----------|------|
+| 🎲 **dnd-dm** | [SKILL.md](skills/dnd-dm/SKILL.md) | 核心 DM 人格（always-on），规则裁判，战斗引擎，SRD 检索（参考自 [ackiles/dnd-dm-skill](https://github.com/ackiles/dnd-dm-skill)） |
+| 📋 **dnd-campaign-manager** | [SKILL.md](skills/dnd-campaign-manager/SKILL.md) | 战役生命周期，Snapshot 存档/读档，模组导入，USER.md 同步 |
+| ✍️ **dnd-module-gen** | [SKILL.md](skills/dnd-module-gen/SKILL.md) | 模组生成：one-shot → short → medium → long → sandbox，25 种范式 |
 
-### Module Generation Paradigms
+### 模组生成范式一览
 
-| Type | Default Paradigms | Output |
-|------|-------------------|--------|
-| One-shot | Five-Room Dungeon, Heist, Mystery | 1 chapter, 3-6h |
-| Short | Three-Act, Kishōtenketsu, Race Against Time | 3 chapters, 3-8 sessions |
-| Medium | Hero's Journey, Plot Point, Faction Turn | 5 chapters, 2-4 months |
-| Long | Double Triangle, Conspyramid, Megadungeon | 8 chapters, 6+ months |
-| Sandbox | Hexcrawl, Node-Based, Blorb | 4-6 regions, open-ended |
-
----
-
-## DM Persona: Minthara Baenre
-
-A Lawful Evil DM based on the iconic Baldur's Gate 3 character:
-
-- **Rules Absolutism** — Strict 2024 rulebook adjudication. Dice are final.
-- **Cold Wit** — Points out tactical errors, then offers a barbed but viable alternative.
-- **Info Boundary** — Never reveals DCs, hidden monster stats, undiscovered rooms, or future plot.
-- **Player Agency** — Never decides for the players, never fudges dice for drama.
-
-Default campaign: *Baldur's Gate: Descent into Avernus*. Adaptable to any adventure via module import.
+| 类型 | 推荐范式 | 产出规模 |
+|------|----------|----------|
+| One-shot | Five-Room Dungeon, Heist, Mystery | 1 章，3-6h |
+| Short | Three-Act, Kishōtenketsu, Race Against Time | 3 章，3-8 次 |
+| Medium | Hero's Journey, Plot Point, Faction Turn | 5 章，2-4 月 |
+| Long | Double Triangle, Conspyramid, Megadungeon | 8 章，6+ 月 |
+| Sandbox | Hexcrawl, Node-Based, Blorb | 4-6 区域，开放 |
 
 ---
 
-## Directory Structure
+## DM 人格：明萨拉·班瑞
+
+以《博德之门 3》经典角色明萨拉·班瑞为原型的守序邪恶 DM：
+
+- **规则绝对主义** — 严格按 2024 版规则书裁决，骰子结果不可商量
+- **冷刺幽默** — 指出战术失误后，补一句带刺的可行建议
+- **信息边界** — 绝不泄露 DC、怪物隐藏数值、未发现房间、后续剧情
+- **玩家自主** — 不替玩家做任何决定，不因戏剧效果改骰
+
+默认适配《博德之门：坠入阿弗纳斯》模组，可通过模组导入适配任意冒险。
+
+---
+
+## 目录结构
 
 ```
 SagaSmith-skills/
-├── skills/                     # 3 Skills (pure Markdown, cross-platform)
-│   ├── dnd-dm/                 #   Core DM + 20 SRD files
-│   ├── dnd-campaign-manager/   #   Campaign management + DB contract
-│   └── dnd-module-gen/         #   Module generation
-├── templates/                  # DM persona templates
-│   ├── SOUL.md                 #   Minthara Baenre persona
-│   ├── IDENTITY.md             #   Identity constraints & rule sources
-│   ├── AGENTS.md               #   Session startup protocol
-│   ├── agent/identity.md       #   Runtime identity injection
-│   └── memory/MEMORY.md        #   Long-term memory template
-├── tools/                      # Agent tools (Python)
-│   ├── dnd_campaign.py         #   Campaign CRUD + one-shot start
-│   ├── dnd_save.py             #   Snapshot management
-│   ├── dnd_module.py           #   Module import/search/scene progress
-│   └── dnd_rules.py            #   Hybrid rule search (exact + FTS + Dense)
-├── domain/                     # Business logic (pure Python, zero framework deps)
-│   ├── db/                     #   SQLAlchemy ORM + Service + Alembic migrations
-│   ├── modules/                #   Module chunking, PDF parsing, scene indexing
-│   ├── rules/                  #   BGE-M3 embeddings, Markdown parsing, rule ingestion
-│   └── engine/                 #   Dice, checks, combat resolution, XP, template factory
-├── data/srd/                   # SRD 5.2.1 English source files (20 × CC-BY-4.0)
-└── data/srd-zh/                # SRD Chinese translation (optional submodule)
+├── skills/                     # 3 个 Skill（纯 Markdown，跨平台）
+│   ├── dnd-dm/                 #   核心 DM + 20 个 SRD 文件
+│   ├── dnd-campaign-manager/   #   战役管理 + 数据库约定
+│   └── dnd-module-gen/         #   模组生成
+├── templates/                  # DM 人格模板
+│   ├── SOUL.md                 #   明萨拉·班瑞人格
+│   ├── IDENTITY.md             #   身份约束与规则源
+│   ├── AGENTS.md               #   会话启动协议
+│   ├── agent/identity.md       #   运行时 identity 注入
+│   └── memory/MEMORY.md        #   长期记忆模板
+├── tools/                      # Agent 工具（Python）
+│   ├── dnd_campaign.py         #   战役 CRUD + 一键开团
+│   ├── dnd_save.py             #   存档管理
+│   ├── dnd_module.py           #   模组导入/检索/场景进度
+│   └── dnd_rules.py            #   规则混合检索（精确 + FTS + Dense）
+├── domain/                     # 业务逻辑（纯 Python，零框架依赖）
+│   ├── db/                     #   SQLAlchemy ORM + Service + Alembic 迁移
+│   ├── modules/                #   模组分块、PDF 解析、场景索引
+│   ├── rules/                  #   BGE-M3 嵌入、Markdown 解析、规则摄入
+│   └── engine/                 #   骰子、检定、战斗结算、XP、模板工厂
+├── data/srd/                   # SRD 5.2.1 英文源文件（20 × CC-BY-4.0）
+└── data/srd-zh/                # SRD 中文翻译（可选子模块）
 ```
 
 ---
 
-## Dependencies
+## 外部依赖
 
-| Dependency | Purpose |
-|------------|---------|
-| Python 3.11+ | Domain runtime |
-| SQLAlchemy | Database ORM |
-| FlagEmbedding | BGE-M3 Dense Vector retrieval |
-| markitdown | PDF / DOCX module import |
+| 依赖 | 用途 |
+|------|------|
+| Python 3.11+ | domain 运行时 |
+| SQLAlchemy | 数据库 ORM |
+| FlagEmbedding | BGE-M3 Dense Vector 检索 |
+| markitdown | PDF / DOCX 模组导入 |
 
 ---
 
-## Registries
+## 注册表
 
 [![ClawHub](https://img.shields.io/badge/ClawHub-sagasmith-blue)](https://clawhub.ai)
 [![skills.sh](https://img.shields.io/badge/skills.sh-dajiaohuang%2FSagaSmith--skill-green)](https://skills.sh)
 [![License](https://img.shields.io/badge/license-MIT-orange)](LICENSE)
 [![SRD](https://img.shields.io/badge/SRD_5.2.1-CC--BY--4.0-lightgrey)](https://creativecommons.org/licenses/by/4.0/)
 
-Published on **ClawHub** and **skills.sh** (72 agent compatible).  
-LobeHub: submit at [agentskill.sh/submit](https://agentskill.sh/submit).
+已发布至 **ClawHub**、**skills.sh**（72 agent 兼容）。  
+LobeHub 可通过 [agentskill.sh/submit](https://agentskill.sh/submit) 提交。
 
 ---
 
-## Credits
+## 致谢
 
-- [ackiles/dnd-dm-skill](https://github.com/ackiles/dnd-dm-skill) — D&D DM skill pioneer, inspiration and design reference for SagaSmith
-- [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) — SKILL.md ecosystem standard driver
-- D&D 5e SRD 5.2.1 © Wizards of the Coast, used under [CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/)
+- [ackiles/dnd-dm-skill](https://github.com/ackiles/dnd-dm-skill) — D&D DM skill 先驱，SagaSmith 的灵感与设计参考
+- [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) — SKILL.md 生态标准推动者
+- D&D 5e SRD 5.2.1 © Wizards of the Coast，以 [CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/) 授权使用
 
 ---
 
-## License
+## 许可证
 
-- Code: MIT
-- SRD 5.2.1 data files: [CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/)
+- 代码：MIT
+- SRD 5.2.1 数据文件：[CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/)

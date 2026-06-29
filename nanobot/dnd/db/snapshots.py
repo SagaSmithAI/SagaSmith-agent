@@ -5,15 +5,16 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
+from nanobot.dnd.db.campaigns import CampaignNotFoundError
 from nanobot.dnd.db.database import Database
 from nanobot.dnd.db.models import (
     Campaign,
@@ -38,9 +39,6 @@ if TYPE_CHECKING:
 SNAPSHOT_FORMAT = "dnd-campaign-snapshot"
 SNAPSHOT_SCHEMA_VERSION = 3
 SUPPORTED_SNAPSHOT_SCHEMA_VERSIONS = {2, SNAPSHOT_SCHEMA_VERSION}
-
-
-from nanobot.dnd.db.campaigns import CampaignNotFoundError
 
 
 class SnapshotError(RuntimeError):
@@ -318,20 +316,8 @@ class CampaignSnapshotService:
         memory_actions: list[dict] = []
         warnings: list[str] = []
 
-        # Attach pre-generated recap if provided
         if recap is not None:
             payload["recap"] = recap
-            # Trigger memory from recap
-            try:
-                from nanobot.dnd.db.memory import trigger_memory_from_recap
-
-                memory_actions = trigger_memory_from_recap(
-                    self.database, campaign_id, "", recap,
-                )
-            except Exception as exc:
-                logger.warning("Memory trigger failed: {}", exc)
-                warnings.append(f"Memory trigger failed: {exc}")
-
             if recap.get("source", {}).get("mode") == "failed":
                 warnings.append("Recap 生成失败，已保存降级摘要。")
 
@@ -352,21 +338,20 @@ class CampaignSnapshotService:
         session.add(save)
         session.flush()
 
-        # Back-fill save_id in recap and re-trigger memory with final id
         if recap is not None:
             recap["to_save_id"] = save.id
             payload["recap"] = recap
             save.snapshot_json = payload
             save.snapshot_hash = _snapshot_hash(payload)
-            # Re-trigger with final save_id
             try:
-                from nanobot.dnd.db.memory import trigger_memory_from_recap
+                from nanobot.dnd.db.memory import trigger_memory_from_recap_in_session
 
-                memory_actions = trigger_memory_from_recap(
-                    self.database, campaign_id, save.id, recap,
+                memory_actions = trigger_memory_from_recap_in_session(
+                    session, campaign_id, save.id, recap,
                 )
             except Exception as exc:
-                logger.warning("Memory trigger (final) failed: {}", exc)
+                logger.warning("Memory trigger failed: {}", exc)
+                warnings.append(f"Memory trigger failed: {exc}")
 
         return self._info(save, memory_actions=memory_actions, warnings=warnings)
 
@@ -455,12 +440,23 @@ class CampaignSnapshotService:
         with self.database.transaction() as session:
             save = self._save(session, campaign_id, slot)
             payload = dict(save.snapshot_json)
+            memory_actions: list[dict] = []
+            warnings: list[str] = []
             recap["to_save_id"] = save.id
             payload["recap"] = recap
             save.snapshot_json = payload
             save.snapshot_hash = _snapshot_hash(payload)
+            try:
+                from nanobot.dnd.db.memory import trigger_memory_from_recap_in_session
+
+                memory_actions = trigger_memory_from_recap_in_session(
+                    session, campaign_id, save.id, recap,
+                )
+            except Exception as exc:
+                logger.warning("Memory trigger failed during recap regeneration: {}", exc)
+                warnings.append(f"Memory trigger failed: {exc}")
             session.flush()
-            return self._info(save)
+            return self._info(save, memory_actions=memory_actions, warnings=warnings)
 
     def delete(self, campaign_id: str, slot: int) -> None:
         with self.database.transaction() as session:

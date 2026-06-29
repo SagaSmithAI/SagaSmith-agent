@@ -366,6 +366,26 @@ class TestTriggerMemoryFromRecap:
         assert len(npc_mems) == 1  # Updated, not duplicated
         assert "ally" in npc_mems[0]["text"]
 
+    def test_trigger_dedupes_candidates_without_explicit_entity_id(self, database):
+        _seed_campaign(database, "c_trigger5")
+        recap = _make_recap(
+            memory_candidates=[
+                {"kind": "plot_commitment", "text": "The party promised to help Mira.", "priority": "medium"},
+            ],
+            future_impact=[],
+        )
+
+        first = trigger_memory_from_recap(database, "c_trigger5", "save_005", recap)
+        second = trigger_memory_from_recap(database, "c_trigger5", "save_006", recap)
+
+        first_upsert = next(a for a in first if a.get("action") == "upsert")
+        second_upsert = next(a for a in second if a.get("action") == "upsert")
+        assert first_upsert["memory_id"] == second_upsert["memory_id"]
+
+        memories = CampaignMemoryService(database).list_by_status("c_trigger5", ["candidate"])
+        assert len(memories) == 1
+        assert memories[0]["source_save_id"] == "save_006"
+
 
 # ---------------------------------------------------------------------------
 # SnapshotInfo recap integration tests
@@ -380,6 +400,7 @@ class TestSnapshotWithRecap:
         assert result.recap is not None
         assert result.recap["summary"] == recap["summary"]
         assert result.recap["baseline"] is True
+        assert result.recap["to_save_id"] == result.id
 
     def test_snapshot_creates_without_recap(self, database):
         _seed_campaign(database, "c_norecap")
@@ -415,6 +436,7 @@ class TestSnapshotWithRecap:
         regenerated = service.regenerate_recap("c_regen", slot, new_recap)
         assert regenerated.recap is not None
         assert regenerated.recap["summary"] == "New summary after regeneration."
+        assert isinstance(regenerated.memory_actions, list)
 
     def test_memory_actions_in_snapshot_info(self, database):
         _seed_campaign(database, "c_actions")
@@ -424,3 +446,19 @@ class TestSnapshotWithRecap:
         # memory_actions should be populated
         # (may be empty if no candidates match, but should be a list)
         assert isinstance(result.memory_actions, list)
+
+    def test_snapshot_memory_trigger_runs_once_with_final_save_id(self, database):
+        _seed_campaign(database, "c_actions2")
+        service = CampaignSnapshotService(database)
+        recap = _make_recap(
+            memory_candidates=[
+                {"kind": "plot_commitment", "text": "Campaign started in tavern.", "priority": "high"},
+            ],
+            future_impact=[],
+        )
+        result = service.create("c_actions2", label="test", recap=recap)
+
+        memories = CampaignMemoryService(database).get_by_save(result.id)
+        assert len(memories) == 1
+        assert memories[0]["source_save_id"] == result.id
+        assert not CampaignMemoryService(database).get_by_save("")
