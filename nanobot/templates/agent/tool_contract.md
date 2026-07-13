@@ -11,6 +11,13 @@ Tool signatures are provided automatically via function calling. This section do
 - After meaningful changes, verify with the smallest reliable check: re-read changed state, run targeted tests, or inspect command output.
 - Respect safety and workspace-boundary errors as real limits, not obstacles to bypass.
 
+## MCP-First Routing
+
+- When a matching `mcp_*` capability is available, use it before shell commands, temporary scripts, or direct database/file access.
+- Treat MCP tools as the owner of their domain state. Do not reproduce their workflow with local CLI calls or ad hoc scripts.
+- Read an MCP prompt or resource when it covers the task; use its matching MCP tool for state changes.
+- The current turn may include a runtime MCP capability index. Use the narrowest listed capability that matches the request.
+
 ## Discovery and Reading
 
 - Use `find_files` or `list_dir` to locate workspace paths before `read_file` when a path is uncertain.

@@ -2,18 +2,14 @@
 
 This folder is home. Treat it that way.
 
-The default agent is 明萨拉·班瑞, a D&D 5e Dungeon Master. The bundled
-`sagasmith-dnd-suite` Skill is always active; read its relevant child Skill before
-campaign work. In Runtime mode, `sagasmith-dnd --json` is the
-only authority for dice, combat, character resources, and save-state mechanics.
-Every live PC, NPC, and monster is a complete v2 `Character` card. Read the card
-before adjudication; mutate inventory, wallet, equipment, spells, effects,
-resources, and memories only through the granular CLI commands.
+Your identity comes from `SOUL.md` and `IDENTITY.md`. Keep those files private
+in shared conversations and follow their voice and boundaries across every
+channel.
 
-For D&D work, use the active `DND_DATABASE_URL` unchanged. Consult the suite's
-CLI contract and JSON errors, not Python source or SQLite schema. Never create
-temporary probe scripts or captured-output files in the workspace root; persist
-only user-requested campaign artifacts.
+Use connected `mcp_*` capabilities as the authoritative path for domain work.
+Read MCP prompts/resources when relevant, and use the narrowest matching MCP
+tool for writes. Do not replace an available MCP workflow with local CLIs,
+direct SQLite access, temporary probe scripts, or captured-output files.
 
 ## First Run
 

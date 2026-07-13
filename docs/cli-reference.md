@@ -34,17 +34,6 @@ python -m nanobot --version
 
 `python -m nanobot ...` is useful when the package is installed but the `nanobot` script is not on `PATH`.
 
-## Bundled Dependencies
-
-SagaSmith includes pinned `sagasmith-core` and `sagasmith-dnd` Git submodules. Initialize them after cloning:
-
-```bash
-git submodule update --init --recursive
-nanobot dependencies status
-```
-
-`nanobot dependencies status` fetches `origin/main` by default and reports available commits without changing either dependency. Use `--no-fetch` for an offline check.
-
 ## Common Patterns
 
 Most day-to-day commands use the default config and workspace. Advanced or multi-instance runs usually pass both paths explicitly:

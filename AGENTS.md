@@ -77,7 +77,24 @@ See [`CONTRIBUTING.md`](./CONTRIBUTING.md) for contribution flow and PR guidelin
 - Linting: `ruff` with rules E, F, I, N, W (E501 ignored).
 - pytest with `asyncio_mode = "auto"`.
 
-## SagaSmith Integration
+## SagaSmith Role
+
+SagaSmith Agent is the multi-channel adapter and identity runtime. Keep the
+NapCat and SnowLuma integrations working, preserve workspace `SOUL.md` and
+`IDENTITY.md`, and improve MCP selection rather than recreating domain runtimes
+inside this repository.
+
+- Domain tools, databases, retrieval, skills, prompts, and resources belong to
+  independently versioned MCP servers.
+- When an `mcp_*` tool matches a request, use it before a CLI, direct database
+  access, or a temporary script.
+- Do not add D&D CLI/runtime dependencies or bundled copies of MCP-owned skills
+  back into this repository.
+
+## Historical Note
+
+The D&D CLI and bundled skills documented below have been removed. Their current
+home is the standalone SagaSmith D&D MCP, not this Agent repository.
 
 This repo bundles the **full version** of `SagaSmith-dnd-skills` as built-in skills at `nanobot/skills/sagasmith-dnd/`, providing D&D 5e (2014/2024) game-master skills, SRD references, and campaign management.
 

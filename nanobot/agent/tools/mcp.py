@@ -23,6 +23,7 @@ from nanobot.bus.events import (
     RUNTIME_CONTROL_MCP_RELOAD,
     InboundMessage,
 )
+from nanobot.runtime_context import RuntimeContextBlock, wrap_runtime_context_lines
 from nanobot.security.network import (
     PinnedDNSAsyncTransport,
     env_proxy_applies_to_url,
@@ -52,6 +53,33 @@ _WINDOWS_SHELL_LAUNCHERS: frozenset[str] = frozenset(("npx", "npm", "pnpm", "yar
 _SANITIZE_RE = re.compile(r"_+")
 _RELOAD_LOCKS: WeakKeyDictionary[Any, asyncio.Lock] = WeakKeyDictionary()
 _ReconnectCallback = Callable[[str, str, Tool], Awaitable[Tool | None]]
+_MCP_CONTEXT_TOOL_LIMIT = 48
+
+
+def routing_context_provider(registry: ToolRegistry):
+    """Return per-turn MCP routing context for the tools currently connected."""
+
+    async def provide(_request: Any) -> RuntimeContextBlock | None:
+        names = sorted(name for name in registry.tool_names if name.startswith("mcp_"))
+        if not names:
+            return None
+        visible = names[:_MCP_CONTEXT_TOOL_LIMIT]
+        extra = len(names) - len(visible)
+        lines = [
+            "MCP-first routing: when an `mcp_*` capability matches the task, use it "
+            "before shell commands, temporary scripts, or direct data access.",
+            "MCP tools own their domain state; use MCP prompts/resources before recreating "
+            "their instructions locally.",
+            "Available MCP capabilities: " + ", ".join(visible),
+        ]
+        if extra:
+            lines.append(f"{extra} additional MCP capabilities are available through tool calling.")
+        return RuntimeContextBlock(
+            source="mcp_routing",
+            content=wrap_runtime_context_lines(lines),
+        )
+
+    return provide
 
 
 class MCPConnection(Protocol):

@@ -49,8 +49,6 @@ dependencies = [
     "pyyaml>=6.0,<7.0.0",
     "filelock>=3.25.2",
     "packaging>=24.0",
-    "sagasmith-core",
-    "sagasmith-dnd",
 ]
 
 [project.optional-dependencies]
@@ -131,10 +129,6 @@ pdf = [
 olostep = [
     "olostep>=0.1.0",
 ]
-sagasmith = [
-    "sagasmith-core[all]",
-    "sagasmith-dnd[all]",
-]
 dev = [
     "pytest>=9.0.0,<10.0.0",
     "pytest-asyncio>=1.3.0,<2.0.0",
@@ -181,7 +175,6 @@ include = [
     "nanobot/skills/**/*.toml",
     "nanobot/skills/**/*.txt",
     "nanobot/skills/**/*.json",
-    "nanobot/skills/sagasmith-dnd/templates/**/*",
     "nanobot/web/dist/**/*",
 ]
 # nanobot/web/dist/ is produced by `cd webui && bun run build` and is
@@ -233,13 +226,3 @@ exclude_lines = [
     "if __name__ == .__main__.:",
     "if TYPE_CHECKING:",
 ]
-
-[tool.uv.workspace]
-members = [
-    "sagasmith/Sagasmith-core",
-    "sagasmith/Sagasmith-dnd",
-]
-
-[tool.uv.sources]
-sagasmith-core = { workspace = true }
-sagasmith-dnd = { workspace = true }

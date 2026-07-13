@@ -45,6 +45,37 @@ Add this to `~/.nanobot/config.json`:
 
 Restart nanobot and ask a question that requires the MCP tool.
 
+## SagaSmith D&D MCP
+
+SagaSmith Agent keeps D&D state and skills outside the agent process. Clone
+[`SagaSmith-dnd-mcp`](https://github.com/SagaSmithAI/SagaSmith-dnd-mcp) beside
+this repository, create its virtual environment, and add this Windows config
+when starting nanobot from the SagaSmith-agent repository root:
+
+```json
+{
+  "tools": {
+    "mcpServers": {
+      "sagasmith_dnd": {
+        "command": "..\\SagaSmith-dnd-mcp\\.venv\\Scripts\\sagasmith-dnd-mcp.exe",
+        "args": [],
+        "cwd": "..\\SagaSmith-dnd-mcp",
+        "env": {
+          "SAGASMITH_DND_MCP_HOME": "..\\SagaSmith-agent\\workspace\\.sagasmith-dnd-mcp"
+        },
+        "toolTimeout": 60,
+        "enabledTools": ["*"]
+      }
+    }
+  }
+}
+```
+
+The server owns its SQLite data, ChromaDB collections, D&D rules, skills,
+resources, and prompts. Keep the agent workspace `SOUL.md` and `IDENTITY.md`
+for your persona; use matching `mcp_sagasmith_dnd_*` capabilities instead of
+recreating D&D work through shell commands or local scripts.
+
 ## Production notes
 
 - Prefer `enabledTools` over exposing every tool by default.

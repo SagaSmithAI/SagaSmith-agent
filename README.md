@@ -4,12 +4,14 @@
 
 <p align="center"><img src="images/Sagasmith.png" alt="SagaSmith" width="200"></p>
 
-**自主 AI 地下城主运行时** — 基于 [NanoBot](https://github.com/HKUDS/nanobot) 构建，具备完整 D&D 5e DM 能力。
+**自主多渠道 Agent 运行时** — 基于 [NanoBot](https://github.com/HKUDS/nanobot)，负责 NapCat、SnowLuma 等适配、workspace identity，以及 MCP-first 工具编排。
 
 > *"规则书为经文，模组为地图，骰子为审判官。"*  
 > — 明萨拉·班瑞，SagaSmith 默认 DM
 
-SagaSmith Agent 是一个完整的、可运行的 AI DM 系统。连接 QQ (NapCat)、Telegram 或 WebSocket——玩家在聊天中发送消息，DM 负责响应。后端由 SQLite/PostgreSQL 战役数据库、ChromaDB 向量库（可选）、BGE-M3 规则检索引擎、d20 战斗引擎，以及守序邪恶的卓尔 DM 人格驱动。
+SagaSmith Agent 是可运行的多渠道个人 Agent。它连接 QQ（NapCat、SnowLuma）、Telegram 或 WebSocket，加载 workspace 的 `SOUL.md` / `IDENTITY.md`，并优先将领域任务交给独立 MCP。数据库、ChromaDB、规则、D&D skills 和模块生成不再内嵌在 Agent 中。
+
+> **迁移状态：** 下方保留的 D&D 示例属于过去的内嵌运行时；当前请通过 `SagaSmith-dnd-mcp` 的 tools、resources 和 prompts 使用 D&D 功能。
 
 ---
 
@@ -17,9 +19,8 @@ SagaSmith Agent 是一个完整的、可运行的 AI DM 系统。连接 QQ (NapC
 
 | 仓库 | 定位 |
 |------|------|
-| 🎲 **SagaSmith-agent**（本仓库） | 完整 AI DM 运行时 |
-| 📦 [SagaSmith-skills](https://github.com/dajiaohuang/SagaSmith-skills) | Skill 插件包 |
-| ✍️ [SagaSmith-module-gen-skills](https://github.com/dajiaohuang/SagaSmith-module-gen-skills) | 独立模组生成器 |
+| 🔌 **SagaSmith-agent**（本仓库） | 多渠道 adapter、identity runtime、MCP-first 编排 |
+| 🎲 [SagaSmith-dnd-mcp](https://github.com/SagaSmithAI/SagaSmith-dnd-mcp) | D&D runtime、SQLite、ChromaDB、skills、resources 与 prompts |
 
 ---
 

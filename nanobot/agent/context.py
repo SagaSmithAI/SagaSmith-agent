@@ -32,6 +32,11 @@ def session_extra(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
     return cli_app_utils.session_extra(metadata) | mcp_tools.session_extra(metadata)
 
 
+def mcp_routing_context_provider(tools: ToolRegistry):
+    """Expose connected MCP capabilities in runtime context for tool selection."""
+    return mcp_tools.routing_context_provider(tools)
+
+
 async def connect_mcp(state: Any, tools: ToolRegistry) -> None:
     await mcp_tools.connect_missing_servers(state, tools)
 

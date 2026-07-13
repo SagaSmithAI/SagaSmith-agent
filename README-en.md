@@ -4,12 +4,14 @@
 
 <p align="center"><img src="images/Sagasmith.png" alt="SagaSmith" width="200"></p>
 
-**Autonomous AI Dungeon Master runtime** — built on [NanoBot](https://github.com/HKUDS/nanobot), with full D&D 5e DM capabilities.
+**Autonomous multi-channel Agent runtime** — built on [NanoBot](https://github.com/HKUDS/nanobot) for NapCat, SnowLuma, workspace identity, and MCP-first tool orchestration.
 
 > *"The rulebooks are scripture, the module is the map, the dice are the judge."*  
 > — Minthara Baenre, SagaSmith default DM
 
-SagaSmith Agent is a complete, runnable AI DM system. Connect QQ (NapCat), Telegram, or WebSocket — players send messages in chat, the DM responds. Backed by a SQLite/PostgreSQL campaign database, ChromaDB vector store (optional), BGE-M3 rule search engine, d20 combat engine, and a Lawful Evil drow DM persona.
+SagaSmith Agent is a runnable multi-channel personal Agent. It connects QQ (NapCat and SnowLuma), Telegram, and WebSocket; loads workspace `SOUL.md` / `IDENTITY.md`; and routes domain work to independently versioned MCP servers. Databases, ChromaDB, D&D skills, rules, and module generation are no longer embedded here.
+
+> **Migration status:** the D&D examples below describe the former embedded runtime. Use `SagaSmith-dnd-mcp` tools, resources, and prompts for current D&D functionality.
 
 ---
 
@@ -17,9 +19,8 @@ SagaSmith Agent is a complete, runnable AI DM system. Connect QQ (NapCat), Teleg
 
 | Repo | Role |
 |------|------|
-| 🎲 **SagaSmith-agent** (this repo) | Complete AI DM runtime |
-| 📦 [SagaSmith-skills](https://github.com/dajiaohuang/SagaSmith-skills) | Skill plugin pack |
-| ✍️ [SagaSmith-module-gen-skills](https://github.com/dajiaohuang/SagaSmith-module-gen-skills) | Standalone module generator |
+| 🔌 **SagaSmith-agent** (this repo) | Multi-channel adapters, identity runtime, MCP-first orchestration |
+| 🎲 [SagaSmith-dnd-mcp](https://github.com/SagaSmithAI/SagaSmith-dnd-mcp) | D&D runtime, SQLite, ChromaDB, skills, resources, and prompts |
 
 ---
 

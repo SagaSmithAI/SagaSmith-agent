@@ -1,4 +1,4 @@
-"""Status checks for SagaSmith's bundled Git submodules."""
+"""Status checks for optional locally managed dependencies."""
 
 from __future__ import annotations
 
@@ -21,10 +21,7 @@ class DependencyStatus:
     error: str | None = None
 
 
-DEPENDENCIES = {
-    "sagasmith-core": "sagasmith/Sagasmith-core",
-    "sagasmith-dnd": "sagasmith/Sagasmith-dnd",
-}
+DEPENDENCIES: dict[str, str] = {}
 
 
 def repository_root() -> Path:

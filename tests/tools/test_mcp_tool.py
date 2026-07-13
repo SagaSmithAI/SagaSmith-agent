@@ -47,6 +47,26 @@ class _FakeImageContent:
         self.mimeType = mime_type
 
 
+@pytest.mark.asyncio
+async def test_mcp_routing_context_prefers_available_mcp_capabilities() -> None:
+    registry = ToolRegistry()
+    registry.register(SimpleNamespace(name="shell"))
+    registry.register(SimpleNamespace(name="mcp_sagasmith_dnd_campaign_create"))
+    registry.register(SimpleNamespace(name="mcp_sagasmith_dnd_skill_read"))
+
+    provider = mcp_mod.routing_context_provider(registry)
+    block = await provider(SimpleNamespace())
+
+    assert block is not None
+    assert block.source == "mcp_routing"
+    assert "MCP-first routing" in block.content
+    assert "mcp_sagasmith_dnd_campaign_create" in block.content
+    capability_line = next(
+        line for line in block.content.splitlines() if line.startswith("Available MCP capabilities:")
+    )
+    assert "shell" not in capability_line
+
+
 @pytest.fixture
 def fake_mcp_runtime() -> dict[str, object | None]:
     return {"session": None}
