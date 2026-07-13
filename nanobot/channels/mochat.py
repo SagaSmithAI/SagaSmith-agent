@@ -11,13 +11,13 @@ from datetime import datetime
 from typing import Any
 
 import httpx
+from pydantic import Field
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_runtime_subdir
 from nanobot.config.schema import Base
-from pydantic import Field
 
 try:
     import socketio
@@ -216,7 +216,7 @@ def parse_timestamp(value: Any) -> int | None:
 class MochatMentionConfig(Base):
     """Mochat mention behavior configuration."""
 
-    require_in_groups: bool = True
+    require_in_groups: bool = False
 
 
 class MochatGroupRule(Base):

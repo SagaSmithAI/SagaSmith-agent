@@ -9,6 +9,7 @@ from importlib.resources import files as pkg_files
 from pathlib import Path
 
 from nanobot.agent.context import ContextBuilder
+from nanobot.runtime_context import RuntimeContextBlock
 
 
 class _FakeDatetime(real_datetime):
@@ -61,34 +62,7 @@ def test_system_prompt_reflects_current_dream_memory_contract(tmp_path) -> None:
     assert "write important facts here" not in prompt
 
 
-def test_runtime_context_is_separate_untrusted_user_message(tmp_path) -> None:
-    """Runtime metadata should be merged with the user message."""
-    workspace = _make_workspace(tmp_path)
-    builder = ContextBuilder(workspace)
-
-    messages = builder.build_messages(
-        history=[],
-        current_message="Return exactly: OK",
-        channel="cli",
-        chat_id="direct",
-    )
-
-    assert messages[0]["role"] == "system"
-    assert "## Current Session" not in messages[0]["content"]
-
-    # Runtime context is now merged with user message into a single message
-    assert messages[-1]["role"] == "user"
-    user_content = messages[-1]["content"]
-    assert isinstance(user_content, str)
-    assert ContextBuilder._RUNTIME_CONTEXT_TAG in user_content
-    assert "Current Time:" in user_content
-    assert "Channel: cli" in user_content
-    assert "Chat ID: direct" in user_content
-    assert "Return exactly: OK" in user_content
-
-
-def test_runtime_context_appended_after_user_content(tmp_path) -> None:
-    """User content must precede runtime context for prompt-cache prefix stability."""
+def test_provider_context_appended_after_user_content(tmp_path) -> None:
     workspace = _make_workspace(tmp_path)
     builder = ContextBuilder(workspace)
 
@@ -97,48 +71,15 @@ def test_runtime_context_appended_after_user_content(tmp_path) -> None:
         current_message="hello world",
         channel="cli",
         chat_id="direct",
+        runtime_context_blocks=[
+            RuntimeContextBlock(source="test", content="provider context"),
+        ],
     )
 
     content = messages[-1]["content"]
     user_pos = content.find("hello world")
-    tag_pos = content.find(ContextBuilder._RUNTIME_CONTEXT_TAG)
-    assert user_pos < tag_pos, "user content must precede runtime context for prefix stability"
-
-
-def test_runtime_context_includes_sender_id_when_provided(tmp_path) -> None:
-    """Sender ID should be included in runtime context when provided."""
-    workspace = _make_workspace(tmp_path)
-    builder = ContextBuilder(workspace)
-
-    messages = builder.build_messages(
-        history=[],
-        current_message="Return exactly: OK",
-        channel="cli",
-        chat_id="direct",
-        sender_id="user-12345",
-    )
-
-    user_content = messages[-1]["content"]
-    assert isinstance(user_content, str)
-    assert "Sender ID: user-12345" in user_content
-
-
-def test_runtime_context_excludes_sender_id_when_not_provided(tmp_path) -> None:
-    """Sender ID should not be present in runtime context when not provided."""
-    workspace = _make_workspace(tmp_path)
-    builder = ContextBuilder(workspace)
-
-    messages = builder.build_messages(
-        history=[],
-        current_message="Return exactly: OK",
-        channel="cli",
-        chat_id="direct",
-        sender_id=None,
-    )
-
-    user_content = messages[-1]["content"]
-    assert isinstance(user_content, str)
-    assert "Sender ID:" not in user_content
+    context_pos = content.find("provider context")
+    assert user_pos < context_pos, "user content must precede provider context"
 
 
 def test_unprocessed_history_injected_into_system_prompt(tmp_path) -> None:
@@ -272,8 +213,8 @@ def test_partial_dream_processing_shows_only_remainder(tmp_path) -> None:
     assert "recent question about K8s" in prompt
 
 
-def test_dnd_dm_soul_in_system_prompt(tmp_path) -> None:
-    """The bundled D&D DM persona should appear via the default SOUL.md."""
+def test_execution_rules_in_system_prompt(tmp_path) -> None:
+    """Execution rules should appear in the system prompt via default SOUL.md."""
     from nanobot.utils.helpers import sync_workspace_templates
 
     workspace = _make_workspace(tmp_path)
@@ -281,20 +222,21 @@ def test_dnd_dm_soul_in_system_prompt(tmp_path) -> None:
     builder = ContextBuilder(workspace)
 
     prompt = builder.build_system_prompt()
-    assert "明萨拉·班瑞" in prompt
-    assert "地下城主" in prompt
-    assert "规则为信仰，骰子为审判官" in prompt
+    assert "single-step tasks" in prompt
+    assert "multi-step tasks" in prompt
+    assert "Read before you write" in prompt
+    assert "verify the result" in prompt
 
 
-def test_identity_declares_dnd_dm_runtime_contract(tmp_path) -> None:
-    """Identity template should establish the default Minthara DM contract."""
+def test_identity_has_no_behavioral_instructions(tmp_path) -> None:
+    """Identity template should not contain behavioral rules or hardcoded name."""
     workspace = _make_workspace(tmp_path)
     builder = ContextBuilder(workspace)
 
     identity = builder._get_identity(channel=None)
-    assert "明萨拉·班瑞" in identity
-    assert "always-active `dnd-dm` Skill" in identity
-    assert "only mechanical rules engine" in identity
+    assert "You are nanobot" not in identity
+    assert "Act, don't narrate" not in identity
+    assert "Execution Rules" not in identity
 
 
 def test_system_prompt_does_not_warn_about_message_time_markers(tmp_path) -> None:
@@ -308,12 +250,12 @@ def test_system_prompt_does_not_warn_about_message_time_markers(tmp_path) -> Non
     assert "Message Time" not in prompt
 
 
-def test_default_soul_template_contains_dnd_dm_persona() -> None:
-    """Default SOUL.md template must contain the D&D DM persona."""
+def test_default_soul_template_contains_execution_rules() -> None:
+    """Default SOUL.md template must contain execution rules with act/plan layering."""
     soul = (pkg_files("nanobot") / "templates" / "SOUL.md").read_text(encoding="utf-8")
-    assert "# SOUL.md——明萨拉·班瑞·阿弗纳斯的地狱城主" in soul
-    assert "## 核心身份（Core Identity）" in soul
-    assert "## 性格与信条（Personality & Tenets）" in soul
+    assert "## Execution Rules" in soul
+    assert "single-step tasks" in soul
+    assert "multi-step tasks" in soul
 
 
 def test_channel_format_hint_telegram(tmp_path) -> None:
@@ -400,14 +342,12 @@ def test_always_skills_excluded_from_skills_index(tmp_path) -> None:
     # memory skill should be in Active Skills section
     assert "# Active Skills" in prompt
     assert "### Skill: memory" in prompt
-    assert "### Skill: dnd-dm" in prompt
 
     # memory skill should NOT appear in the skills index
     skills_section = prompt.split("# Skills\n", 1)
     if len(skills_section) > 1:
         index_text = skills_section[1].split("\n\n---")[0]
         assert "**memory**" not in index_text
-        assert "**dnd-dm**" not in index_text
 
 
 def test_template_memory_md_is_skipped(tmp_path) -> None:

@@ -32,6 +32,7 @@ import type {
   ChatSummary,
   SettingsPayload,
   SlashCommand,
+  SkillSummary,
   UIMessage,
   WorkspaceScopePayload,
   WorkspacesPayload,
@@ -44,7 +45,9 @@ function projectWebuiThreadMessages(messages: UIMessage[]): UIMessage[] {
   return scrubSubagentUiMessages(normalizeLegacyLongTaskMessages(messages));
 }
 
-function sameMessageShape(a: UIMessage, b: UIMessage): boolean {
+type MessageShape = Pick<UIMessage, "role" | "kind" | "content">;
+
+function sameMessageShape(a: MessageShape, b: MessageShape): boolean {
   return (
     a.role === b.role
     && (a.kind ?? "") === (b.kind ?? "")
@@ -52,9 +55,51 @@ function sameMessageShape(a: UIMessage, b: UIMessage): boolean {
   );
 }
 
+function durableMessageShape(message: UIMessage): MessageShape | null {
+  if (message.kind === "trace") return null;
+  if (message.role !== "user" && message.role !== "assistant") return null;
+  if (message.role === "assistant" && !message.content.trim() && !message.media?.length) {
+    return null;
+  }
+  return {
+    role: message.role,
+    kind: message.kind,
+    content: message.content,
+  };
+}
+
+function preservesDurableMessages(current: UIMessage[], snapshot: UIMessage[]): boolean {
+  // Canonical history refreshes can race with live websocket messages after fork/send.
+  // Never accept a refreshed snapshot that drops a user/assistant message already shown.
+  const expected = current
+    .map(durableMessageShape)
+    .filter((message): message is MessageShape => message !== null);
+  if (expected.length === 0) return true;
+  const candidates = snapshot
+    .map(durableMessageShape)
+    .filter((message): message is MessageShape => message !== null);
+
+  let cursor = 0;
+  for (const message of expected) {
+    let found = false;
+    while (cursor < candidates.length) {
+      const candidate = candidates[cursor];
+      cursor += 1;
+      if (sameMessageShape(message, candidate)) {
+        found = true;
+        break;
+      }
+    }
+    if (!found) return false;
+  }
+  return true;
+}
+
 function isStaleThreadSnapshot(current: UIMessage[], snapshot: UIMessage[]): boolean {
-  if (current.length === 0 || snapshot.length >= current.length) return false;
+  if (current.length === 0) return false;
   if (snapshot.length === 0) return true;
+  if (!preservesDurableMessages(current, snapshot)) return true;
+  if (snapshot.length >= current.length) return false;
   return snapshot.every((message, index) => sameMessageShape(current[index], message));
 }
 
@@ -98,6 +143,7 @@ interface ThreadShellProps {
   onWorkspaceScopeChange?: (scope: WorkspaceScopePayload) => void;
   settingsSnapshot?: SettingsPayload | null;
   onOpenModelSettings?: () => void;
+  skills?: SkillSummary[];
 }
 
 function toModelBadgeLabel(modelName: string | null): string | null {
@@ -248,6 +294,7 @@ export function ThreadShell({
   onWorkspaceScopeChange,
   settingsSnapshot = null,
   onOpenModelSettings,
+  skills = [],
 }: ThreadShellProps) {
   const { t } = useTranslation();
   const chatId = session?.chatId ?? null;
@@ -284,6 +331,7 @@ export function ThreadShell({
   const [settings, setSettings] = useState<SettingsPayload | null>(settingsSnapshot);
   const [heroGreetingKey, setHeroGreetingKey] = useState(randomHeroGreetingKey);
   const [scrollToBottomSignal, setScrollToBottomSignal] = useState(0);
+  const [scrollToLatestUserPromptSignal, setScrollToLatestUserPromptSignal] = useState(0);
   const [filePreviewPath, setFilePreviewPath] = useState<string | null>(null);
   const [filePreviewClosing, setFilePreviewClosing] = useState(false);
   const [filePreviewWidth, setFilePreviewWidth] = useState(FILE_PREVIEW_DEFAULT_WIDTH);
@@ -291,6 +339,7 @@ export function ThreadShell({
   const filePreviewWidthRef = useRef(FILE_PREVIEW_DEFAULT_WIDTH);
   const filePreviewCloseTimerRef = useRef<number | null>(null);
   const pendingFirstRef = useRef<PendingFirstMessage | null>(null);
+  const [pendingFirstTargetChatId, setPendingFirstTargetChatId] = useState<string | null>(null);
   const viewportRef = useRef<ThreadViewportHandle | null>(null);
   const messageCacheRef = useRef<Map<string, UIMessage[]>>(new Map());
   /** Last chatId we associated with the in-memory thread (for cache-on-switch). */
@@ -300,6 +349,7 @@ export function ThreadShell({
   const appliedHistoryVersionRef = useRef<Map<string, number>>(new Map());
   const pendingCanonicalHydrateRef = useRef<Set<string>>(new Set());
   const sessionKeyByChatIdRef = useRef<Map<string, string>>(new Map());
+  const bottomScrolledChatIdRef = useRef<string | null>(null);
 
   const initial = useMemo(() => {
     if (!chatId) return historical;
@@ -448,15 +498,21 @@ export function ThreadShell({
     return client.onSessionUpdate((updatedChatId, scope) => {
       if (updatedChatId !== chatId) return;
       if (scope === "metadata") return;
+      viewportRef.current?.cancelAutoScroll();
       pendingCanonicalHydrateRef.current.add(chatId);
       refreshHistory();
     });
   }, [chatId, client, refreshHistory]);
 
   useEffect(() => {
-    if (!chatId || loading) return;
+    if (!chatId) {
+      bottomScrolledChatIdRef.current = null;
+      return;
+    }
+    if (loading || bottomScrolledChatIdRef.current === chatId) return;
+    bottomScrolledChatIdRef.current = chatId;
     setScrollToBottomSignal((value) => value + 1);
-  }, [chatId, loading, historical]);
+  }, [chatId, loading]);
 
   useEffect(() => {
     if (chatId) return;
@@ -500,15 +556,22 @@ export function ThreadShell({
     messageCacheRef.current.set(chatId, projectWebuiThreadMessages(messages));
   }, [chatId, loading, messages]);
 
+  // The landing composer queues the first message while `new_chat` is in flight.
+  // Only the chat created for that send may consume it; selecting another chat
+  // while creation is pending must not leak the message there.
   useEffect(() => {
-    if (!chatId) return;
+    if (!chatId || pendingFirstTargetChatId !== chatId) return;
     const pending = pendingFirstRef.current;
-    if (!pending) return;
+    if (!pending) {
+      setPendingFirstTargetChatId(null);
+      return;
+    }
     pendingFirstRef.current = null;
-    setScrollToBottomSignal((value) => value + 1);
+    setPendingFirstTargetChatId(null);
+    setScrollToLatestUserPromptSignal((value) => value + 1);
     send(pending.content, pending.images, pending.options);
     setBooting(false);
-  }, [chatId, send]);
+  }, [chatId, pendingFirstTargetChatId, send]);
 
   useEffect(() => {
     let cancelled = false;
@@ -530,18 +593,22 @@ export function ThreadShell({
       if (booting) return;
       setBooting(true);
       pendingFirstRef.current = { content, images, options: withWorkspaceScope(options) };
+      setPendingFirstTargetChatId(null);
       const newId = await onCreateChat?.(workspaceScope);
       if (!newId) {
         pendingFirstRef.current = null;
+        setPendingFirstTargetChatId(null);
         setBooting(false);
+        return;
       }
+      setPendingFirstTargetChatId(newId);
     },
     [booting, onCreateChat, withWorkspaceScope, workspaceScope],
   );
 
   const handleThreadSend = useCallback(
     (content: string, images?: SendImage[], options?: SendOptions) => {
-      setScrollToBottomSignal((value) => value + 1);
+      setScrollToLatestUserPromptSignal((value) => value + 1);
       send(content, images, withWorkspaceScope(options));
     },
     [send, withWorkspaceScope],
@@ -674,6 +741,7 @@ export function ThreadShell({
           slashCommands={slashCommands}
           cliApps={cliApps}
           mcpPresets={mcpPresets}
+          skills={skills}
           onStop={stop}
           onTranscribeAudio={transcribeAudio}
           runStartedAt={runStartedAt}
@@ -685,6 +753,7 @@ export function ThreadShell({
           workspaceError={workspaceError}
           onWorkspaceScopeChange={onWorkspaceScopeChange}
           pendingQueueKey={chatId}
+          transcriptionProvider={settingsSnapshot?.transcription?.provider}
         />
       ) : (
         <ThreadComposer
@@ -705,6 +774,7 @@ export function ThreadShell({
           slashCommands={slashCommands}
           cliApps={cliApps}
           mcpPresets={mcpPresets}
+          skills={skills}
           runStartedAt={runStartedAt}
           onTranscribeAudio={transcribeAudio}
           goalState={goalState}
@@ -714,6 +784,7 @@ export function ThreadShell({
           workspaceScopeDisabled={workspaceScopeDisabled}
           workspaceError={workspaceError}
           onWorkspaceScopeChange={onWorkspaceScopeChange}
+          transcriptionProvider={settingsSnapshot?.transcription?.provider}
         />
       )}
     </>
@@ -725,7 +796,7 @@ export function ThreadShell({
     </div>
   ) : (
     <div className="flex w-full flex-col items-center text-center animate-in fade-in-0 slide-in-from-bottom-2 duration-500">
-      <h1 className="max-w-[30rem] text-balance text-[34px] font-normal leading-[1.08] tracking-normal text-foreground sm:text-[48px] sm:leading-tight">
+      <h1 className="max-w-[44rem] text-balance text-[34px] font-normal leading-[1.08] tracking-normal text-foreground sm:text-[48px] sm:leading-tight">
         {t(heroGreetingKey)}
       </h1>
     </div>
@@ -764,6 +835,7 @@ export function ThreadShell({
           emptyState={emptyState}
           composer={composer}
           scrollToBottomSignal={scrollToBottomSignal}
+          scrollToLatestUserPromptSignal={scrollToLatestUserPromptSignal}
           conversationKey={historyKey}
           showScrollToBottomButton={!!session}
           cliApps={cliApps}

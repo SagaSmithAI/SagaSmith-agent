@@ -12,4 +12,4 @@ Fix (pick one):
 EOF
     exit 1
 fi
-exec uv run nanobot "$@"
+exec nanobot "$@"

@@ -1,6 +1,6 @@
 # Image Generation
 
-nanobot can generate and edit images through the `generate_image` tool. In the WebUI, users can enable **Image Generation** from the composer, choose an aspect ratio, and keep iterating on generated images inside the same chat.
+nanobot can generate and edit images through the `generate_image` tool. Enable the tool in WebUI Settings, then ask for an image normally in chat; the agent decides when to call it and can keep iterating on generated images in the same conversation.
 
 The feature is disabled by default. Enable it in `~/.nanobot/config.json`, configure a supported image provider, then restart the gateway.
 
@@ -32,11 +32,9 @@ See [Provider Notes](#provider-notes) for Custom, AIHubMix, MiniMax, Gemini, Oll
 
 ## WebUI Usage
 
-In the WebUI composer:
-
-1. Click **Image Generation**.
-2. Choose an aspect ratio: `Auto`, `1:1`, `3:4`, `9:16`, `4:3`, or `16:9`.
-3. Describe the image or the edit you want.
+1. Open Settings and enable **Image Generation** with a configured provider and model.
+2. Describe the image or edit you want in chat.
+3. Include an aspect ratio or size in the request when the configured defaults are not suitable.
 4. Attach reference images when editing an existing image.
 
 Generated images are rendered as assistant media in the chat. Follow-up prompts such as "make it warmer", "change the background", or "try a 16:9 version" can reuse the most recent generated artifact.
@@ -272,7 +270,7 @@ StepPlan is StepFun's subscription tier and uses a different API base URL. The i
   "providers": {
     "stepfun": {
       "apiKey": "${STEPFUN_API_KEY}",
-      "apiBase": "https://api.stepfun.com/step_plan/v1"
+      "apiBase": "https://api.stepfun.ai/step_plan/v1"
     }
   },
   "tools": {
@@ -285,7 +283,7 @@ StepPlan is StepFun's subscription tier and uses a different API base URL. The i
 }
 ```
 
-`apiBase` takes precedence over the registry default, so with the StepPlan base URL configured, image requests are sent to `https://api.stepfun.com/step_plan/v1/images/generations` — the same path prefix used for LLM calls. The API key is shared with the standard StepFun provider.
+`apiBase` takes precedence over the registry default, so with the StepPlan base URL configured, image requests are sent to `https://api.stepfun.ai/step_plan/v1/images/generations` — the same path prefix used for LLM calls. The API key is shared with the standard StepFun provider.
 
 ### Zhipu
 

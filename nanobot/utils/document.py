@@ -311,7 +311,7 @@ def extract_documents(
         else:
             extracted = extract_text(p)
             if extracted and not extracted.startswith("[error:"):
-                doc_texts.append(f"[File: {p.name}]\n[Attachment: {p}]\n{extracted}")
+                doc_texts.append(f"[File: {p.name}]\n{extracted}")
 
     if doc_texts:
         text = text + "\n\n" + "\n\n".join(doc_texts)

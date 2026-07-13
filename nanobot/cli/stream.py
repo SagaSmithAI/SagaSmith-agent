@@ -45,7 +45,7 @@ def _make_console() -> Console:
 class ThinkingSpinner:
     """Spinner that shows '<bot_name> is thinking...' with pause support."""
 
-    def __init__(self, console: Console | None = None, bot_name: str = "明萨拉"):
+    def __init__(self, console: Console | None = None, bot_name: str = "nanobot"):
         c = console or _make_console()
         self._console = c
         self._spinner = c.status(f"[dim]{bot_name} is thinking...[/dim]", spinner="dots")
@@ -95,8 +95,8 @@ class StreamRenderer:
         self,
         render_markdown: bool = True,
         show_spinner: bool = True,
-        bot_name: str = "明萨拉",
-        bot_icon: str = "🎲",
+        bot_name: str = "nanobot",
+        bot_icon: str = "🐈",
     ):
         self._md = render_markdown
         self._show_spinner = show_spinner

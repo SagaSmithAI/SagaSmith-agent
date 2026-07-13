@@ -6,12 +6,12 @@ from nanobot.cli.stream import StreamRenderer, ThinkingSpinner
 from nanobot.config.schema import AgentDefaults, Config
 
 
-def test_bot_name_and_icon_defaults_use_dnd_dm_branding() -> None:
-    """Default values expose the D&D DM identity."""
+def test_bot_name_and_icon_defaults_preserve_current_branding() -> None:
+    """Default values keep the existing 'nanobot' name and cat icon."""
     defaults = AgentDefaults()
 
-    assert defaults.bot_name == "明萨拉"
-    assert defaults.bot_icon == "🎲"
+    assert defaults.bot_name == "nanobot"
+    assert defaults.bot_icon == "🐈"
 
 
 def test_bot_name_and_icon_can_be_overridden_via_config() -> None:

@@ -1,1 +1,0 @@
-"""Campaign module retrieval services."""

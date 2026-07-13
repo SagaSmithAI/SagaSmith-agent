@@ -94,9 +94,6 @@ async def test_group_mention_routes_with_sender_label() -> None:
     assert msg.sender_id == "user1"
     assert msg.chat_id == "group:100"
     assert msg.content == "Alice: hello"
-    assert msg.metadata["sender_id"] == "user1"
-    assert msg.metadata["group_id"] == "100"
-    assert msg.metadata["message_type"] == "group"
     assert msg.metadata["message_id"] == 1
 
 
