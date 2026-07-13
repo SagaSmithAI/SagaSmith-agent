@@ -2325,6 +2325,46 @@ def plugins_disable(
 
 
 # ============================================================================
+# Bundled Dependency Commands
+# ============================================================================
+
+dependencies_app = typer.Typer(help="Inspect bundled SagaSmith dependencies")
+app.add_typer(dependencies_app, name="dependencies")
+
+
+@dependencies_app.command("status")
+def dependencies_status(
+    fetch: bool = typer.Option(True, "--fetch/--no-fetch", help="Refresh origin/main before checking"),
+):
+    """Show bundled dependency revisions and available updates."""
+    from nanobot.dependencies import check_dependency_updates
+
+    table = Table(title="Bundled SagaSmith Dependencies")
+    table.add_column("Dependency")
+    table.add_column("Pinned")
+    table.add_column("origin/main")
+    table.add_column("Status")
+    for dependency in check_dependency_updates(fetch=fetch):
+        if dependency.error:
+            status = f"[red]{escape(dependency.error)}[/red]"
+        elif dependency.dirty:
+            status = "[yellow]local changes[/yellow]"
+        elif dependency.behind:
+            status = f"[yellow]{dependency.behind} commit(s) available[/yellow]"
+        elif dependency.ahead:
+            status = f"[yellow]{dependency.ahead} local commit(s)[/yellow]"
+        else:
+            status = "[green]up to date[/green]"
+        table.add_row(
+            dependency.name,
+            dependency.current[:12] if dependency.current else "-",
+            dependency.remote[:12] if dependency.remote else "-",
+            status,
+        )
+    console.print(table)
+
+
+# ============================================================================
 # Status Commands
 # ============================================================================
 

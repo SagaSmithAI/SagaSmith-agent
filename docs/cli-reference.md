@@ -18,6 +18,7 @@ Use this page when you know what you want to run and need the command shape. For
 | Deliver a local trigger | `nanobot trigger <id> "message"` | Created first with `/trigger <name>` in the target chat/session |
 | Serve an OpenAI-compatible API | `nanobot serve` | Starts `/v1/chat/completions`, `/v1/models`, and `/health` |
 | Check chat channel setup | `nanobot channels status` | Useful before starting `nanobot gateway` |
+| Check bundled SagaSmith dependencies | `nanobot dependencies status` | Fetches and compares the pinned core and D&D submodules with `origin/main` |
 | Manage optional features | `nanobot plugins list` | Shows channels and optional capabilities you can turn on |
 | Log in to QR/OAuth-style channels | `nanobot channels login <channel>` | Used by channels such as WhatsApp and WeChat |
 | Log in to OAuth model providers | `nanobot provider login <provider>` | Used by OAuth providers such as OpenAI Codex and GitHub Copilot |
@@ -32,6 +33,17 @@ python -m nanobot --version
 ```
 
 `python -m nanobot ...` is useful when the package is installed but the `nanobot` script is not on `PATH`.
+
+## Bundled Dependencies
+
+SagaSmith includes pinned `sagasmith-core` and `sagasmith-dnd` Git submodules. Initialize them after cloning:
+
+```bash
+git submodule update --init --recursive
+nanobot dependencies status
+```
+
+`nanobot dependencies status` fetches `origin/main` by default and reports available commits without changing either dependency. Use `--no-fetch` for an offline check.
 
 ## Common Patterns
 

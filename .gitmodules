@@ -1,0 +1,8 @@
+[submodule "sagasmith/Sagasmith-core"]
+	path = sagasmith/Sagasmith-core
+	url = https://github.com/SagaSmithAI/Sagasmith-core.git
+	branch = main
+[submodule "sagasmith/Sagasmith-dnd"]
+	path = sagasmith/Sagasmith-dnd
+	url = https://github.com/SagaSmithAI/Sagasmith-dnd.git
+	branch = main

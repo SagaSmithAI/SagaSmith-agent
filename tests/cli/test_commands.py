@@ -31,6 +31,31 @@ from nanobot.webui.metadata import (
 runner = CliRunner()
 
 
+def test_dependencies_status_renders_update_state(monkeypatch) -> None:
+    from nanobot.dependencies import DependencyStatus
+
+    monkeypatch.setattr(
+        "nanobot.dependencies.check_dependency_updates",
+        lambda **_kwargs: [
+            DependencyStatus(
+                "sagasmith-core",
+                Path("sagasmith/Sagasmith-core"),
+                "a" * 40,
+                "b" * 40,
+                0,
+                2,
+                False,
+            )
+        ],
+    )
+
+    result = runner.invoke(app, ["dependencies", "status", "--no-fetch"])
+
+    assert result.exit_code == 0
+    assert "sagasmith-core" in result.output
+    assert "2 commit(s) available" in result.output
+
+
 def test_proactive_websocket_delivery_gets_fresh_turn_id() -> None:
     metadata = {
         "webui": True,
