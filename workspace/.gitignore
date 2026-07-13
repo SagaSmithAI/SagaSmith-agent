@@ -1,3 +1,14 @@
 *
 !.gitignore
 !README.md
+!AGENTS.md
+!SOUL.md
+!IDENTITY.md
+!USER.md
+!HEARTBEAT.md
+!memory/
+memory/*
+!memory/MEMORY.md
+!prompts/
+prompts/*
+!prompts/README.md
