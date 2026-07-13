@@ -26,7 +26,7 @@ The default instance lives under `~/.nanobot/`:
 | Path | Meaning |
 |---|---|
 | `~/.nanobot/config.json` | Instance configuration: providers, model defaults, channels, tools, gateway, API, and runtime options |
-| `~/.nanobot/workspace/` | Agent workspace: memory, sessions, heartbeat tasks, cron jobs, skills, and generated artifacts |
+| `workspace/` | Project-relative agent workspace: memory, sessions, heartbeat tasks, cron jobs, skills, and generated artifacts |
 
 You can override both with command flags:
 

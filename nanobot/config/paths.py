@@ -6,6 +6,8 @@ from pathlib import Path
 
 from nanobot.utils.helpers import ensure_dir
 
+DEFAULT_WORKSPACE = Path("workspace")
+
 
 def get_config_path() -> Path:
     """Get the configuration file path (lazy import to break circular dependency).
@@ -50,14 +52,14 @@ def get_webui_dir() -> Path:
 
 def get_workspace_path(workspace: str | None = None) -> Path:
     """Resolve and ensure the agent workspace path."""
-    path = Path(workspace).expanduser() if workspace else Path.home() / ".nanobot" / "workspace"
+    path = Path(workspace).expanduser() if workspace else DEFAULT_WORKSPACE
     return ensure_dir(path)
 
 
 def is_default_workspace(workspace: str | Path | None) -> bool:
     """Return whether a workspace resolves to nanobot's default workspace path."""
-    current = Path(workspace).expanduser() if workspace is not None else Path.home() / ".nanobot" / "workspace"
-    default = Path.home() / ".nanobot" / "workspace"
+    current = Path(workspace).expanduser() if workspace is not None else DEFAULT_WORKSPACE
+    default = DEFAULT_WORKSPACE
     return current.resolve(strict=False) == default.resolve(strict=False)
 
 

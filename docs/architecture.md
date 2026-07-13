@@ -141,7 +141,7 @@ Defaults:
 | Path | Default |
 |---|---|
 | Config | `~/.nanobot/config.json` |
-| Workspace | `~/.nanobot/workspace/` |
+| Workspace | `workspace/` relative to the directory where nanobot runs |
 | Sessions | `<workspace>/sessions/*.jsonl` |
 | Memory | `<workspace>/memory/` |
 | Cron store | `<workspace>/cron/jobs.json` |

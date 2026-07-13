@@ -7,7 +7,7 @@ Use this page when you know what you want to run and need the command shape. For
 | Goal | Command | Notes |
 |---|---|---|
 | Check the install | `nanobot --version` | If this fails, try `python -m nanobot --version` |
-| Create or refresh config | `nanobot onboard` | Creates `~/.nanobot/config.json` and `~/.nanobot/workspace/` |
+| Create or refresh config | `nanobot onboard` | Creates `~/.nanobot/config.json` and project-relative `workspace/` |
 | Refresh config non-interactively | `nanobot onboard --refresh` | Preserves existing values and adds missing default fields without prompting |
 | Use guided setup | `nanobot onboard --wizard` | Best when you prefer prompts over hand-editing JSON |
 | Open the browser workbench | `nanobot webui` | Prepares local WebUI settings, starts the gateway, and opens the browser |
@@ -80,7 +80,7 @@ Default paths:
 | Path | Default |
 |---|---|
 | Config | `~/.nanobot/config.json` |
-| Workspace | `~/.nanobot/workspace/` |
+| Workspace | `workspace/` relative to the directory where nanobot runs |
 
 ## Agent CLI
 
