@@ -312,6 +312,15 @@ def test_disabled_skills_excluded_from_get_always_skills(tmp_path: Path) -> None
     assert "beta" in always
 
 
+def test_sagasmith_suite_is_an_available_always_skill(monkeypatch: pytest.MonkeyPatch) -> None:
+    from nanobot.agent.skills import BUILTIN_SKILLS_DIR
+
+    monkeypatch.setattr("nanobot.agent.skills.shutil.which", lambda cmd: "/bin/sagasmith-dnd")
+    loader = SkillsLoader(Path.cwd() / "workspace", builtin_skills_dir=BUILTIN_SKILLS_DIR)
+
+    assert "sagasmith-dnd" in loader.get_always_skills()
+
+
 # -- multiline description tests (YAML folded > and literal |) -----------------
 
 

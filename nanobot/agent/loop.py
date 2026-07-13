@@ -349,6 +349,9 @@ class AgentLoop:
         self._extra_hooks: list[AgentHook] = hooks or []
         self._hook_factories: list[AgentTurnHookFactory] = hook_factories or []
 
+        from nanobot.sagasmith_runtime import configure_sagasmith_runtime
+
+        configure_sagasmith_runtime(workspace)
         self.context = ContextBuilder(workspace, timezone=timezone, disabled_skills=disabled_skills)
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()

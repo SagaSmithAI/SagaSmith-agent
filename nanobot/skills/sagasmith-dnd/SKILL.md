@@ -2,6 +2,11 @@
 name: sagasmith-dnd-suite
 description: "Cross-platform D&D 5e 2014/2024 game-master and campaign workflow using the SagaSmith JSON CLI."
 version: 2.0.0
+metadata:
+  nanobot:
+    always: true
+    requires:
+      bins: ["sagasmith-dnd"]
 ---
 
 # SagaSmith D&D Suite
@@ -19,12 +24,28 @@ This repository is an Agent Skill, not a Python runtime. It operates
 4. Never claim that Portable mode provides Runtime transactions, validated v2 actor
    cards, granular state mutations, or SQL Snapshot semantics.
 
+The bundled agent sets `DND_DATABASE_URL` to the active workspace database unless
+the deployment explicitly provides another value. Do not replace it during play.
+
 ## Included Skills
 
 - `skills/dnd-dm`: play, adjudication, rule/module retrieval, and narration.
 - `skills/dnd-campaign-manager`: campaign, character, save, and memory lifecycle.
 
 Module generation is maintained separately in `SagaSmith-module-gen-skills`.
+
+## CLI Discipline
+
+- Treat this skill and `references/cli-contract.md` as the CLI contract. Use
+  `sagasmith-dnd <group> --help` only when that contract does not answer a
+  command-shape question.
+- Do not inspect SagaSmith Python source, import private package internals, query
+  SQLite tables, or create probe scripts to infer CLI behavior.
+- Keep command output in the tool result. Do not create `._*.py`, `__*.py`,
+  `_*.txt`, or other temporary probes in the workspace. Persist only user-requested
+  campaign artifacts such as modules, exported cards, or reports.
+- On a CLI error, read its JSON envelope and follow `error.code`; do not fall back
+  to direct database manipulation.
 
 ## Invariants
 
