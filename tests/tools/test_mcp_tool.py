@@ -11,6 +11,7 @@ import httpx
 import pytest
 
 import nanobot.agent.tools.mcp as mcp_mod
+from nanobot.agent.tools.context import RequestContext, request_context
 from nanobot.agent.tools.mcp import (
     MCPPromptWrapper,
     MCPResourceWrapper,
@@ -23,7 +24,14 @@ from nanobot.agent.tools.mcp import (
 from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result
 from nanobot.config.schema import MCPServerConfig
 
-_PROXY_ENV_VARS = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy")
+_PROXY_ENV_VARS = (
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
+)
 
 
 class _FakeTextContent:
@@ -62,7 +70,9 @@ async def test_mcp_routing_context_prefers_available_mcp_capabilities() -> None:
     assert "MCP-first routing" in block.content
     assert "mcp_sagasmith_dnd_campaign_create" in block.content
     capability_line = next(
-        line for line in block.content.splitlines() if line.startswith("Available MCP capabilities:")
+        line
+        for line in block.content.splitlines()
+        if line.startswith("Available MCP capabilities:")
     )
     assert "shell" not in capability_line
 
@@ -162,6 +172,85 @@ def _make_wrapper(session: object, *, timeout: float = 0.1) -> MCPToolWrapper:
         inputSchema={"type": "object", "properties": {}},
     )
     return MCPToolWrapper(session, "test", tool_def, tool_timeout=timeout)
+
+
+def _profiled_wrapper(
+    session: object,
+    *,
+    name: str,
+    profiles: list[str],
+    default: str = "authoring",
+) -> MCPToolWrapper:
+    tool_def = SimpleNamespace(
+        name=name,
+        description=f"{name} tool",
+        inputSchema={"type": "object", "properties": {}},
+        meta={"sagasmith_tool_profiles": profiles},
+    )
+    return MCPToolWrapper(
+        session,
+        "sagasmith_dnd",
+        tool_def,
+        default_tool_profile=default,
+    )
+
+
+def test_mcp_tool_profiles_filter_schemas_and_stale_execution_per_session() -> None:
+    registry = ToolRegistry()
+    authoring = _profiled_wrapper(
+        SimpleNamespace(call_tool=None), name="module_write", profiles=["authoring"]
+    )
+    combat = _profiled_wrapper(
+        SimpleNamespace(call_tool=None), name="combat_status", profiles=["combat"]
+    )
+    registry.register(authoring)
+    registry.register(combat)
+
+    ctx = RequestContext(channel="discord", chat_id="profile-a", session_key="profile-a")
+    with request_context(ctx):
+        assert registry.definition_names() == [authoring.name]
+        tool, _, error = registry.prepare_call(combat.name, {})
+        assert tool is None
+        assert "unavailable in the current tool profile" in error
+
+
+def test_mcp_server_config_accepts_camel_case_default_tool_profile() -> None:
+    config = MCPServerConfig.model_validate({"command": "demo", "defaultToolProfile": "authoring"})
+    assert config.default_tool_profile == "authoring"
+
+
+@pytest.mark.asyncio
+async def test_mcp_profile_transition_is_scoped_to_current_session() -> None:
+    async def call_tool(_name: str, arguments: dict) -> object:
+        return SimpleNamespace(
+            content=[_FakeTextContent(json.dumps({"tool_profile": "combat"}))],
+            isError=False,
+        )
+
+    transition = _profiled_wrapper(
+        SimpleNamespace(call_tool=call_tool),
+        name="combat_start",
+        profiles=["play"],
+        default="play",
+    )
+    combat = _profiled_wrapper(
+        SimpleNamespace(call_tool=None),
+        name="combat_status",
+        profiles=["combat"],
+        default="play",
+    )
+    session_a = RequestContext(channel="discord", chat_id="a", session_key="phase-a")
+    session_b = RequestContext(channel="discord", chat_id="b", session_key="phase-b")
+
+    with request_context(session_a):
+        assert transition.is_available(session_a)
+        assert not combat.is_available(session_a)
+        await transition.execute()
+        assert combat.is_available(session_a)
+        assert not transition.is_available(session_a)
+    with request_context(session_b):
+        assert transition.is_available(session_b)
+        assert not combat.is_available(session_b)
 
 
 def test_wrapper_preserves_non_nullable_unions() -> None:
@@ -334,6 +423,95 @@ async def test_execute_returns_text_blocks() -> None:
 
 
 @pytest.mark.asyncio
+async def test_principal_injection_hides_and_overrides_model_argument() -> None:
+    captured: dict[str, object] = {}
+
+    async def call_tool(_name: str, arguments: dict) -> object:
+        captured.update(arguments)
+        return SimpleNamespace(content=[_FakeTextContent("ok")])
+
+    tool_def = SimpleNamespace(
+        name="campaign_get",
+        description="campaign",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "campaign_id": {"type": "string"},
+                "principal_id": {"type": "string"},
+            },
+            "required": ["campaign_id", "principal_id"],
+        },
+    )
+    wrapper = MCPToolWrapper(
+        SimpleNamespace(call_tool=call_tool),
+        "sagasmith_dnd",
+        tool_def,
+        inject_principal=True,
+    )
+    assert "principal_id" not in wrapper.parameters["properties"]
+    assert "principal_id" not in wrapper.parameters["required"]
+    with request_context(RequestContext(channel="discord", chat_id="chat", sender_id="user/42")):
+        assert await wrapper.execute(campaign_id="c1", principal_id="system:local") == "ok"
+    assert captured == {"campaign_id": "c1", "principal_id": "discord:user_42"}
+
+
+@pytest.mark.asyncio
+async def test_principal_injection_does_not_add_unknown_argument() -> None:
+    captured: dict[str, object] = {}
+
+    async def call_tool(_name: str, arguments: dict) -> object:
+        captured.update(arguments)
+        return SimpleNamespace(content=[_FakeTextContent("ok")])
+
+    tool_def = SimpleNamespace(
+        name="storage_status",
+        description="status",
+        inputSchema={"type": "object", "properties": {}},
+    )
+    wrapper = MCPToolWrapper(
+        SimpleNamespace(call_tool=call_tool), "sagasmith_dnd", tool_def, inject_principal=True
+    )
+    with request_context(RequestContext(channel="discord", chat_id="chat", sender_id="user/42")):
+        assert await wrapper.execute() == "ok"
+    assert captured == {}
+
+
+@pytest.mark.asyncio
+async def test_principal_injection_uses_caller_field_for_grants() -> None:
+    captured: dict[str, object] = {}
+
+    async def call_tool(_name: str, arguments: dict) -> object:
+        captured.update(arguments)
+        return SimpleNamespace(content=[_FakeTextContent("ok")])
+
+    tool_def = SimpleNamespace(
+        name="campaign_member_grant",
+        description="grant",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "campaign_id": {"type": "string"},
+                "principal_id": {"type": "string"},
+                "by_principal_id": {"type": "string"},
+            },
+            "required": ["campaign_id", "principal_id", "by_principal_id"],
+        },
+    )
+    wrapper = MCPToolWrapper(
+        SimpleNamespace(call_tool=call_tool), "sagasmith_dnd", tool_def, inject_principal=True
+    )
+    assert "principal_id" in wrapper.parameters["properties"]
+    assert "by_principal_id" not in wrapper.parameters["properties"]
+    with request_context(RequestContext(channel="discord", chat_id="chat", sender_id="user/42")):
+        assert await wrapper.execute(campaign_id="c1", principal_id="target") == "ok"
+    assert captured == {
+        "campaign_id": "c1",
+        "principal_id": "target",
+        "by_principal_id": "discord:user_42",
+    }
+
+
+@pytest.mark.asyncio
 async def test_execute_wraps_mcp_is_error_result() -> None:
     async def call_tool(_name: str, arguments: dict) -> object:
         return SimpleNamespace(
@@ -396,8 +574,7 @@ async def test_execute_preserves_success_text_that_starts_with_error() -> None:
 
 # Smallest valid 1x1 PNG, base64 without the data: prefix.
 _PNG_B64 = (
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8"
-    "/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
 )
 
 
@@ -921,6 +1098,7 @@ async def test_connect_mcp_servers_http_clients_reject_unsafe_redirect_targets(
 
     monkeypatch.setattr(mcp_mod, "validate_url_target", _validate)
     monkeypatch.setattr(mcp_mod, "_probe_http_url", _reachable)
+    monkeypatch.setattr(mcp_mod, "httpx_env_proxy_mounts", lambda: {})
     monkeypatch.setattr(
         mcp_mod,
         "PinnedDNSAsyncTransport",
@@ -1462,6 +1640,7 @@ async def test_connect_mcp_servers_enabled_tools_matches_sanitized_name(
 )
 def test_redact_url_strips_credentials_and_query(url: str, expected: str) -> None:
     assert mcp_mod._redact_url(url) == expected
+
 
 def test_mcp_tool_name_keeps_short_name():
     name = _sanitize_mcp_tool_name("mcp_myserver_resource_myres")

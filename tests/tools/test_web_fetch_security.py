@@ -247,6 +247,10 @@ def test_web_fetch_no_proxy_env_keeps_pinned_direct_route(monkeypatch):
 @pytest.mark.asyncio
 async def test_web_fetch_does_not_fallback_after_pinned_dns_rebind_rejection(monkeypatch):
     calls = {"evil.example": 0}
+    monkeypatch.setattr(
+        "nanobot.security.network.httpx_env_proxy_mounts",
+        lambda: {},
+    )
 
     def _rebinding_resolver(hostname, port, family=0, type_=0, proto=0, flags=0):
         host = str(hostname).rstrip(".").lower()
@@ -448,6 +452,10 @@ async def test_web_fetch_blocks_private_redirect_before_readability_request(monk
 @pytest.mark.asyncio
 async def test_web_fetch_blocks_private_redirect_before_returning_image(monkeypatch):
     tool = WebFetchTool(config=WebFetchConfig(use_jina_reader=False))
+    monkeypatch.setattr(
+        "nanobot.security.network.httpx_env_proxy_mounts",
+        lambda: {},
+    )
 
     def handler(request: httpx.Request) -> httpx.Response:
         if str(request.url) == "https://example.com/image.png":
@@ -492,6 +500,10 @@ async def test_web_fetch_blocks_private_redirect_before_returning_image(monkeypa
 @pytest.mark.asyncio
 async def test_web_fetch_does_not_request_private_redirect_target(monkeypatch):
     tool = WebFetchTool(config=WebFetchConfig(use_jina_reader=False))
+    monkeypatch.setattr(
+        "nanobot.security.network.httpx_env_proxy_mounts",
+        lambda: {},
+    )
     requested: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:

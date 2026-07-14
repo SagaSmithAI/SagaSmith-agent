@@ -59,11 +59,7 @@ class ToolRegistry:
         key = self._lookup_key(str(name or ""))
         if not key:
             return None
-        matches = [
-            registered
-            for registered in self._tools
-            if self._lookup_key(registered) == key
-        ]
+        matches = [registered for registered in self._tools if self._lookup_key(registered) == key]
         if len(matches) == 1:
             return matches[0]
         return None
@@ -90,10 +86,19 @@ class ToolRegistry:
         sorted and appended.  The result is cached until the next
         register/unregister call.
         """
-        if self._cached_definitions is not None:
+        contextual = any(
+            callable(getattr(tool, "is_available", None)) for tool in self._tools.values()
+        )
+        if self._cached_definitions is not None and not contextual:
             return self._cached_definitions
 
-        definitions = [tool.to_schema() for tool in self._tools.values()]
+        ctx = current_request_context()
+        visible_tools = [
+            tool
+            for tool in self._tools.values()
+            if not callable(getattr(tool, "is_available", None)) or tool.is_available(ctx)
+        ]
+        definitions = [tool.to_schema() for tool in visible_tools]
         builtins: list[dict[str, Any]] = []
         mcp_tools: list[dict[str, Any]] = []
         for schema in definitions:
@@ -105,8 +110,20 @@ class ToolRegistry:
 
         builtins.sort(key=self._schema_name)
         mcp_tools.sort(key=self._schema_name)
-        self._cached_definitions = builtins + mcp_tools
-        return self._cached_definitions
+        result = builtins + mcp_tools
+        if not contextual:
+            self._cached_definitions = result
+        return result
+
+    def definition_names(self) -> list[str]:
+        """Return registered tool names visible in the current request."""
+        ctx = current_request_context()
+        names = [
+            name
+            for name, tool in self._tools.items()
+            if not callable(getattr(tool, "is_available", None)) or tool.is_available(ctx)
+        ]
+        return sorted(names, key=lambda name: (name.startswith("mcp_"), name))
 
     def prepare_call(
         self,
@@ -117,11 +134,29 @@ class ToolRegistry:
         tool = self._tools.get(name)
         if not tool:
             suggestion = self._suggest_name(str(name))
-            hint = f" Did you mean '{suggestion}'? Tool names must match exactly." if suggestion else ""
-            return None, params, (
+            hint = (
+                f" Did you mean '{suggestion}'? Tool names must match exactly."
+                if suggestion
+                else ""
+            )
+            return (
+                None,
+                params,
+                (
+                    ToolResult.error(
+                        f"Error: Tool '{name}' not found.{hint} Available: {', '.join(self.tool_names)}"
+                    )
+                ),
+            )
+
+        availability = getattr(tool, "is_available", None)
+        if callable(availability) and not availability(current_request_context()):
+            return (
+                None,
+                params,
                 ToolResult.error(
-                    f"Error: Tool '{name}' not found.{hint} Available: {', '.join(self.tool_names)}"
-                )
+                    f"Error: Tool '{name}' is unavailable in the current tool profile."
+                ),
             )
 
         # Compatibility for external tools that still implement the legacy
@@ -132,19 +167,29 @@ class ToolRegistry:
 
         params = self._coerce_params(tool, params)
         if not isinstance(params, dict):
-            return tool, params, (
-                ToolResult.error(
-                    f"Error: Tool '{name}' parameters must be a JSON object, got "
-                    f"{type(params).__name__}. Use named parameters like "
-                    'tool_name(param1="value1", param2="value2") matching the tool schema.'
-                )
+            return (
+                tool,
+                params,
+                (
+                    ToolResult.error(
+                        f"Error: Tool '{name}' parameters must be a JSON object, got "
+                        f"{type(params).__name__}. Use named parameters like "
+                        'tool_name(param1="value1", param2="value2") matching the tool schema.'
+                    )
+                ),
             )
 
         cast_params = tool.cast_params(params)
         errors = tool.validate_params(cast_params)
         if errors:
-            return tool, cast_params, (
-                ToolResult.error(f"Error: Invalid parameters for tool '{name}': " + "; ".join(errors))
+            return (
+                tool,
+                cast_params,
+                (
+                    ToolResult.error(
+                        f"Error: Invalid parameters for tool '{name}': " + "; ".join(errors)
+                    )
+                ),
             )
         return tool, cast_params, None
 

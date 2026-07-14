@@ -1,4 +1,5 @@
 import json
+import os
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -152,7 +153,12 @@ async def test_exec_tool_uses_scope_project_as_default_cwd(tmp_path: Path) -> No
     )
     token = bind_workspace_scope(scope)
     try:
-        result = await tool.execute(command="printf ok > scoped-marker.txt")
+        command = (
+            "Set-Content -LiteralPath scoped-marker.txt -Value ok -NoNewline"
+            if os.name == "nt"
+            else "printf ok > scoped-marker.txt"
+        )
+        result = await tool.execute(command=command)
     finally:
         reset_workspace_scope(token)
 
@@ -174,7 +180,12 @@ async def test_exec_full_scope_allows_explicit_cwd_outside_project(tmp_path: Pat
     )
     token = bind_workspace_scope(scope)
     try:
-        result = await tool.execute(command="printf ok > outside-marker.txt", working_dir=str(outside))
+        command = (
+            "Set-Content -LiteralPath outside-marker.txt -Value ok -NoNewline"
+            if os.name == "nt"
+            else "printf ok > outside-marker.txt"
+        )
+        result = await tool.execute(command=command, working_dir=str(outside))
     finally:
         reset_workspace_scope(token)
 

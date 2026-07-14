@@ -91,6 +91,7 @@ class SubagentManager:
         tools_config: ToolsConfig | None = None,
         restrict_to_workspace: bool = False,
         disabled_skills: list[str] | None = None,
+        external_skills_dirs: list[str] | None = None,
         max_iterations: int | None = None,
         max_concurrent_subagents: int | None = None,
         fail_on_tool_error: bool | None = None,
@@ -127,6 +128,7 @@ class SubagentManager:
         self.max_tool_result_chars = max_tool_result_chars
         self.restrict_to_workspace = restrict_to_workspace
         self.disabled_skills = set(disabled_skills or [])
+        self.external_skills_dirs = list(external_skills_dirs or [])
         self.max_iterations = (
             max_iterations
             if max_iterations is not None
@@ -439,6 +441,7 @@ class SubagentManager:
         skills_summary = SkillsLoader(
             root,
             disabled_skills=self.disabled_skills,
+            external_skill_dirs=self.external_skills_dirs,
         ).build_skills_summary()
         return render_template(
             "agent/subagent_system.md",

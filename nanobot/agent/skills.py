@@ -26,10 +26,27 @@ class SkillsLoader:
     specific tools or perform certain tasks.
     """
 
-    def __init__(self, workspace: Path, builtin_skills_dir: Path | None = None, disabled_skills: set[str] | None = None):
+    def __init__(
+        self,
+        workspace: Path,
+        builtin_skills_dir: Path | None = None,
+        disabled_skills: set[str] | None = None,
+        external_skill_dirs: list[str | Path] | None = None,
+    ):
         self.workspace = workspace
         self.workspace_skills = workspace / "skills"
         self.builtin_skills = builtin_skills_dir or BUILTIN_SKILLS_DIR
+        external = os.environ.get("SAGASMITH_EXTERNAL_SKILLS_DIRS", "")
+        configured = list(external_skill_dirs or [])
+        configured.extend(item for item in external.split(os.pathsep) if item.strip())
+        self.external_skill_dirs = []
+        known_paths: set[Path] = set()
+        for item in configured:
+            path = Path(item).expanduser().resolve(strict=False)
+            if path in known_paths:
+                continue
+            known_paths.add(path)
+            self.external_skill_dirs.append(path)
         self.disabled_skills = disabled_skills or set()
 
     def _skill_entries_from_dir(self, base: Path, source: str, *, skip_names: set[str] | None = None) -> list[dict[str, str]]:
@@ -64,6 +81,11 @@ class SkillsLoader:
             skills.extend(
                 self._skill_entries_from_dir(self.builtin_skills, "builtin", skip_names=workspace_names)
             )
+        known_names = {entry["name"] for entry in skills}
+        for root in self.external_skill_dirs:
+            extra = self._skill_entries_from_dir(root, "external", skip_names=known_names)
+            skills.extend(extra)
+            known_names.update(entry["name"] for entry in extra)
 
         if self.disabled_skills:
             skills = [s for s in skills if s["name"] not in self.disabled_skills]
@@ -85,6 +107,7 @@ class SkillsLoader:
         roots = [self.workspace_skills]
         if self.builtin_skills:
             roots.append(self.builtin_skills)
+        roots.extend(self.external_skill_dirs)
         for root in roots:
             path = root / name / "SKILL.md"
             if path.exists():

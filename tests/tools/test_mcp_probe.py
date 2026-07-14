@@ -18,6 +18,10 @@ _PROXY_ENV_VARS = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "http
 def _clear_proxy_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in (*_PROXY_ENV_VARS, "NO_PROXY", "no_proxy"):
         monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(
+        "nanobot.agent.tools.mcp.env_proxy_applies_to_url",
+        lambda _url: False,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -49,9 +53,24 @@ async def test_probe_returns_false_for_closed_port():
 
 
 @pytest.mark.asyncio
-async def test_probe_uses_default_port_for_http():
+async def test_probe_uses_default_port_for_http(monkeypatch: pytest.MonkeyPatch):
     """When no port in URL, should default to 80 (will fail -> False)."""
+    attempts: list[tuple[str, int]] = []
+
+    async def fail_connection(host: str, port: int):
+        attempts.append((host, port))
+        raise OSError("closed")
+
+    monkeypatch.setattr(
+        "nanobot.agent.tools.mcp.resolve_url_target",
+        lambda _url: (True, "", ("203.0.113.1",)),
+    )
+    monkeypatch.setattr(
+        "nanobot.agent.tools.mcp.asyncio.open_connection",
+        fail_connection,
+    )
     assert await _probe_http_url("http://unreachable-host.test/mcp") is False
+    assert attempts == [("203.0.113.1", 80)]
 
 
 @pytest.mark.asyncio
@@ -73,6 +92,10 @@ async def test_probe_skips_direct_tcp_when_global_proxy_env_is_set(monkeypatch):
 
     monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example:8080")
     monkeypatch.setenv("NO_PROXY", "localhost,127.0.0.1,::1")
+    monkeypatch.setattr(
+        "nanobot.agent.tools.mcp.env_proxy_applies_to_url",
+        lambda _url: True,
+    )
     monkeypatch.setattr("nanobot.agent.tools.mcp.asyncio.open_connection", _open_connection)
 
     with patch("nanobot.security.network.socket.getaddrinfo", _resolver):

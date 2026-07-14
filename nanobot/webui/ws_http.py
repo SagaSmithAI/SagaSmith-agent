@@ -158,6 +158,7 @@ class GatewayHTTPHandler:
         workspaces: WebUIWorkspaceController,
         skills_workspace_path: Path,
         disabled_skills: set[str] | None = None,
+        external_skills_dirs: list[str] | None = None,
         cron_service: CronService | None = None,
         local_trigger_store: LocalTriggerStore | None = None,
         cron_pending_job_ids: Callable[[str], set[str]] | None = None,
@@ -174,6 +175,7 @@ class GatewayHTTPHandler:
         self.workspaces = workspaces
         self.skills_workspace_path = skills_workspace_path
         self.disabled_skills = disabled_skills or set()
+        self.external_skills_dirs = list(external_skills_dirs or [])
         self.cron_service = cron_service
         self.local_trigger_store = local_trigger_store
         self.cron_pending_job_ids = cron_pending_job_ids
@@ -779,6 +781,7 @@ class GatewayHTTPHandler:
             webui_skills_payload(
                 self.skills_workspace_path,
                 disabled_skills=self.disabled_skills,
+                external_skills_dirs=self.external_skills_dirs,
             )
         )
 
@@ -794,6 +797,7 @@ class GatewayHTTPHandler:
             self.skills_workspace_path,
             name,
             disabled_skills=self.disabled_skills,
+            external_skills_dirs=self.external_skills_dirs,
         )
         if payload is None:
             return _http_error(404, "skill not found")

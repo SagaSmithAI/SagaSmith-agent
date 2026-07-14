@@ -166,6 +166,9 @@ class ChannelManager:
                         workspace_path=workspace,
                         default_restrict_to_workspace=self.config.tools.restrict_to_workspace,
                         disabled_skills=set(self.config.agents.defaults.disabled_skills),
+                        external_skills_dirs=list(
+                            self.config.agents.defaults.external_skills_dirs
+                        ),
                         runtime_model_name=self._webui_runtime_model_name,
                         runtime_surface=self._webui_runtime_surface,
                         runtime_capabilities_overrides=self._webui_runtime_capabilities,

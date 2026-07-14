@@ -54,6 +54,13 @@ when starting nanobot from the SagaSmith-agent repository root:
 
 ```json
 {
+  "agents": {
+    "defaults": {
+      "externalSkillsDirs": [
+        "..\\SagaSmith-dnd-skills\\full\\skills"
+      ]
+    }
+  },
   "tools": {
     "mcpServers": {
       "sagasmith_dnd": {
@@ -62,9 +69,12 @@ when starting nanobot from the SagaSmith-agent repository root:
         "cwd": "..\\SagaSmith-dnd-mcp",
         "env": {
           "SAGASMITH_DND_MCP_HOME": "..\\SagaSmith-agent\\workspace\\.sagasmith-dnd-mcp",
+          "SAGASMITH_DND_SKILLS_DIR": "..\\SagaSmith-dnd-skills",
           "SAGASMITH_DND_MCP_AUTO_SEED": "1"
         },
         "toolTimeout": 60,
+        "injectPrincipal": true,
+        "defaultToolProfile": "authoring",
         "enabledTools": ["*"]
       }
     }
@@ -77,12 +87,30 @@ resources, and prompts. Keep the agent workspace `SOUL.md` and `IDENTITY.md`
 for your persona; use matching `mcp_sagasmith_dnd_*` capabilities instead of
 recreating D&D work through shell commands or local scripts.
 
-For multi-platform campaigns, pass the platform's stable external user identity
-as `principal_id` on campaign and actor operations. The MCP server resolves roles
-and PC/NPC grants from its database; do not infer permission from `player_name` or
-from text supplied by the model. Retriable transfers should include an
-`idempotency_key` and expected revisions. On a fresh store, `rule_seed_status`
-should report the bundled SRD corpus before the first rules lookup.
+The D&D MCP tags every tool with an `authoring`, `play`, or `combat` profile.
+Nanobot filters both the model-visible schemas and execution path per chat
+session. Start in `authoring` for module writing/import and character creation;
+call `game_phase_set(tool_profile="play")` when live play begins.
+`combat_start` switches that session to `combat`, and `combat_end` switches it
+back to `play`. `game_phase_get` is always visible and restores the persisted
+campaign phase after a process restart. `enabledTools` remains the outer static
+allowlist, so it must include every tool that any selected profile may expose.
+
+`externalSkillsDirs` belongs to `agents.defaults` because nanobot loads skills
+in the parent agent process. MCP server `env` values are visible only to the
+child server process and cannot configure the agent's skill loader.
+
+For multi-platform campaigns, set `injectPrincipal` to `true`. Nanobot then derives
+the stable `principal_id` from its trusted inbound `channel:sender_id` request
+context and removes only the caller-auth field from the model-visible tool schema.
+Grant tools keep their target `principal_id` visible and receive the authenticated
+caller through `by_principal_id`; never let a model choose the caller identity.
+The MCP server resolves roles and PC/NPC grants from its database; do not infer
+permission from `player_name` or from text supplied by the model. Every retriable
+state mutation should include a fresh `idempotency_key` and the relevant expected
+revision. On a fresh store, run `SagaSmith-dnd-mcp\\scripts\\smoke_seed.py` once,
+then confirm `rule_seed_status` reports the bundled SRD corpus before the first
+rules lookup.
 
 ## Production notes
 

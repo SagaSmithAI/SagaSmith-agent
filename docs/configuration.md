@@ -1935,6 +1935,13 @@ Use `enabledTools` to register only a subset of tools from an MCP server:
 - Set `enabledTools` to `[]` to register no tools from that server. Resources and prompts are also skipped, since they have no per-name filter.
 - Set `enabledTools` to a non-empty list of names to register only those tools — resources and prompts are not registered.
 
+Servers may tag tools with `meta.sagasmith_tool_profiles`. Set
+`defaultToolProfile` to the initial profile name to make nanobot filter both
+model-visible schemas and execution per chat session. A successful MCP response
+containing `tool_profile` switches only that session. This is a dynamic layer
+inside the static `enabledTools` allowlist; use `enabledTools: ["*"]` only when
+the server itself publishes a complete profile assignment for every tool.
+
 MCP tools are automatically discovered and registered on startup. The LLM can use them alongside built-in tools — no extra configuration needed.
 
 

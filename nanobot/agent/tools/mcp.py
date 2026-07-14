@@ -16,6 +16,7 @@ import httpx
 from loguru import logger
 
 from nanobot.agent.tools.base import Tool, ToolResult
+from nanobot.agent.tools.context import RequestContext, current_request_context
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.events import (
     INBOUND_META_RUNTIME_CONTROL,
@@ -35,16 +36,18 @@ from nanobot.security.network import (
 # Transient connection errors that warrant a single retry.
 # These typically happen when an MCP server restarts or a network
 # connection is interrupted between calls.
-_TRANSIENT_EXC_NAMES: frozenset[str] = frozenset((
-    "ClosedResourceError",
-    "BrokenResourceError",
-    "EndOfStream",
-    "BrokenPipeError",
-    "ConnectionResetError",
-    "ConnectionRefusedError",
-    "ConnectionAbortedError",
-    "ConnectionError",
-))
+_TRANSIENT_EXC_NAMES: frozenset[str] = frozenset(
+    (
+        "ClosedResourceError",
+        "BrokenResourceError",
+        "EndOfStream",
+        "BrokenPipeError",
+        "ConnectionResetError",
+        "ConnectionRefusedError",
+        "ConnectionAbortedError",
+        "ConnectionError",
+    )
+)
 
 _WINDOWS_SHELL_LAUNCHERS: frozenset[str] = frozenset(("npx", "npm", "pnpm", "yarn", "bunx"))
 
@@ -54,13 +57,37 @@ _SANITIZE_RE = re.compile(r"_+")
 _RELOAD_LOCKS: WeakKeyDictionary[Any, asyncio.Lock] = WeakKeyDictionary()
 _ReconnectCallback = Callable[[str, str, Tool], Awaitable[Tool | None]]
 _MCP_CONTEXT_TOOL_LIMIT = 48
+_SESSION_MCP_TOOL_PROFILES: dict[tuple[str, str], str] = {}
+
+
+def _profile_session_key(ctx: RequestContext | None) -> str | None:
+    if ctx is None:
+        return None
+    return ctx.session_key or f"{ctx.channel}:{ctx.chat_id}"
+
+
+def _profile_from_rendered_result(rendered: str) -> str | None:
+    try:
+        payload = json.loads(rendered)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    candidates = [payload]
+    if isinstance(payload.get("result"), dict):
+        candidates.append(payload["result"])
+    for candidate in candidates:
+        profile = candidate.get("tool_profile")
+        if isinstance(profile, str) and profile.strip():
+            return profile.strip().lower()
+    return None
 
 
 def routing_context_provider(registry: ToolRegistry):
     """Return per-turn MCP routing context for the tools currently connected."""
 
     async def provide(_request: Any) -> RuntimeContextBlock | None:
-        names = sorted(name for name in registry.tool_names if name.startswith("mcp_"))
+        names = sorted(name for name in registry.definition_names() if name.startswith("mcp_"))
         if not names:
             return None
         visible = names[:_MCP_CONTEXT_TOOL_LIMIT]
@@ -268,11 +295,38 @@ def _redact_url(url: str) -> str:
         return "<redacted-url>"
 
 
+class _SafeRedirectTransport(httpx.AsyncBaseTransport):
+    """Validate redirect destinations before httpx follows them."""
+
+    def __init__(self, delegate: httpx.AsyncBaseTransport) -> None:
+        self._delegate = delegate
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        response = await self._delegate.handle_async_request(request)
+        location = response.headers.get("location")
+        if location and 300 <= response.status_code < 400:
+            target = str(request.url.join(location))
+            ok, error = validate_url_target(target)
+            if not ok:
+                await response.aclose()
+                raise httpx.RequestError(
+                    f"Blocked unsafe MCP redirect {_redact_url(target)} ({error})",
+                    request=request,
+                )
+        return response
+
+    async def aclose(self) -> None:
+        await self._delegate.aclose()
+
+
 def _pinned_transport_kwargs() -> dict[str, object]:
-    kwargs: dict[str, object] = {"transport": PinnedDNSAsyncTransport()}
+    kwargs: dict[str, object] = {"transport": _SafeRedirectTransport(PinnedDNSAsyncTransport())}
     mounts = httpx_env_proxy_mounts()
     if mounts:
-        kwargs["mounts"] = mounts
+        kwargs["mounts"] = {
+            pattern: (None if transport is None else _SafeRedirectTransport(transport))
+            for pattern, transport in mounts.items()
+        }
     return kwargs
 
 
@@ -283,6 +337,20 @@ async def _validate_mcp_request_url(request: httpx.Request) -> None:
         raise httpx.RequestError(
             f"Blocked unsafe MCP URL {_redact_url(str(request.url))} ({error})",
             request=request,
+        )
+
+
+async def _validate_mcp_redirect_response(response: httpx.Response) -> None:
+    """Validate a redirect Location before httpx follows it."""
+    location = response.headers.get("location")
+    if not location or not (300 <= response.status_code < 400):
+        return
+    target = str(response.request.url.join(location))
+    ok, error = validate_url_target(target)
+    if not ok:
+        raise httpx.RequestError(
+            f"Blocked unsafe MCP redirect {_redact_url(target)} ({error})",
+            request=response.request,
         )
 
 
@@ -475,7 +543,16 @@ class MCPToolWrapper(_MCPWrapperBase):
 
     _plugin_discoverable = False
 
-    def __init__(self, session, server_name: str, tool_def, tool_timeout: int = 30):
+    def __init__(
+        self,
+        session,
+        server_name: str,
+        tool_def,
+        tool_timeout: int = 30,
+        *,
+        inject_principal: bool = False,
+        default_tool_profile: str | None = None,
+    ):
         self._set_mcp_connection(session, server_name)
         self._original_name = tool_def.name
         self._name = _sanitize_mcp_tool_name(f"mcp_{server_name}_{tool_def.name}")
@@ -483,6 +560,39 @@ class MCPToolWrapper(_MCPWrapperBase):
         raw_schema = tool_def.inputSchema or {"type": "object", "properties": {}}
         self._parameters = _normalize_schema_for_openai(raw_schema)
         self._tool_timeout = tool_timeout
+        self._inject_principal = inject_principal
+        meta = getattr(tool_def, "meta", None)
+        if not isinstance(meta, dict):
+            meta = {}
+        profiles = meta.get("sagasmith_tool_profiles") or []
+        self._tool_profiles = frozenset(
+            str(profile).strip().lower() for profile in profiles if str(profile).strip()
+        )
+        self._default_tool_profile = (
+            str(default_tool_profile).strip().lower() if default_tool_profile else None
+        )
+        properties = self._parameters.get("properties", {})
+        # Grant tools have a subject principal_id and a separate caller field.
+        # Prefer the caller field so transport identity can never overwrite the
+        # principal being granted access.  Older tools use principal_id itself.
+        if "auth_principal_id" in properties:
+            self._principal_argument = "auth_principal_id"
+        elif "by_principal_id" in properties:
+            self._principal_argument = "by_principal_id"
+        elif "principal_id" in properties:
+            self._principal_argument = "principal_id"
+        else:
+            self._principal_argument = None
+        if inject_principal:
+            # Transport-authentication input is never an LLM argument.  Tools
+            # without a trusted identity parameter receive no injected field.
+            if self._principal_argument is not None:
+                properties.pop(self._principal_argument, None)
+            required = self._parameters.get("required")
+            if isinstance(required, list):
+                self._parameters["required"] = [
+                    item for item in required if item != self._principal_argument
+                ]
 
     @property
     def name(self) -> str:
@@ -496,7 +606,36 @@ class MCPToolWrapper(_MCPWrapperBase):
     def parameters(self) -> dict[str, Any]:
         return self._parameters
 
+    def set_context(self, ctx: RequestContext) -> None:
+        """Compatibility hook; identity is read from the task-local context at execution."""
+
+    def is_available(self, ctx: RequestContext | None) -> bool:
+        """Apply MCP-provided phase metadata independently for each chat session."""
+        if not self._tool_profiles or not self._default_tool_profile:
+            return True
+        session_key = _profile_session_key(ctx)
+        profile = (
+            _SESSION_MCP_TOOL_PROFILES.get((session_key, self._server_name))
+            if session_key is not None
+            else None
+        )
+        return (profile or self._default_tool_profile) in self._tool_profiles
+
+    def _trusted_principal(self) -> str:
+        # Wrappers are shared across sessions, so identity must remain task-local.
+        ctx = current_request_context()
+        if ctx is None or not ctx.sender_id:
+            # Local cron/CLI calls have no user identity. They remain explicitly
+            # distinguishable from an inbound platform user and cannot be spoofed
+            # by a model parameter.
+            return "system:local"
+        channel = re.sub(r"[^a-zA-Z0-9_.:-]", "_", ctx.channel or "unknown")
+        sender = re.sub(r"[^a-zA-Z0-9_.:-]", "_", ctx.sender_id)
+        return f"{channel}:{sender}"
+
     async def execute(self, **kwargs: Any) -> str:
+        if self._inject_principal and self._principal_argument is not None:
+            kwargs = {**kwargs, self._principal_argument: self._trusted_principal()}
         retried_transient = False
         refreshed_session = False
         while True:
@@ -506,12 +645,8 @@ class MCPToolWrapper(_MCPWrapperBase):
                     timeout=self._tool_timeout,
                 )
             except asyncio.TimeoutError:
-                logger.warning(
-                    "MCP tool '{}' timed out after {}s", self._name, self._tool_timeout
-                )
-                return ToolResult.error(
-                    f"(MCP tool call timed out after {self._tool_timeout}s)"
-                )
+                logger.warning("MCP tool '{}' timed out after {}s", self._name, self._tool_timeout)
+                return ToolResult.error(f"(MCP tool call timed out after {self._tool_timeout}s)")
             except asyncio.CancelledError:
                 # MCP SDK's anyio cancel scopes can leak CancelledError on timeout/failure.
                 # Re-raise only if our task was externally cancelled (e.g. /stop).
@@ -553,15 +688,17 @@ class MCPToolWrapper(_MCPWrapperBase):
                     type(exc).__name__,
                     exc,
                 )
-                return ToolResult.error(
-                    f"(MCP tool call failed: {type(exc).__name__})"
-                )
+                return ToolResult.error(f"(MCP tool call failed: {type(exc).__name__})")
             else:
                 # Success — extract text and persist any image content as artifacts.
                 try:
                     rendered = self._render_call_result(result.content, kwargs)
                     if getattr(result, "isError", False):
                         return ToolResult.error(rendered)
+                    profile = _profile_from_rendered_result(rendered)
+                    session_key = _profile_session_key(current_request_context())
+                    if profile and session_key is not None:
+                        _SESSION_MCP_TOOL_PROFILES[(session_key, self._server_name)] = profile
                     return rendered
                 except Exception as exc:
                     logger.exception(
@@ -919,7 +1056,9 @@ async def connect_mcp_servers(
                 read, write = await server_stack.enter_async_context(stdio_client(params))
             elif transport_type == "sse":
                 if not await _probe_http_url(cfg.url):
-                    logger.warning("MCP server '{}': {} unreachable, skipping", name, _redact_url(cfg.url))
+                    logger.warning(
+                        "MCP server '{}': {} unreachable, skipping", name, _redact_url(cfg.url)
+                    )
                     await server_stack.aclose()
                     return name, None
 
@@ -935,7 +1074,10 @@ async def connect_mcp_servers(
                     }
                     return httpx.AsyncClient(
                         headers=merged_headers or None,
-                        event_hooks={"request": [_validate_mcp_request_url]},
+                        event_hooks={
+                            "request": [_validate_mcp_request_url],
+                            "response": [_validate_mcp_redirect_response],
+                        },
                         follow_redirects=True,
                         timeout=timeout,
                         auth=auth,
@@ -947,14 +1089,19 @@ async def connect_mcp_servers(
                 )
             elif transport_type == "streamableHttp":
                 if not await _probe_http_url(cfg.url):
-                    logger.warning("MCP server '{}': {} unreachable, skipping", name, _redact_url(cfg.url))
+                    logger.warning(
+                        "MCP server '{}': {} unreachable, skipping", name, _redact_url(cfg.url)
+                    )
                     await server_stack.aclose()
                     return name, None
 
                 http_client = await server_stack.enter_async_context(
                     httpx.AsyncClient(
                         headers=cfg.headers or None,
-                        event_hooks={"request": [_validate_mcp_request_url]},
+                        event_hooks={
+                            "request": [_validate_mcp_request_url],
+                            "response": [_validate_mcp_redirect_response],
+                        },
                         follow_redirects=True,
                         timeout=httpx.Timeout(30.0, connect=10.0),
                         **_pinned_transport_kwargs(),
@@ -978,7 +1125,9 @@ async def connect_mcp_servers(
             registered_count = 0
             matched_enabled_tools: set[str] = set()
             available_raw_names = [tool_def.name for tool_def in tools.tools]
-            available_wrapped_names = [_sanitize_mcp_tool_name(f"mcp_{name}_{tool_def.name}") for tool_def in tools.tools]
+            available_wrapped_names = [
+                _sanitize_mcp_tool_name(f"mcp_{name}_{tool_def.name}") for tool_def in tools.tools
+            ]
             for tool_def in tools.tools:
                 wrapped_name = _sanitize_mcp_tool_name(f"mcp_{name}_{tool_def.name}")
                 if (
@@ -992,7 +1141,14 @@ async def connect_mcp_servers(
                         name,
                     )
                     continue
-                wrapper = MCPToolWrapper(session, name, tool_def, tool_timeout=cfg.tool_timeout)
+                wrapper = MCPToolWrapper(
+                    session,
+                    name,
+                    tool_def,
+                    tool_timeout=cfg.tool_timeout,
+                    inject_principal=cfg.inject_principal,
+                    default_tool_profile=cfg.default_tool_profile,
+                )
                 registry.register(wrapper)
                 logger.debug("MCP: registered tool '{}' from server '{}'", wrapper.name, name)
                 registered_count += 1
@@ -1038,9 +1194,7 @@ async def connect_mcp_servers(
                             name,
                         )
                 except Exception as e:
-                    logger.debug(
-                        "MCP server '{}': resources not supported or failed: {}", name, e
-                    )
+                    logger.debug("MCP server '{}': resources not supported or failed: {}", name, e)
 
                 try:
                     prompts_result = await session.list_prompts()
@@ -1056,9 +1210,7 @@ async def connect_mcp_servers(
                             name,
                         )
                 except Exception as e:
-                    logger.debug(
-                        "MCP server '{}': prompts not supported or failed: {}", name, e
-                    )
+                    logger.debug("MCP server '{}': prompts not supported or failed: {}", name, e)
             else:
                 logger.info(
                     "MCP server '{}': skipping resource/prompt registration "
@@ -1302,11 +1454,15 @@ async def request_mcp_reload(bus: Any, *, timeout: float = 15.0) -> dict[str, An
             "message": "MCP hot reload timed out. Restart nanobot to pick up changes.",
             "requires_restart": True,
         }
-    return result if isinstance(result, dict) else {
-        "ok": False,
-        "message": "MCP hot reload returned an unexpected response.",
-        "requires_restart": True,
-    }
+    return (
+        result
+        if isinstance(result, dict)
+        else {
+            "ok": False,
+            "message": "MCP hot reload returned an unexpected response.",
+            "requires_restart": True,
+        }
+    )
 
 
 async def handle_runtime_control(state: Any, msg: InboundMessage, registry: ToolRegistry) -> bool:
@@ -1401,7 +1557,9 @@ async def _refresh_terminated_server(
         state._mcp_stacks.update(connected)
         _attach_reconnect_handlers(state, registry, connected)
         if server_name not in connected:
-            logger.warning("MCP server '{}' reconnect failed after session termination", server_name)
+            logger.warning(
+                "MCP server '{}' reconnect failed after session termination", server_name
+            )
             return None
         return registry.get(tool_name)
 

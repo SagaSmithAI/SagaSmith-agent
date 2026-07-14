@@ -8,6 +8,8 @@ from pathlib import Path
 import pytest
 
 from nanobot.agent.skills import SkillsLoader
+from nanobot.config.schema import AgentDefaults
+from nanobot.webui.skills_api import webui_skills_payload
 
 
 def _write_skill(
@@ -110,6 +112,60 @@ def test_list_skills_merges_workspace_and_builtin(tmp_path: Path) -> None:
         {"name": "bi_only", "path": str(bi_path), "source": "builtin"},
         {"name": "ws_only", "path": str(ws_path), "source": "workspace"},
     ]
+
+
+def test_external_skill_directory_is_loaded_from_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    external = tmp_path / "external"
+    _write_skill(external, "dnd-dm", body="# D&D")
+    monkeypatch.setenv("SAGASMITH_EXTERNAL_SKILLS_DIRS", str(external))
+
+    loader = SkillsLoader(tmp_path / "workspace", builtin_skills_dir=tmp_path / "builtin")
+
+    assert "# D&D" in loader.load_skill("dnd-dm")
+
+
+def test_external_skill_directory_is_loaded_from_agent_config(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    builtin = tmp_path / "builtin"
+    builtin.mkdir()
+    external = tmp_path / "external"
+    external_path = _write_skill(external, "dnd-dm", body="# Configured D&D")
+
+    loader = SkillsLoader(
+        workspace,
+        builtin_skills_dir=builtin,
+        external_skill_dirs=[str(external)],
+    )
+
+    assert loader.list_skills(filter_unavailable=False) == [
+        {"name": "dnd-dm", "path": str(external_path), "source": "external"}
+    ]
+    assert "# Configured D&D" in loader.load_skill("dnd-dm")
+
+
+def test_agent_defaults_accept_external_skills_dirs_camel_case() -> None:
+    defaults = AgentDefaults.model_validate(
+        {"externalSkillsDirs": ["C:/skills/dnd", "C:/skills/shared"]}
+    )
+
+    assert defaults.external_skills_dirs == ["C:/skills/dnd", "C:/skills/shared"]
+
+
+def test_webui_lists_configured_external_skills_without_paths(tmp_path: Path) -> None:
+    external = tmp_path / "external"
+    _write_skill(external, "dnd-dm", body="# Configured D&D")
+
+    payload = webui_skills_payload(
+        tmp_path / "workspace",
+        external_skills_dirs=[str(external)],
+    )
+
+    skill = next(item for item in payload["skills"] if item["name"] == "dnd-dm")
+    assert skill["source"] == "external"
+    assert "path" not in skill
 
 
 def test_list_skills_builtin_omitted_when_dir_missing(tmp_path: Path) -> None:

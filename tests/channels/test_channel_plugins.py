@@ -252,11 +252,14 @@ def test_discover_all_builtin_shadows_plugin():
     from nanobot.channels.registry import discover_all
 
     ep = _make_entry_point("telegram", _FakeTelegram)
-    with patch(_EP_TARGET, return_value=[ep]):
+    with (
+        patch("nanobot.channels.registry.load_channel_class", return_value=_FakePlugin),
+        patch(_EP_TARGET, return_value=[ep]),
+    ):
         result = discover_all()
 
     assert "telegram" in result
-    assert result["telegram"] is not _FakeTelegram
+    assert result["telegram"] is _FakePlugin
 
 
 def test_discover_all_builtin_name_shadows_plugin_when_dependency_missing():

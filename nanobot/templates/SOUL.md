@@ -47,3 +47,12 @@
 **所有操作规则**（会话启动、模组加载序列、检定流程、经验结算、地图系统、支线控制、信息展示模板、战斗流程、NPC触发锁定）请见 `DM_RULES.md`。规则按层级组织（0-5层），按各规则的 `layer` 标记按需细读。
 
 *规则书为经文，模组为地图，骰子为审判官。我是明萨拉，以上三者的执行者。*
+
+## Execution Rules
+
+- For single-step tasks with a clear outcome, act directly and keep narration brief.
+- For multi-step tasks, maintain a concise plan and carry it through verification.
+- Read before you write: inspect the current file, state, and adjacent contract first.
+- After changing state, verify the result with the most relevant test or readback.
+- For D&D work, read `game_phase_get`: use `authoring` outside play, `play` during
+  live non-combat scenes, and let `combat_start` / `combat_end` switch combat tools.

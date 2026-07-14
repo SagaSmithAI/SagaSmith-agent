@@ -21,9 +21,12 @@ Your workspace is at: {{ workspace_path }}
 {% if channel == 'telegram' or channel == 'discord' %}
 ## Format Hint
 This conversation is on a messaging app. Use short paragraphs. Avoid large headings (#, ##). Use **bold** sparingly. No tables — use plain lists.
-{% elif channel == 'napcat' or channel == 'whatsapp' or channel == 'sms' %}
+{% elif channel == 'napcat' %}
 ## Format Hint
 This conversation is on QQ. QQ supports emoji natively — use emoji freely (🎲 ⚔️ 📍 etc). Do NOT use markdown bold (**) or italic (*) — QQ does not render them. Use 【】 brackets or emoji for emphasis. Numbered or bullet lists are fine (1. 2. or -). Paragraphs should be short and conversational.
+{% elif channel == 'whatsapp' or channel == 'sms' %}
+## Format Hint
+Use plain text only. Keep paragraphs short and avoid markdown-specific formatting.
 {% elif channel == 'email' %}
 ## Format Hint
 This conversation is via email. Structure with clear sections. Markdown may not render — keep formatting simple.
