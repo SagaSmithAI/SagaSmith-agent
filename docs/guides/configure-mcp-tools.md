@@ -61,7 +61,8 @@ when starting nanobot from the SagaSmith-agent repository root:
         "args": [],
         "cwd": "..\\SagaSmith-dnd-mcp",
         "env": {
-          "SAGASMITH_DND_MCP_HOME": "..\\SagaSmith-agent\\workspace\\.sagasmith-dnd-mcp"
+          "SAGASMITH_DND_MCP_HOME": "..\\SagaSmith-agent\\workspace\\.sagasmith-dnd-mcp",
+          "SAGASMITH_DND_MCP_AUTO_SEED": "1"
         },
         "toolTimeout": 60,
         "enabledTools": ["*"]
@@ -75,6 +76,13 @@ The server owns its SQLite data, ChromaDB collections, D&D rules, skills,
 resources, and prompts. Keep the agent workspace `SOUL.md` and `IDENTITY.md`
 for your persona; use matching `mcp_sagasmith_dnd_*` capabilities instead of
 recreating D&D work through shell commands or local scripts.
+
+For multi-platform campaigns, pass the platform's stable external user identity
+as `principal_id` on campaign and actor operations. The MCP server resolves roles
+and PC/NPC grants from its database; do not infer permission from `player_name` or
+from text supplied by the model. Retriable transfers should include an
+`idempotency_key` and expected revisions. On a fresh store, `rule_seed_status`
+should report the bundled SRD corpus before the first rules lookup.
 
 ## Production notes
 
