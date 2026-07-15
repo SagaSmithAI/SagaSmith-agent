@@ -110,6 +110,13 @@ MCP `tools/list_changed` can instead use the dynamically refreshed native tool.
 incompatible loaded groups unavailable. `enabledTools` is therefore the outer
 allowlist for the core protocol, not a list of every D&D action.
 
+Before a campaign exists, an unbound exposure may load only `lobby.bootstrap`
+to list systems or create the campaign. Reopen it with the selected
+`campaign_id` before loading campaign administration, character, rules, module,
+play, or combat groups. With `injectPrincipal: true`, Nanobot binds the trusted
+chat principal to `exposure_open`; the MCP then injects that same principal into
+the nested target arguments used by `exposure_call`.
+
 Optional rules remain MCP-owned too. While in `lobby`, the agent loads
 `lobby.rules`, stages a
 locally supplied rulebook from `SAGASMITH_DND_MCP_RULE_IMPORT_ROOTS`, calls
