@@ -75,8 +75,20 @@ when starting nanobot from the SagaSmith-agent repository root:
         },
         "toolTimeout": 60,
         "injectPrincipal": true,
-        "defaultToolProfile": "authoring",
-        "enabledTools": ["*"]
+        "enabledTools": [
+          "exposure_open",
+          "exposure_status",
+          "exposure_search",
+          "exposure_inspect",
+          "exposure_load",
+          "exposure_unload",
+          "exposure_call",
+          "server_capabilities",
+          "server_tool_profiles",
+          "storage_status",
+          "campaign_query",
+          "game_phase"
+        ]
       }
     }
   }
@@ -88,16 +100,18 @@ resources, and prompts. Keep the agent workspace `SOUL.md` and `IDENTITY.md`
 for your persona; use matching `mcp_sagasmith_dnd_*` capabilities instead of
 recreating D&D work through shell commands or local scripts.
 
-The D&D MCP tags every tool with an `authoring`, `play`, or `combat` profile.
-Nanobot filters both the model-visible schemas and execution path per chat
-session. Start in `authoring` for module writing/import and character creation;
-call `game_phase_set(tool_profile="play")` when live play begins.
-`combat_start` switches that session to `combat`, and `combat_end` switches it
-back to `play`. `game_phase_get` is always visible and restores the persisted
-campaign phase after a process restart. `enabledTools` remains the outer static
-allowlist, so it must include every tool that any selected profile may expose.
+The D&D MCP owns the per-session `lobby`, `play`, and `combat` exposure; Nanobot
+does not duplicate a phase/profile filter. Keep only the core exposure tools in
+`enabledTools`, call `exposure_open`, then search, inspect, and load an MCP
+capability group. Nanobot currently retains its initial static tool schemas, so
+invoke every loaded domain tool through `exposure_call`. A host that supports
+MCP `tools/list_changed` can instead use the dynamically refreshed native tool.
+`combat_start` and `combat_end` change the authoritative campaign phase and make
+incompatible loaded groups unavailable. `enabledTools` is therefore the outer
+allowlist for the core protocol, not a list of every D&D action.
 
-Optional rules remain MCP-owned too. While in `authoring`, the agent stages a
+Optional rules remain MCP-owned too. While in `lobby`, the agent loads
+`lobby.rules`, stages a
 locally supplied rulebook from `SAGASMITH_DND_MCP_RULE_IMPORT_ROOTS`, calls
 `rule_document_inspect` and `rule_document_import`, then searches and expands a
 reviewed chunk. User-imported executable rules must go through
