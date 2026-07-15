@@ -70,6 +70,7 @@ when starting nanobot from the SagaSmith-agent repository root:
         "env": {
           "SAGASMITH_DND_MCP_HOME": "..\\SagaSmith-agent\\workspace\\.sagasmith-dnd-mcp",
           "SAGASMITH_DND_SKILLS_DIR": "..\\SagaSmith-dnd-skills",
+          "SAGASMITH_DND_MCP_RULE_IMPORT_ROOTS": "..\\reference\\DnD-Books",
           "SAGASMITH_DND_MCP_AUTO_SEED": "1"
         },
         "toolTimeout": 60,
@@ -95,6 +96,19 @@ call `game_phase_set(tool_profile="play")` when live play begins.
 back to `play`. `game_phase_get` is always visible and restores the persisted
 campaign phase after a process restart. `enabledTools` remains the outer static
 allowlist, so it must include every tool that any selected profile may expose.
+
+Optional rules remain MCP-owned too. While in `authoring`, the agent stages a
+locally supplied rulebook from `SAGASMITH_DND_MCP_RULE_IMPORT_ROOTS`, calls
+`rule_document_inspect` and `rule_document_import`, then searches and expands a
+reviewed chunk. User-imported executable rules must go through
+`rule_pack_draft_from_source`, which binds citations to the imported document
+checksum and page range. The agent then inspects validation and requests
+installation. It must never
+generate Python, mutate the database directly, or silently enable a pack. The
+DM explicitly enables an installed version with `campaign_rule_pack_set`.
+During play, use `campaign_rules_explain` to audit the current branch fingerprint
+and citations, and `campaign_rule_receipts` for immutable historical settlement
+evidence; rule configuration changes are unavailable during combat.
 
 `externalSkillsDirs` belongs to `agents.defaults` because nanobot loads skills
 in the parent agent process. MCP server `env` values are visible only to the
