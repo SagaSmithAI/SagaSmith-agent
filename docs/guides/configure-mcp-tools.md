@@ -57,7 +57,8 @@ when starting nanobot from the SagaSmith-agent repository root:
   "agents": {
     "defaults": {
       "externalSkillsDirs": [
-        "..\\SagaSmith-dnd-skills\\full\\skills"
+        "..\\SagaSmith-dnd-skills\\full\\skills",
+        "..\\SagaSmith-coc-skills"
       ]
     }
   },
@@ -89,16 +90,42 @@ when starting nanobot from the SagaSmith-agent repository root:
           "campaign_query",
           "game_phase"
         ]
+      },
+      "sagasmith_coc": {
+        "command": "..\\SagaSmith-coc-mcp\\.venv\\Scripts\\sagasmith-coc-mcp.exe",
+        "args": [],
+        "cwd": "..\\SagaSmith-coc-mcp",
+        "env": {
+          "SAGASMITH_COC_MCP_HOME": "..\\SagaSmith-agent\\workspace\\.sagasmith-coc-mcp",
+          "SAGASMITH_COC_SKILLS_DIR": "..\\SagaSmith-coc-skills",
+          "SAGASMITH_MODULEGEN_SKILLS_DIR": "..\\SagaSmith-module-gen-skills"
+        },
+        "toolTimeout": 60,
+        "injectPrincipal": true,
+        "enabledTools": [
+          "exposure_open",
+          "exposure_status",
+          "exposure_search",
+          "exposure_inspect",
+          "exposure_load",
+          "exposure_unload",
+          "exposure_call",
+          "server_capabilities",
+          "storage_status",
+          "campaign_query",
+          "game_phase"
+        ]
       }
     }
   }
 }
 ```
 
-The server owns its SQLite data, ChromaDB collections, D&D rules, skills,
-resources, and prompts. Keep the agent workspace `SOUL.md` and `IDENTITY.md`
-for your persona; use matching `mcp_sagasmith_dnd_*` capabilities instead of
-recreating D&D work through shell commands or local scripts.
+Each domain server owns its SQLite data and skill access. D&D additionally owns
+its ChromaDB collections and imported rule packs. Keep the agent workspace
+`SOUL.md` and `IDENTITY.md` for your persona; use matching
+`mcp_sagasmith_dnd_*` or `mcp_sagasmith_coc_*` capabilities instead of
+recreating game state through shell commands or local scripts.
 
 The D&D MCP owns the per-session `lobby`, `play`, and `combat` exposure; Nanobot
 does not duplicate a phase/profile filter. Keep only the core exposure tools in
@@ -109,6 +136,13 @@ MCP `tools/list_changed` can instead use the dynamically refreshed native tool.
 `combat_start` and `combat_end` change the authoritative campaign phase and make
 incompatible loaded groups unavailable. `enabledTools` is therefore the outer
 allowlist for the core protocol, not a list of every D&D action.
+
+The CoC MCP follows the same protocol and server-owned session boundary. Its
+Lobby groups cover campaign setup, investigators, scenario import, continuity,
+and actor knowledge; Play adds investigation/SAN/chase resolution; Combat adds
+attack resolution while keeping SAN/HP mutations explicit. Per-actor grants
+prevent one player from reading another investigator's private beliefs, and
+player module queries return only `visibility=player` scenes.
 
 Before a campaign exists, an unbound exposure may load only `lobby.bootstrap`
 to list systems or create the campaign. Reopen it with the selected

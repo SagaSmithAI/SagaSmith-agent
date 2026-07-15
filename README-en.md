@@ -41,7 +41,7 @@ One MCP process can therefore maintain different tool surfaces for different cha
 
 ## Start the full Windows workspace
 
-[`start.bat`](start.bat) is the single Agent + D&D MCP entry point. The MCP uses stdio and is started by NanoBot as a child process.
+[`start.bat`](start.bat) is the single Agent + D&D MCP + D&D UI Gateway entry point. NanoBot starts the stdio MCP as a child process; the script also starts a principal-aware HTTP/SSE adapter on `127.0.0.1:8766`.
 
 Expected sibling layout:
 
@@ -58,13 +58,18 @@ SagaSmith/
 cd SagaSmith-dnd-mcp
 uv sync --all-extras
 
+cd ..\SagaSmith-coc-mcp
+uv sync --all-extras
+
 cd ..\SagaSmith-agent
 uv sync --all-extras
-# configure provider, model, channels, and tools.mcpServers.sagasmith_dnd
+# configure provider, model, channels, and both SagaSmith MCP servers
 .\start.bat
 ```
 
-The script checks `uv`, the local config, and the sibling MCP executable, prepares the workspace MCP home, and starts the foreground gateway. See [the MCP guide](docs/guides/configure-mcp-tools.md). Keep machine paths and secrets out of Git; reference provider keys through environment variables.
+The script checks `uv`, the local config, and both sibling MCP executables, prepares their workspace homes, waits for the D&D UI Gateway health check, and then starts the foreground Agent gateway. It stops the UI adapter when the Agent exits. See [the MCP guide](docs/guides/configure-mcp-tools.md). Keep machine paths and secrets out of Git; reference provider keys through environment variables.
+
+The UI connects to `http://127.0.0.1:8766` by default. Non-loopback access requires an explicit bearer token and origin allowlist; without a token, the adapter rejects remote requests.
 
 ## Generic quick start
 

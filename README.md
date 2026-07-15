@@ -54,7 +54,7 @@ SagaSmith Agent 负责：
 
 ## Windows 一键启动当前工作区
 
-仓库根目录的 [`start.bat`](start.bat) 是 Agent + D&D MCP 的单一入口。D&D MCP 使用 stdio，由 NanoBot 根据配置启动为子进程，无需单独开一个可见窗口。
+仓库根目录的 [`start.bat`](start.bat) 是 Agent + D&D MCP + D&D UI Gateway 的单一入口。D&D MCP 使用 stdio，由 NanoBot 根据配置启动为子进程；脚本同时在 `127.0.0.1:8766` 启动 principal-aware HTTP/SSE adapter，供 D&D UI 观察权威状态与提交受 MCP 校验的战斗移动。
 
 准备相邻仓库：
 
@@ -73,17 +73,22 @@ SagaSmith/
 cd SagaSmith-dnd-mcp
 uv sync --all-extras
 
+cd ..\SagaSmith-coc-mcp
+uv sync --all-extras
+
 cd ..\SagaSmith-agent
 uv sync --all-extras
 ```
 
-然后按 [配置指南](docs/guides/configure-mcp-tools.md) 创建或检查 `config/config.json` 中的 provider、model preset、channel 与 `tools.mcpServers.sagasmith_dnd`，运行：
+然后按 [配置指南](docs/guides/configure-mcp-tools.md) 创建或检查 `config/config.json` 中的 provider、model preset、channel，以及 `tools.mcpServers.sagasmith_dnd` / `sagasmith_coc`，运行：
 
 ```powershell
 .\start.bat
 ```
 
-脚本会检查 `uv`、Agent 配置和相邻 MCP executable，创建 workspace MCP home，并以前台 gateway 启动。详细 D&D 配置见 [configure-mcp-tools](docs/guides/configure-mcp-tools.md)。
+脚本会检查 `uv`、Agent 配置和两个相邻 MCP executable，创建各自的 workspace MCP home，先等待 D&D UI Gateway 健康检查通过，再以前台启动 Agent gateway；退出 Agent 时会清理 UI Gateway 子进程。详细配置见 [configure-mcp-tools](docs/guides/configure-mcp-tools.md)。
+
+UI 默认连接 `http://127.0.0.1:8766`。若要从非本机访问，必须设置 `SAGASMITH_DND_GATEWAY_TOKEN`、显式 origin allowlist 与 UI 对应 token；无 token 时 gateway 拒绝所有非 loopback 请求。
 
 > `config/config.json` 通常包含本机路径与密钥，不应提交。使用环境变量引用 provider secret。
 
