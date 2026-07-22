@@ -41,6 +41,13 @@ if not exist "%COC_MCP_EXE%" (
     exit /b 6
 )
 
+uv run python scripts\validate_sagasmith_runtime.py --config config\config.json
+if errorlevel 1 (
+    echo [ERROR] SagaSmith Skills and MCP configuration preflight failed.
+    pause
+    exit /b 9
+)
+
 if not exist "workspace\.sagasmith-dnd-mcp" mkdir "workspace\.sagasmith-dnd-mcp"
 if not exist "workspace\.sagasmith-coc-mcp" mkdir "workspace\.sagasmith-coc-mcp"
 set "SAGASMITH_DND_MCP_HOME=%CD%\workspace\.sagasmith-dnd-mcp"

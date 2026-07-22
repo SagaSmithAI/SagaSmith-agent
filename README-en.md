@@ -67,7 +67,7 @@ uv sync --all-extras
 .\start.bat
 ```
 
-The script checks `uv`, the local config, and both sibling MCP executables, prepares their workspace homes, waits for the D&D UI Gateway health check, and then starts the foreground Agent gateway. It stops the UI adapter when the Agent exits. See [the MCP guide](docs/guides/configure-mcp-tools.md). Keep machine paths and secrets out of Git; reference provider keys through environment variables.
+The script checks `uv`, the local config, Full D&D Skills exposure, the D&D core-tool allowlist, the PDF timeout, and both sibling MCP executables. It prepares their workspace homes, waits for the D&D UI Gateway health check, and then starts the foreground Agent gateway. It stops the UI adapter when the Agent exits. See [the MCP guide](docs/guides/configure-mcp-tools.md). Keep machine paths and secrets out of Git; reference provider keys through environment variables.
 
 The UI connects to `http://127.0.0.1:8766` by default. Non-loopback access requires an explicit bearer token and origin allowlist; without a token, the adapter rejects remote requests.
 

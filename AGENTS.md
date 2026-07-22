@@ -94,9 +94,10 @@ inside this repository.
 ## Historical Note
 
 The D&D CLI and bundled skills documented below have been removed. Their current
-home is the standalone SagaSmith D&D MCP, not this Agent repository.
-
-This repo bundles the **full version** of `SagaSmith-dnd-skills` as built-in skills at `nanobot/skills/sagasmith-dnd/`, providing D&D 5e (2014/2024) game-master skills, SRD references, and campaign management.
+homes are the sibling SagaSmith D&D MCP and `SagaSmith-dnd-skills` repositories,
+not this Agent repository. Load the **full version** through
+`agents.defaults.externalSkillsDirs`; do not expect a bundled
+`nanobot/skills/sagasmith-dnd/` copy.
 
 ### Local Dependencies
 
@@ -113,17 +114,15 @@ pip install -e ".[dev,sagasmith]"
 
 ### Skill Structure
 
-- `nanobot/skills/sagasmith-dnd/SKILL.md` — Suite entry point
-- `nanobot/skills/sagasmith-dnd/skills/dnd-dm/` — DM play/adjudication skill
-- `nanobot/skills/sagasmith-dnd/skills/dnd-campaign-manager/` — Campaign management skill
-- `nanobot/skills/sagasmith-dnd/references/` — Shared references (schema, CLI contract, workflows)
-- `nanobot/skills/sagasmith-dnd/data/` — SRD data
-- `nanobot/skills/sagasmith-dnd/tools/portable.py` — Portable mode fallback
-- `nanobot/skills/sagasmith-dnd/templates/` — Agent identity, soul, memory templates
+- `../SagaSmith-dnd-skills/full/SKILL.md` — Suite entry point
+- `../SagaSmith-dnd-skills/full/skills/dnd-dm/` — DM play/adjudication skill
+- `../SagaSmith-dnd-skills/full/skills/dnd-campaign-manager/` — Campaign management skill
+- `../SagaSmith-dnd-skills/full/references/` — Shared MCP contracts and workflows
+- `../SagaSmith-dnd-skills/full/templates/` — Agent identity and campaign templates
 
 ### Module Generation
 
-`nanobot/skills/sagasmith-modulegen/SKILL.md` — Generate D&D 5e adventure modules (25 narrative paradigms: one-shot, short, medium, long, sandbox).
+`../SagaSmith-module-gen-skills/` — External module-generation skills.
 
 ### CLI Verification
 
