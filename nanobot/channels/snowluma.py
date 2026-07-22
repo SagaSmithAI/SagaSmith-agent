@@ -8,7 +8,6 @@ import json
 import os
 import random
 import time
-import uuid
 from collections import deque
 from pathlib import Path
 from typing import Annotated, Any, Literal
@@ -19,6 +18,7 @@ from pydantic import Field
 from websockets.asyncio.client import ClientConnection
 from websockets.asyncio.client import connect as ws_connect
 
+from nanobot.agent.tools.snowluma import configure as snowluma_tool_configure
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
@@ -26,9 +26,6 @@ from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
 from nanobot.security.network import validate_url_target
 from nanobot.utils.helpers import safe_filename
-
-# Import the SnowLuma action tool so we can wire it up
-from nanobot.agent.tools.snowluma import configure as snowluma_tool_configure
 
 _DOWNLOAD_TIMEOUT = aiohttp.ClientTimeout(total=60)
 _ACTION_TIMEOUT = 20.0

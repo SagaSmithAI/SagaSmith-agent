@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from loguru import logger
-
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
 from nanobot.agent.tools.schema import (
     ObjectSchema,
