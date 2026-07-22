@@ -52,7 +52,22 @@ class GitStore:
 
     def __init__(self, workspace: Path, tracked_files: list[str]):
         self._workspace = workspace
-        self._tracked_files = tracked_files
+        self._tracked_files = list(dict.fromkeys(tracked_files))
+
+    def update_tracked_files(self, tracked_files: list[str]) -> None:
+        """Refresh the audited file set and keep managed ignore rules traversable.
+
+        Dream can create procedural-memory files below ``skills/`` after the
+        workspace repository has already been initialized.  Those files must be
+        added to both the tracked set and the allow-listing ``.gitignore`` rules
+        or they would exist outside the memory audit trail.
+        """
+        normalized = list(dict.fromkeys(tracked_files))
+        if normalized == self._tracked_files:
+            return
+        self._tracked_files = normalized
+        if self.is_initialized():
+            self._merge_gitignore_rules()
 
     def is_initialized(self) -> bool:
         """Check if the git repo has been initialized."""
@@ -141,7 +156,7 @@ class GitStore:
                 return None
 
             msg_bytes = message.encode("utf-8") if isinstance(message, str) else message
-            porcelain.add(str(self._workspace), paths=self._tracked_files)
+            porcelain.add(str(self._workspace), paths=[".gitignore", *self._tracked_files])
             sha_bytes = porcelain.commit(
                 str(self._workspace),
                 message=msg_bytes,
@@ -201,16 +216,29 @@ class GitStore:
         """Generate .gitignore content from tracked files."""
         dirs: set[str] = set()
         for f in self._tracked_files:
-            parent = str(Path(f).parent)
-            if parent != ".":
-                dirs.add(parent)
+            parent = Path(f).parent
+            while str(parent) != ".":
+                dirs.add(parent.as_posix())
+                parent = parent.parent
         lines = ["/*"]
-        for d in sorted(dirs):
+        for d in sorted(dirs, key=lambda item: (item.count("/"), item)):
             lines.append(f"!{d}/")
         for f in self._tracked_files:
-            lines.append(f"!{f}")
+            lines.append(f"!{Path(f).as_posix()}")
         lines.append("!.gitignore")
         return "\n".join(lines) + "\n"
+
+    def _merge_gitignore_rules(self) -> None:
+        gitignore = self._workspace / ".gitignore"
+        desired = self._build_gitignore().splitlines()
+        existing = gitignore.read_text(encoding="utf-8") if gitignore.exists() else ""
+        existing_lines = set(existing.splitlines())
+        missing = [line for line in desired if line not in existing_lines]
+        if not missing:
+            return
+        prefix = existing.rstrip("\n")
+        merged = (prefix + "\n" if prefix else "") + "\n".join(missing) + "\n"
+        gitignore.write_text(merged, encoding="utf-8")
 
     # -- query -----------------------------------------------------------------
 

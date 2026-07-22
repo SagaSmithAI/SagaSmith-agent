@@ -681,3 +681,17 @@ class TestDreamContentDiff:
         store.git.auto_commit("initial")
         store.set_last_dream_cursor(99)  # only memory/.dream_cursor changes
         assert store.dream_content_diff() == ""
+
+    def test_includes_procedural_memory_skill_changes(self, store):
+        store.write_memory("baseline")
+        assert store.git.init() is True
+        skill = store.workspace / "skills" / "learned-tool" / "SKILL.md"
+        skill.parent.mkdir(parents=True)
+        skill.write_text("# Learned tool\n\nUse the stable command.\n", encoding="utf-8")
+
+        diff = store.dream_content_diff()
+
+        assert "skills/learned-tool/SKILL.md" in diff
+        sha = store.git.auto_commit("dream: learn tool")
+        assert sha is not None
+        assert store.dream_content_diff() == ""

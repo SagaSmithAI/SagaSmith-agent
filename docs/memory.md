@@ -19,7 +19,8 @@ It separates memory into layers, because different kinds of remembering deserve 
 - `session.messages` holds the living short-term conversation.
 - `memory/history.jsonl` is the running archive of compressed past turns.
 - `SOUL.md`, `USER.md`, and `memory/MEMORY.md` are the durable knowledge files.
-- `GitStore` records how those durable files change over time.
+- workspace `skills/` can hold durable procedural memory learned by Dream.
+- `GitStore` records how those durable files and skills change over time.
 
 This keeps the system light in the moment, but reflective over time.
 
@@ -60,6 +61,12 @@ Dream reads:
 
 Then it edits the long-term files surgically in a single pass — not by rewriting everything, but by making the smallest honest change that keeps memory coherent.
 
+A completed batch advances the Dream cursor even when no edit is needed. This
+records that the history was reviewed and prevents an intentionally skipped
+batch from blocking all later memory. Failed or interrupted runs do not advance
+the cursor. History compaction removes only already-reviewed entries; an
+unreviewed backlog is retained even when it exceeds the normal retention target.
+
 This is why nanobot's memory is not just archival. It is interpretive.
 
 ## The Files
@@ -68,23 +75,25 @@ This is why nanobot's memory is not just archival. It is interpretive.
 workspace/
 ├── SOUL.md              # The bot's long-term voice and communication style
 ├── USER.md              # Stable knowledge about the user
+├── skills/              # Audited procedural memory maintained by Dream
 ├── prompts/
 │   ├── README.md        # Notes for memory guidance files
 │   └── dream.md         # Optional instructions for how Dream organizes memory
-└── memory/
+├── memory/
     ├── MEMORY.md        # Project facts, decisions, and durable context
     ├── history.jsonl    # Append-only history summaries
     ├── .cursor          # Consolidator write cursor
-    ├── .dream_cursor    # Dream consumption cursor
-    └── .git/            # Version history for long-term memory files
+    └── .dream_cursor    # Dream consumption cursor
+├── .git/                # Version history for durable memory and skills
 ```
 
 These files play different roles:
 
 - `SOUL.md` remembers how nanobot should sound.
 - `USER.md` remembers who the user is and what they prefer.
-- `MEMORY.md` remembers what remains true about the work itself.
+- `memory/MEMORY.md` remembers what remains true about the work itself.
 - `history.jsonl` remembers what happened on the way there.
+- `skills/` remembers reusable operational procedures.
 
 ## Why `history.jsonl`
 
