@@ -71,10 +71,12 @@ when starting nanobot from the SagaSmith-agent repository root:
         "env": {
           "SAGASMITH_DND_MCP_HOME": "..\\SagaSmith-agent\\workspace\\.sagasmith-dnd-mcp",
           "SAGASMITH_DND_SKILLS_DIR": "..\\SagaSmith-dnd-skills",
-          "SAGASMITH_DND_MCP_RULE_IMPORT_ROOTS": "..\\reference\\DnD-Books",
+          "SAGASMITH_DND_MCP_RULE_IMPORT_ROOTS": "..\\reference\\DnD-Books\\5e\\Books",
+          "SAGASMITH_DND_MCP_RULE_OCR": "1",
+          "SAGASMITH_DND_MCP_RULE_OCR_SCALE": "2.0",
           "SAGASMITH_DND_MCP_AUTO_SEED": "1"
         },
-        "toolTimeout": 60,
+        "toolTimeout": 900,
         "injectPrincipal": true,
         "enabledTools": [
           "exposure_open",
@@ -152,18 +154,26 @@ chat principal to `exposure_open`; the MCP then injects that same principal into
 the nested target arguments used by `exposure_call`.
 
 Optional rules remain MCP-owned too. While in `lobby`, the agent loads
-`lobby.rules`, stages a
-locally supplied rulebook from `SAGASMITH_DND_MCP_RULE_IMPORT_ROOTS`, calls
-`rule_document_inspect` and `rule_document_import`, then searches and expands a
-reviewed chunk. User-imported executable rules must go through
-`rule_pack_draft_from_source`, which binds citations to the imported document
-checksum and page range. The agent then inspects validation and requests
-installation. It must never
-generate Python, mutate the database directly, or silently enable a pack. The
-DM explicitly enables an installed version with `campaign_rule_pack_set`.
-During play, use `campaign_rules_explain` to audit the current branch fingerprint
-and citations, and `campaign_rule_receipts` for immutable historical settlement
-evidence; rule configuration changes are unavailable during combat.
+`lobby.rules` and uses the public `rule_import` facade in this order:
+`discover` → `stage` → `inspect` → `ingest` → `extract_candidates` → `review` →
+`compile` → `install` → `activate`. Inspection warnings require explicit DM review
+and `payload.acknowledge_warnings=true` on ingest. For a PDF warning or ambiguous
+candidate, call `rule_document_page_render` with the staged job id and exact page
+before acknowledging it. Search the imported evidence with the exact `source_ids`
+filter before expanding a chunk. The server binds accepted candidates to the
+imported checksum and page range; imported prose remains
+`catalog_only` unless reviewed mechanics pass compilation and the DM explicitly
+activates the installed version. Never generate Python, mutate the database, use
+retired raw import tools, or silently enable a pack. During play, use
+`campaign_rules(action="explain")` and `campaign_rules(action="receipts")` for
+the active fingerprint and immutable settlement evidence; rule configuration
+changes are unavailable during combat.
+
+The first inspection of a scanned or corrupt-text book may perform selective OCR.
+Keep `toolTimeout` at 900 seconds for real rulebook corpora; normalized and raw page
+extraction caches make exact subsequent runs fast. Stdio servers receive only their
+configured `env`, so paths and OCR settings must be present in this MCP block rather
+than only in the shell that starts Nanobot.
 
 `externalSkillsDirs` belongs to `agents.defaults` because nanobot loads skills
 in the parent agent process. MCP server `env` values are visible only to the
