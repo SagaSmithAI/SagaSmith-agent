@@ -1881,10 +1881,10 @@ async def test_session_routes_reject_non_websocket_keys(
 
 @pytest.mark.asyncio
 async def test_session_routes_reject_invalid_key(
-    bus: MagicMock, tmp_path: Path
+    bus: MagicMock, tmp_path: Path, unused_tcp_port: int
 ) -> None:
     sm = _seed_session(tmp_path)
-    channel = _ch(bus, session_manager=sm, port=29904)
+    channel = _ch(bus, session_manager=sm, port=unused_tcp_port)
     server_task = asyncio.create_task(channel.start())
     await asyncio.sleep(0.3)
     try:
@@ -1894,7 +1894,7 @@ async def test_session_routes_reject_invalid_key(
         # Invalid characters in the key -> regex match fails -> 404
         # (route doesn't match, falls through to channel 404).
         resp = await _http_get(
-            "http://127.0.0.1:29904/api/sessions/bad%20key/messages",
+            f"http://127.0.0.1:{unused_tcp_port}/api/sessions/bad%20key/messages",
             headers=auth,
         )
         assert resp.status_code in {400, 404}
