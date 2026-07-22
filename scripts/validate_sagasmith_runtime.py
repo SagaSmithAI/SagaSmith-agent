@@ -31,6 +31,14 @@ def _resolve_config_path(agent_root: Path, value: str) -> Path:
     return path.resolve() if path.is_absolute() else (agent_root / path).resolve()
 
 
+def _resolve_config_roots(agent_root: Path, value: str) -> list[Path]:
+    return [
+        _resolve_config_path(agent_root, item)
+        for item in value.split(os.pathsep)
+        if item.strip()
+    ]
+
+
 def _mapping(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
@@ -107,10 +115,21 @@ def validate_runtime(config_path: Path, agent_root: Path) -> list[str]:
             )
 
     raw_rule_root = env.get("SAGASMITH_DND_MCP_RULE_IMPORT_ROOTS")
-    if not isinstance(raw_rule_root, str) or not _resolve_config_path(
-        agent_root, raw_rule_root
-    ).is_dir():
+    rule_roots = (
+        _resolve_config_roots(agent_root, raw_rule_root)
+        if isinstance(raw_rule_root, str)
+        else []
+    )
+    if not rule_roots or not all(root.is_dir() for root in rule_roots):
         errors.append("SAGASMITH_DND_MCP_RULE_IMPORT_ROOTS does not exist.")
+    raw_module_root = env.get("SAGASMITH_DND_MCP_MODULE_IMPORT_ROOTS")
+    module_roots = (
+        _resolve_config_roots(agent_root, raw_module_root)
+        if isinstance(raw_module_root, str)
+        else []
+    )
+    if not module_roots or not all(root.is_dir() for root in module_roots):
+        errors.append("SAGASMITH_DND_MCP_MODULE_IMPORT_ROOTS does not exist.")
     return errors
 
 

@@ -86,7 +86,7 @@ uv sync --all-extras
 .\start.bat
 ```
 
-脚本会检查 `uv`、Agent 配置、Full D&D Skills 暴露、D&D 核心工具清单、PDF 超时和两个相邻 MCP executable，创建各自的 workspace MCP home，先等待 D&D UI Gateway 健康检查通过，再以前台启动 Agent gateway；退出 Agent 时会清理 UI Gateway 子进程。详细配置见 [configure-mcp-tools](docs/guides/configure-mcp-tools.md)。
+脚本会检查 `uv`、Agent 配置、Full D&D Skills 暴露、D&D 核心工具清单、900 秒 PDF 超时、规则书与战役模组两个独立 allowlist，以及两个相邻 MCP executable，创建各自的 workspace MCP home，先等待 D&D UI Gateway 健康检查通过，再以前台启动 Agent gateway；退出 Agent 时会清理 UI Gateway 子进程。详细配置见 [configure-mcp-tools](docs/guides/configure-mcp-tools.md)。
 
 UI 默认连接 `http://127.0.0.1:8766`。若要从非本机访问，必须设置 `SAGASMITH_DND_GATEWAY_TOKEN`、显式 origin allowlist 与 UI 对应 token；无 token 时 gateway 拒绝所有非 loopback 请求。
 

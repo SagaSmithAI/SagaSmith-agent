@@ -72,8 +72,11 @@ when starting nanobot from the SagaSmith-agent repository root:
           "SAGASMITH_DND_MCP_HOME": "..\\SagaSmith-agent\\workspace\\.sagasmith-dnd-mcp",
           "SAGASMITH_DND_SKILLS_DIR": "..\\SagaSmith-dnd-skills",
           "SAGASMITH_DND_MCP_RULE_IMPORT_ROOTS": "..\\reference\\DnD-Books\\5e\\Books",
+          "SAGASMITH_DND_MCP_MODULE_IMPORT_ROOTS": "..\\reference\\DnD-Books\\5e\\Campaign",
           "SAGASMITH_DND_MCP_RULE_OCR": "1",
           "SAGASMITH_DND_MCP_RULE_OCR_SCALE": "2.0",
+          "SAGASMITH_DND_MCP_MODULE_OCR": "1",
+          "SAGASMITH_DND_MCP_MODULE_OCR_SCALE": "2.0",
           "SAGASMITH_DND_MCP_AUTO_SEED": "1"
         },
         "toolTimeout": 900,
@@ -174,6 +177,14 @@ Keep `toolTimeout` at 900 seconds for real rulebook corpora; normalized and raw 
 extraction caches make exact subsequent runs fast. Stdio servers receive only their
 configured `env`, so paths and OCR settings must be present in this MCP block rather
 than only in the shell that starts Nanobot.
+
+`SAGASMITH_DND_MCP_RULE_IMPORT_ROOTS` and
+`SAGASMITH_DND_MCP_MODULE_IMPORT_ROOTS` are separate allowlists. The first admits
+optional rule publications; the second admits campaign PDFs, appendix packets,
+maps, pregenerated-character documents, and other lobby imports. On Windows,
+separate multiple roots with `;`. Before staging a suspected character document,
+the Agent uses `character_query(view="document")`; it must not force that file
+through module import.
 
 `externalSkillsDirs` belongs to `agents.defaults` because nanobot loads skills
 in the parent agent process. MCP server `env` values are visible only to the

@@ -32,6 +32,8 @@ def _prepare_runtime(tmp_path: Path) -> tuple[Path, Path, dict]:
     executable.write_bytes(b"")
     rule_root = tmp_path / "reference" / "DnD-Books" / "5e" / "Books"
     rule_root.mkdir(parents=True)
+    module_root = tmp_path / "reference" / "DnD-Books" / "5e" / "Campaign"
+    module_root.mkdir(parents=True)
 
     config = {
         "agents": {
@@ -47,6 +49,7 @@ def _prepare_runtime(tmp_path: Path) -> tuple[Path, Path, dict]:
                     "env": {
                         "SAGASMITH_DND_SKILLS_DIR": "../SagaSmith-dnd-skills",
                         "SAGASMITH_DND_MCP_RULE_IMPORT_ROOTS": "../reference/DnD-Books/5e/Books",
+                        "SAGASMITH_DND_MCP_MODULE_IMPORT_ROOTS": "../reference/DnD-Books/5e/Campaign",
                     },
                     "toolTimeout": 900,
                     "injectPrincipal": True,
@@ -91,3 +94,17 @@ def test_sagasmith_runtime_preflight_enforces_auth_tools_and_pdf_timeout(
     assert any("exposure_call" in error for error in errors)
     assert any("injectPrincipal" in error for error in errors)
     assert any("at least 900" in error for error in errors)
+
+
+def test_sagasmith_runtime_preflight_requires_campaign_import_root(
+    tmp_path: Path,
+) -> None:
+    agent_root, config_path, config = _prepare_runtime(tmp_path)
+    del config["tools"]["mcpServers"]["sagasmith_dnd"]["env"][
+        "SAGASMITH_DND_MCP_MODULE_IMPORT_ROOTS"
+    ]
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+
+    errors = VALIDATOR.validate_runtime(config_path, agent_root)
+
+    assert any("MODULE_IMPORT_ROOTS" in error for error in errors)
