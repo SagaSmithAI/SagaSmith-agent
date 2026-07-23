@@ -7,19 +7,20 @@ history rather than silently discarded.
 See: https://github.com/HKUDS/nanobot/issues/2966
 """
 
+# Mock classes intentionally retain conventional CamelCase names.
+# ruff: noqa: N806
+
 from __future__ import annotations
 
 import asyncio
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.queue import MessageBus
-from nanobot.providers.base import LLMProvider
 
 
 def _make_provider():

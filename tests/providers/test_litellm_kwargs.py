@@ -6,6 +6,9 @@ Validates that:
 - Standard providers pass model names through as-is.
 """
 
+# Mock classes intentionally retain conventional CamelCase names.
+# ruff: noqa: N806
+
 from __future__ import annotations
 
 import asyncio
