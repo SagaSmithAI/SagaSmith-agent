@@ -216,13 +216,12 @@ async def test_dream_advances_cursor_when_diff_nonempty(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_dream_keeps_cursor_on_completed_noop(tmp_path) -> None:
-    """Completed run with no file changes must NOT advance the cursor, so the
-    history batch is reconsidered next run instead of silently swallowed."""
+async def test_dream_advances_cursor_on_completed_noop(tmp_path) -> None:
+    """A reviewed no-op batch must not permanently block later history."""
     ctx, store = _build_runnable_dream(tmp_path, initialized=True, content_diff="")
     await cmd_dream(ctx)
     await asyncio.sleep(0)
-    assert store._last_dream_cursor == 5  # unchanged
+    assert store._last_dream_cursor == 42
 
 
 @pytest.mark.asyncio

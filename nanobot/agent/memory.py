@@ -81,7 +81,24 @@ class MemoryStore:
 
     @property
     def git(self) -> GitStore:
+        self._refresh_dream_git_files()
         return self._git
+
+    def _dream_content_paths(self) -> list[str]:
+        paths = list(self._DREAM_CONTENT_PATHS)
+        skills_dir = self.workspace / "skills"
+        if skills_dir.is_dir():
+            paths.extend(
+                path.relative_to(self.workspace).as_posix()
+                for path in sorted(skills_dir.rglob("*"))
+                if path.is_file() and ".git" not in path.parts
+            )
+        return list(dict.fromkeys(paths))
+
+    def _refresh_dream_git_files(self) -> None:
+        self._git.update_tracked_files(
+            [*self._dream_content_paths(), "memory/.dream_cursor"]
+        )
 
     # -- generic helpers -----------------------------------------------------
 
@@ -408,14 +425,33 @@ class MemoryStore:
         ]
 
     def compact_history(self) -> None:
-        """Drop oldest entries if the file exceeds *max_history_entries*."""
+        """Drop oldest *processed* entries while preserving the Dream backlog.
+
+        ``max_history_entries`` is a retention target, not permission to discard
+        history that Dream has not consumed yet.  When the backlog alone exceeds
+        the target the file is intentionally allowed to remain larger until Dream
+        catches up.
+        """
         if self.max_history_entries <= 0:
             return
-        entries = self._read_entries()
-        if len(entries) <= self.max_history_entries:
-            return
-        kept = entries[-self.max_history_entries:]
-        self._write_entries(kept)
+        # Serialize the read/rewrite with append_history so an entry appended
+        # during compaction cannot be lost by the atomic replacement below.
+        with self._append_lock:
+            entries = self._read_entries()
+            if len(entries) <= self.max_history_entries:
+                return
+            dream_cursor = self.get_last_dream_cursor()
+            processed: list[dict[str, Any]] = []
+            unprocessed: list[dict[str, Any]] = []
+            for entry in entries:
+                cursor = self._valid_cursor(entry.get("cursor"))
+                if cursor is not None and cursor > dream_cursor:
+                    unprocessed.append(entry)
+                else:
+                    processed.append(entry)
+            processed_budget = max(self.max_history_entries - len(unprocessed), 0)
+            kept_processed = processed[-processed_budget:] if processed_budget else []
+            self._write_entries([*kept_processed, *unprocessed])
 
     # -- JSONL helpers -------------------------------------------------------
 
@@ -486,7 +522,18 @@ class MemoryStore:
         return 0
 
     def set_last_dream_cursor(self, cursor: int) -> None:
-        self._dream_cursor_file.write_text(str(cursor), encoding="utf-8")
+        if self._valid_cursor(cursor) is None:
+            raise ValueError("Dream cursor must be a non-negative integer")
+        tmp_path = self._dream_cursor_file.with_suffix(".tmp")
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                f.write(str(cursor))
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, self._dream_cursor_file)
+        except BaseException:
+            tmp_path.unlink(missing_ok=True)
+            raise
 
     def get_latest_cursor(self) -> int:
         return max(self._next_cursor() - 1, 0)
@@ -586,9 +633,11 @@ class MemoryStore:
         the ground-truth input for diff-grounded Dream commit messages and for
         gating cursor advance on real edits (never on LLM self-report).
         """
+        paths = self._dream_content_paths()
+        self._refresh_dream_git_files()
         if not self._git.is_initialized():
             return ""
-        return self._git.summarize_working_tree(list(self._DREAM_CONTENT_PATHS))
+        return self._git.summarize_working_tree(paths)
 
     def build_dream_tools(self):
         """Build the restricted tool registry used by Dream runs."""
