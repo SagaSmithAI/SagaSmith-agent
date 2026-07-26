@@ -27,6 +27,12 @@ when an entry names `default_resolver="agent"`. Do not collapse a player-owned
 choice, owner approval, permission escalation, or missing/conflicting source
 review into that default. In particular, a missing ranged or thrown range is a
 blocking card/source defect, not a distance the Agent may invent.
+The native domain result and any compact facade top level must agree on
+`default_resolver`, `ruling_kind`, and `policy_ref`. A pre-commit
+`pending_ruling` with `committed=false`, `missing`, and `retry_contract` returns
+control to the named resolver without consuming the action. For an Agent-owned
+boundary, establish the missing scene/rule fact and retry at the current
+revision; for a source-review boundary, repair or review the evidence first.
 
 ## First Run
 

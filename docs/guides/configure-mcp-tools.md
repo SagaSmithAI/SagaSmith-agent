@@ -186,6 +186,14 @@ explicitly classified external-input exception names `external_input` instead.
 The Agent performs its assigned reasoning and then uses public tools to settle
 the resulting state. It waits for external input only for a player-owned choice,
 owner approval, permission escalation, or missing/conflicting source review.
+Native domain calls carry the same `default_resolver`, `ruling_kind`, and
+`policy_ref`, and compact facades copy that classification to their top level.
+A safe engine prerequisite may return `pending_ruling` with `committed=false`,
+`missing`, and a `retry_contract`; this is a control return, not a fictional
+failed action. The Agent supplies ordinary scene/rule facts and retries at the
+current revision. Missing ranges, unresolved hydration, and unsupported source
+contracts remain source-review boundaries and cannot be downgraded to generic
+Agent adjudication.
 Scene readiness applies the same contract per item through
 `ruling_requirements`. Ordinary card, scene, spell, and module adjudications
 name the Agent; missing ranged/thrown ranges and incomplete source hydration
