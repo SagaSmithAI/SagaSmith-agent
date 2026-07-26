@@ -206,6 +206,14 @@ machine-readable output with top-level `status`, `default_resolver`, and
 `ruling_requirements`, so the Agent should resume from those fields rather than
 from an exception string.
 
+For an already indexed 2014 statblock whose columns were split into sibling text
+chunks, the D&D workflow first retries `character_create_from(mode="statblock")`
+with source-established `chunk_ids` and the exact printed heading in
+`payload.source_statblock_name`. The MCP server reconstructs and source-scopes
+that card from text alone, so the parent Agent does not need image capability.
+Only missing or conflicting required facts proceed to the local
+`rule_import(action="recover_statblock")` OCR path.
+
 The first inspection of a scanned or corrupt-text book may perform selective OCR.
 Keep `toolTimeout` at 900 seconds for real rulebook corpora; normalized and raw page
 extraction caches make exact subsequent runs fast. Stdio servers receive only their
