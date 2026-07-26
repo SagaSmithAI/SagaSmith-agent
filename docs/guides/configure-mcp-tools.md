@@ -162,18 +162,30 @@ the nested target arguments used by `exposure_call`.
 Optional rules remain MCP-owned too. While in `lobby`, the agent loads
 `lobby.rules` and uses the public `rule_import` facade in this order:
 `discover` → `stage` → `inspect` → `ingest` → `extract_candidates` → `review` →
-`compile` → `install` → `activate`. Inspection warnings require explicit DM review
-and `payload.acknowledge_warnings=true` on ingest. For a PDF warning or ambiguous
-candidate, call `rule_import(action="render_page")` with the staged job id and exact page
-before acknowledging it. Search the imported evidence with the exact `source_ids`
-filter before expanding a chunk. The server binds accepted candidates to the
-imported checksum and page range; imported prose remains
-`catalog_only` unless reviewed mechanics pass compilation and the DM explicitly
-activates the installed version. Never generate Python, mutate the database, use
+`compile` → `install` → `activate`. The Agent acting as DM reviews inspection
+warnings from exact extracted text or rendered page evidence and sets
+`payload.acknowledge_warnings=true` only after that review. For a PDF warning or
+ambiguous candidate, call `rule_import(action="render_page")` with the staged
+job id and exact page before acknowledging it. Missing or conflicting source
+evidence, including a page that needs visual review when the active model cannot
+inspect images, remains an external review boundary. Search the imported evidence
+with the exact `source_ids` filter before expanding a chunk. The server binds
+accepted candidates to the imported checksum and page range; imported prose
+remains `catalog_only` unless reviewed mechanics pass compilation and the
+campaign owner explicitly approves activation of the installed version. Never
+generate Python, mutate the database, use
 retired raw import tools, or silently enable a pack. During play, use
 `campaign_rules(action="explain")` and `campaign_rules(action="receipts")` for
 the active fingerprint and immutable settlement evidence; rule configuration
 changes are unavailable during combat.
+
+For the fixed 12-tool Agent path, an `exposure_call` response with live
+`status="pending_ruling"` carries `ruling_resolution` and refers to
+`server_capabilities.ruling_policy`. Its default resolver is `agent`; an
+explicitly classified external-input exception names `external_input` instead.
+The Agent performs its assigned reasoning and then uses public tools to settle
+the resulting state. It waits for external input only for a player-owned choice,
+owner approval, permission escalation, or missing/conflicting source review.
 
 The first inspection of a scanned or corrupt-text book may perform selective OCR.
 Keep `toolTimeout` at 900 seconds for real rulebook corpora; normalized and raw page

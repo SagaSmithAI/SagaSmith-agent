@@ -15,9 +15,13 @@ canonical derived weapon attacks, movement spend, attack rolls, typed damage,
 traits, HP, healing, death saves, and concentration windows are automatic.
 Surprise is supplied as a scene fact and follows the selected ruleset. Known-grid
 movement may open a typed opportunity-reaction window when the recorded faction
-or disposition and reach facts prove a trigger. Geometry beyond those explicit
-facts, visibility, cover, hidden targets, and story consequences require an
-explicit DM choice window.
+or disposition and reach facts prove a trigger. For geometry beyond those
+explicit facts, visibility, cover, hidden targets, descriptive activities, and
+story consequences, the Agent acts as DM and adjudicates from the locked rules,
+exact source, scene, actor cards, and branch state. It records the result through
+the relevant public dice, check, map, state, memory, or manifest tools. Never
+fabricate a `combat_choice` window merely to store an Agent ruling; that facade
+resolves only a window already owned by the service.
 
 ## First Run
 
