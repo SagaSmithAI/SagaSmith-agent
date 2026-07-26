@@ -186,6 +186,11 @@ explicitly classified external-input exception names `external_input` instead.
 The Agent performs its assigned reasoning and then uses public tools to settle
 the resulting state. It waits for external input only for a player-owned choice,
 owner approval, permission escalation, or missing/conflicting source review.
+Scene readiness applies the same contract per item through
+`ruling_requirements`. Ordinary card, scene, spell, and module adjudications
+name the Agent; missing ranged/thrown ranges and incomplete source hydration
+name the source-review boundary and block combat rather than inviting invented
+mechanics.
 
 The first inspection of a scanned or corrupt-text book may perform selective OCR.
 Keep `toolTimeout` at 900 seconds for real rulebook corpora; normalized and raw page

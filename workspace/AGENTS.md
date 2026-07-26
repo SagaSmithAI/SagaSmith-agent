@@ -22,6 +22,11 @@ exact source, scene, actor cards, and branch state. It records the result throug
 the relevant public dice, check, map, state, memory, or manifest tools. Never
 fabricate a `combat_choice` window merely to store an Agent ruling; that facade
 resolves only a window already owned by the service.
+Scene readiness exposes structured `ruling_requirements`. Continue autonomously
+when an entry names `default_resolver="agent"`. Do not collapse a player-owned
+choice, owner approval, permission escalation, or missing/conflicting source
+review into that default. In particular, a missing ranged or thrown range is a
+blocking card/source defect, not a distance the Agent may invent.
 
 ## First Run
 
