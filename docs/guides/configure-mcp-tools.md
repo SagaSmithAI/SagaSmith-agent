@@ -205,6 +205,11 @@ playthrough, and encounter regression drivers preserve stopped rulings as
 machine-readable output with top-level `status`, `default_resolver`, and
 `ruling_requirements`, so the Agent should resume from those fields rather than
 from an exception string.
+The same contract covers character validation and derivation. A pre-commit
+spell or activity ruling with no payment must return to its named resolver
+before the Agent rolls healing, applies an effect, starts combat, or assumes a
+slot or charge was consumed. A paid generic-effect ruling is resumed without
+paying the resource again.
 
 For an already indexed 2014 statblock whose columns were split into sibling text
 chunks, the D&D workflow first retries `character_create_from(mode="statblock")`
