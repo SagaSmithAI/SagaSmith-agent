@@ -141,6 +141,9 @@ MCP `tools/list_changed` can instead use the dynamically refreshed native tool.
 `combat_start` and `combat_end` change the authoritative campaign phase and make
 incompatible loaded groups unavailable. `enabledTools` is therefore the outer
 allowlist for the core protocol, not a list of every D&D action.
+The D&D server's compact domain catalogue contains 82 public tools, with
+Lobby/Play/Combat ceilings of 61/46/44. The Agent allowlist remains exactly the
+12 core tools shown above; do not add retired domain aliases to `enabledTools`.
 
 The CoC MCP follows the same protocol and server-owned session boundary. Its
 Lobby groups cover campaign setup, investigators, scenario import, continuity,
@@ -161,7 +164,7 @@ Optional rules remain MCP-owned too. While in `lobby`, the agent loads
 `discover` → `stage` → `inspect` → `ingest` → `extract_candidates` → `review` →
 `compile` → `install` → `activate`. Inspection warnings require explicit DM review
 and `payload.acknowledge_warnings=true` on ingest. For a PDF warning or ambiguous
-candidate, call `rule_document_page_render` with the staged job id and exact page
+candidate, call `rule_import(action="render_page")` with the staged job id and exact page
 before acknowledging it. Search the imported evidence with the exact `source_ids`
 filter before expanding a chunk. The server binds accepted candidates to the
 imported checksum and page range; imported prose remains
