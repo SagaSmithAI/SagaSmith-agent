@@ -199,6 +199,12 @@ Scene readiness applies the same contract per item through
 name the Agent; missing ranged/thrown ranges and incomplete source hydration
 name the source-review boundary and block combat rather than inviting invented
 mechanics.
+Declarative rule-pack `ruling.require` entries also default to Agent reasoning;
+`choice.require` remains a player-owned external input. Full-party,
+playthrough, and encounter regression drivers preserve stopped rulings as
+machine-readable output with top-level `status`, `default_resolver`, and
+`ruling_requirements`, so the Agent should resume from those fields rather than
+from an exception string.
 
 The first inspection of a scanned or corrupt-text book may perform selective OCR.
 Keep `toolTimeout` at 900 seconds for real rulebook corpora; normalized and raw page

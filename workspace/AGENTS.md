@@ -33,6 +33,11 @@ The native domain result and any compact facade top level must agree on
 control to the named resolver without consuming the action. For an Agent-owned
 boundary, establish the missing scene/rule fact and retry at the current
 revision; for a source-review boundary, repair or review the evidence first.
+Declarative rule-pack `ruling.require` pauses default to this Agent adjudication
+lane; `choice.require` remains a player-owned external choice. When a regression
+driver stops, read its structured top-level `status`, `default_resolver`, and
+`ruling_requirements`. Do not treat a generic exception string as a completed
+ruling or lose the domain result's owner while resuming the workflow.
 
 ## First Run
 
