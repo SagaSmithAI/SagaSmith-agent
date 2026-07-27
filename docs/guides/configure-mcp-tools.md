@@ -199,6 +199,15 @@ failed action. The Agent supplies ordinary scene/rule facts and retries at the
 current revision. Missing ranges, unresolved hydration, and unsupported source
 contracts remain source-review boundaries and cannot be downgraded to generic
 Agent adjudication.
+Lobby review states use the same typed ownership before any live action.
+`rule_import(action="extract_candidates")` returns
+`job.review_resolution`, `job.review_requirements`, and per-candidate
+`ruling_requirement`; `module_query(view="candidates")` does the same for a
+`review_ready` statblock candidate. Exact-text review defaults to the Agent. If
+any nested requirement is `missing_or_conflicting_source_review`, preserve that
+external owner and repair/review the evidence instead of accepting the candidate.
+Reviewed rule-statblock parser warnings also carry
+`validation.ruling_requirements` and `validation.default_dm_resolver`.
 Scene readiness applies the same contract per item through
 `ruling_requirements`. Ordinary card, scene, spell, and module adjudications
 name the Agent; missing ranged/thrown ranges and incomplete source hydration

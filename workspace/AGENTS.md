@@ -33,6 +33,11 @@ The native domain result and any compact facade top level must agree on
 control to the named resolver without consuming the action. For an Agent-owned
 boundary, establish the missing scene/rule fact and retry at the current
 revision; for a source-review boundary, repair or review the evidence first.
+This default also applies in Lobby before an action exists. A rule import job in
+`review_required` exposes `review_resolution` and `review_requirements`, while a
+`review_ready` rule/module candidate exposes `ruling_requirement`; follow an
+Agent-owned source-or-scene review autonomously from exact chunks. A nested
+`missing_or_conflicting_source_review` remains external and takes precedence.
 Declarative rule-pack `ruling.require` pauses default to this Agent adjudication
 lane; `choice.require` remains a player-owned external choice. When a regression
 driver stops, read its structured top-level `status`, `default_resolver`, and
