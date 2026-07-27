@@ -199,6 +199,11 @@ Agent chooses the elapsed interval from current scene and world context and
 commits a strict `agent_dm_adjudication` through the public playthrough path.
 It must not attach unrelated source prose or ask for external input merely
 because the duration was not printed.
+The same contract applies to module-specific narrative consequences:
+`record-event` and `record-outcome` accept a settled Agent ruling either beside
+the exact premise text or by itself for a source-independent DM event. The
+committed event retains that decision and reason; callers do not need a new Core
+mechanic for every one-off module situation.
 A safe engine prerequisite may return `pending_ruling` with `committed=false`,
 `missing`, and a `retry_contract`; this is a control return, not a fictional
 failed action. The Agent supplies ordinary scene/rule facts and retries at the
