@@ -188,6 +188,11 @@ the resulting state. It waits for external input only for a player-owned choice,
 owner approval, permission escalation, or missing/conflicting source review.
 Native domain calls carry the same `default_resolver`, `ruling_kind`, and
 `policy_ref`, and compact facades copy that classification to their top level.
+Classification covers the full nested `pending`, `ruling_requirement`, and
+`ruling_requirements` set. A real external exception anywhere in that set wins;
+otherwise an unclassified DM ruling belongs to the Agent. Contradictory resolver
+and kind fields must be rejected or normalized rather than selected by envelope
+position.
 A safe engine prerequisite may return `pending_ruling` with `committed=false`,
 `missing`, and a `retry_contract`; this is a control return, not a fictional
 failed action. The Agent supplies ordinary scene/rule facts and retries at the
