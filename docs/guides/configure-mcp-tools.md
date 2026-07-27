@@ -193,6 +193,12 @@ Classification covers the full nested `pending`, `ruling_requirement`, and
 otherwise an unclassified DM ruling belongs to the Agent. Contradictory resolver
 and kind fields must be rejected or normalized rather than selected by envelope
 position.
+Ordinary source-independent DM estimates follow the same ownership. For
+example, when a module establishes a journey but omits its exact duration, the
+Agent chooses the elapsed interval from current scene and world context and
+commits a strict `agent_dm_adjudication` through the public playthrough path.
+It must not attach unrelated source prose or ask for external input merely
+because the duration was not printed.
 A safe engine prerequisite may return `pending_ruling` with `committed=false`,
 `missing`, and a `retry_contract`; this is a control return, not a fictional
 failed action. The Agent supplies ordinary scene/rule facts and retries at the
