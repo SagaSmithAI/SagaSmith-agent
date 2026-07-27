@@ -165,4 +165,4 @@ bun run test
 
 ## 状态与许可
 
-项目处于 Alpha。SagaSmith-specific 代码与 NanoBot 上游代码均保留各自署名与 notices；仓库整体使用 MIT License，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+项目处于 Alpha。SagaSmith-specific 代码使用 Apache-2.0；NanoBot 上游代码及其他第三方组件保留各自许可、署名与 notices，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

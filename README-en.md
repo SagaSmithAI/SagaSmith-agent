@@ -126,4 +126,4 @@ Docs: [Quick Start](docs/quick-start.md) · [Configuration](docs/configuration.m
 
 ## Status and license
 
-Active Alpha. SagaSmith-specific work and NanoBot upstream retain their respective attribution and notices. The repository is MIT licensed; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Active Alpha. SagaSmith-specific work is licensed under Apache-2.0. NanoBot upstream and other third-party components retain their respective licenses, attribution, and notices; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
