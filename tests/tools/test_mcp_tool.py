@@ -455,6 +455,46 @@ async def test_principal_injection_hides_and_overrides_model_argument() -> None:
     assert captured == {"campaign_id": "c1", "principal_id": "discord:user_42"}
 
 
+def test_local_principal_comes_from_server_schema_default() -> None:
+    advertised = SimpleNamespace(
+        name="campaign_get",
+        description="campaign",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "principal_id": {
+                    "type": "string",
+                    "default": "service:advertised-local",
+                }
+            },
+        },
+    )
+    wrapper = MCPToolWrapper(
+        SimpleNamespace(),
+        "sagasmith_dnd",
+        advertised,
+        inject_principal=True,
+    )
+    assert wrapper._trusted_principal() == "service:advertised-local"
+
+    unowned = SimpleNamespace(
+        name="campaign_get",
+        description="campaign",
+        inputSchema={
+            "type": "object",
+            "properties": {"principal_id": {"type": "string"}},
+        },
+    )
+    missing = MCPToolWrapper(
+        SimpleNamespace(),
+        "generic",
+        unowned,
+        inject_principal=True,
+    )
+    with pytest.raises(RuntimeError, match="does not advertise"):
+        missing._trusted_principal()
+
+
 @pytest.mark.asyncio
 async def test_principal_injection_does_not_add_unknown_argument() -> None:
     captured: dict[str, object] = {}

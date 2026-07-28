@@ -583,6 +583,19 @@ class MCPToolWrapper(_MCPWrapperBase):
             self._principal_argument = "principal_id"
         else:
             self._principal_argument = None
+        principal_schema = (
+            properties.get(self._principal_argument)
+            if self._principal_argument is not None
+            else None
+        )
+        advertised_default = (
+            principal_schema.get("default") if isinstance(principal_schema, dict) else None
+        )
+        self._local_principal_default = (
+            advertised_default.strip()
+            if isinstance(advertised_default, str) and advertised_default.strip()
+            else None
+        )
         if inject_principal:
             # Transport-authentication input is never an LLM argument.  Tools
             # without a trusted identity parameter receive no injected field.
@@ -627,8 +640,13 @@ class MCPToolWrapper(_MCPWrapperBase):
         if ctx is None or not ctx.sender_id:
             # Local cron/CLI calls have no user identity. They remain explicitly
             # distinguishable from an inbound platform user and cannot be spoofed
-            # by a model parameter.
-            return "system:local"
+            # by a model parameter. The capability server owns the local identity;
+            # the generic Agent adapter must not invent its own principal name.
+            if self._local_principal_default is None:
+                raise RuntimeError(
+                    "MCP tool does not advertise a local principal default"
+                )
+            return self._local_principal_default
         channel = re.sub(r"[^a-zA-Z0-9_.:-]", "_", ctx.channel or "unknown")
         sender = re.sub(r"[^a-zA-Z0-9_.:-]", "_", ctx.sender_id)
         return f"{channel}:{sender}"
