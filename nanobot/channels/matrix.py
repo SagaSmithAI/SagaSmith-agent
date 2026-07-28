@@ -55,6 +55,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_data_dir, get_media_dir
 from nanobot.config.schema import Base
+from nanobot.utils.clock import unix_time_ms
 from nanobot.utils.helpers import safe_filename
 from nanobot.utils.logging_bridge import redirect_lib_logging
 
@@ -259,7 +260,7 @@ class MatrixChannel(BaseChannel):
     async def start(self) -> None:
         """Start Matrix client and begin sync loop."""
         self._running = True
-        self._started_at_ms = int(time.time() * 1000)
+        self._started_at_ms = unix_time_ms()
         redirect_lib_logging("nio", level="WARNING")
 
         self.store_path = get_data_dir() / "matrix-store"

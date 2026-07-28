@@ -9,8 +9,15 @@ from typing import Any
 
 from nanobot.apps.cli import CliAppError, CliAppManager, CliAppsRuntimeConfig
 from nanobot.config.loader import load_config
-
-QueryParams = dict[str, list[str]]
+from nanobot.webui.http_utils import (
+    QueryParams,
+)
+from nanobot.webui.http_utils import (
+    clip_ws_string as _clip_ws_string,
+)
+from nanobot.webui.http_utils import (
+    query_first as _query_first,
+)
 
 _CLI_APP_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$", re.IGNORECASE)
 _CLI_APP_ATTACHMENT_KEYS = (
@@ -45,15 +52,6 @@ def _start_catalog_refresh(manager: CliAppManager) -> bool:
     return True
 
 
-def _clip_ws_string(value: Any, limit: int = 240) -> str | None:
-    if not isinstance(value, str):
-        return None
-    text = value.strip()
-    if not text:
-        return None
-    return text[:limit]
-
-
 def normalize_cli_app_mentions(raw: Any) -> list[dict[str, str]]:
     """Sanitize structured CLI app mentions sent by the WebUI."""
     if not isinstance(raw, list):
@@ -77,11 +75,6 @@ def normalize_cli_app_mentions(raw: Any) -> list[dict[str, str]]:
                 row[field] = value
         out.append(row)
     return out
-
-
-def _query_first(query: QueryParams, key: str) -> str | None:
-    values = query.get(key)
-    return values[0] if values else None
 
 
 def _manager() -> CliAppManager:

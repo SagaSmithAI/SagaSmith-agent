@@ -291,6 +291,10 @@ def current_time_str(timezone: str | None = None) -> str:
 
 
 _UNSAFE_CHARS = re.compile(r'[<>:"/\\|?*]')
+_UNSAFE_MEDIA_FILENAME_CHARS = re.compile(
+    r"[^\w.\-()\[\]（）【】\u4e00-\u9fff]+",
+    re.UNICODE,
+)
 _TOOL_RESULT_PREVIEW_CHARS = 1200
 _TOOL_RESULTS_DIR = ".nanobot/tool-results"
 _TOOL_RESULT_RETENTION_SECS = 7 * 24 * 60 * 60
@@ -301,6 +305,13 @@ _TRUNCATED_SUFFIX = "\n... (truncated)"
 def safe_filename(name: str) -> str:
     """Replace unsafe path characters with underscores."""
     return _UNSAFE_CHARS.sub("_", name).strip()
+
+
+def safe_media_filename(name: str) -> str:
+    """Return a traversal-safe media filename accepted by channel APIs."""
+
+    leaf = re.split(r"[/\\]", (name or "").strip())[-1]
+    return _UNSAFE_MEDIA_FILENAME_CHARS.sub("_", leaf).strip("._ ")
 
 
 def image_placeholder_text(path: str | None, *, empty: str = "[image]") -> str:
@@ -445,7 +456,10 @@ def _cleanup_tool_result_buckets(root: Path, current_bucket: Path) -> None:
         shutil.rmtree(path, ignore_errors=True)
 
 
-def _write_text_atomic(path: Path, content: str) -> None:
+def write_text_atomic(path: Path, content: str) -> None:
+    """Durably replace a UTF-8 text file through one shared atomic-write contract."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     try:
         with open(tmp, "w", encoding="utf-8") as f:
@@ -462,6 +476,10 @@ def _write_text_atomic(path: Path, content: str) -> None:
     finally:
         if tmp.exists():
             tmp.unlink(missing_ok=True)
+
+
+# Compatibility alias for callers that imported the former private helper.
+_write_text_atomic = write_text_atomic
 
 
 def maybe_persist_tool_result(
@@ -500,9 +518,9 @@ def maybe_persist_tool_result(
     path = bucket / f"{safe_filename(tool_call_id)}.{suffix}"
     if not path.exists():
         if suffix == "json" and isinstance(content, list):
-            _write_text_atomic(path, json.dumps(content, ensure_ascii=False, indent=2))
+            write_text_atomic(path, json.dumps(content, ensure_ascii=False, indent=2))
         else:
-            _write_text_atomic(path, text_payload)
+            write_text_atomic(path, text_payload)
 
     preview = text_payload[:_TOOL_RESULT_PREVIEW_CHARS]
     return _render_tool_result_reference(

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import time
 import uuid
 from typing import Any, Protocol
 
@@ -14,6 +13,7 @@ from nanobot.cron.session_delivery import origin_delivery_context
 from nanobot.cron.session_turns import CRON_DEFER_UNTIL_IDLE_META, CRON_TRIGGER_META
 from nanobot.cron.types import CronJob
 from nanobot.cron.webui_metadata import cron_proactive_delivery_metadata
+from nanobot.utils.clock import unix_time_ms
 from nanobot.utils.prompt_templates import render_template
 
 
@@ -76,7 +76,7 @@ async def run_bound_cron_job(
         message=job.payload.message,
     )
     prompt_ref = _cron_prompt_ref(prompt)
-    run_id = f"{job.id}:{int(time.time() * 1000)}:{uuid.uuid4().hex[:8]}"
+    run_id = f"{job.id}:{unix_time_ms()}:{uuid.uuid4().hex[:8]}"
     channel, chat_id, metadata = _bound_session_delivery_context(
         job,
         turn_seed=f"cron:{job.id}",

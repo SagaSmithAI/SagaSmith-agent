@@ -29,6 +29,10 @@ class TestMergeMessageContent:
         result = ContextBuilder._merge_message_content("", "world")
         assert result == "world"
 
+    def test_str_plus_empty_right_has_no_extra_separator(self):
+        result = ContextBuilder._merge_message_content("hello", "")
+        assert result == "hello"
+
     def test_list_plus_list(self):
         left = [{"type": "text", "text": "a"}]
         right = [{"type": "text", "text": "b"}]

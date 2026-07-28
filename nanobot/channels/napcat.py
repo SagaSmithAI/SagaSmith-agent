@@ -7,7 +7,6 @@ import base64
 import json
 import os
 import random
-import time
 import uuid
 from collections import deque
 from pathlib import Path
@@ -25,6 +24,7 @@ from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
 from nanobot.security.network import validate_url_target
+from nanobot.utils.clock import unix_time_ms
 from nanobot.utils.helpers import safe_filename
 
 _DOWNLOAD_TIMEOUT = aiohttp.ClientTimeout(total=60)
@@ -569,7 +569,7 @@ class NapcatChannel(BaseChannel):
         if filename_hint:
             name = safe_filename(filename_hint)
         else:
-            name = f"{int(time.time() * 1000)}.jpg"
+            name = f"{unix_time_ms()}.jpg"
         path = self._media_root / name
         try:
             await asyncio.to_thread(path.write_bytes, data)

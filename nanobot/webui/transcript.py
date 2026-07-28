@@ -8,7 +8,6 @@ import json
 import os
 import re
 import shutil
-import time
 import uuid
 from pathlib import Path
 from typing import Any, Callable, Mapping, NamedTuple
@@ -21,6 +20,7 @@ from nanobot.runtime_context import public_history_message
 from nanobot.session.automation_turns import is_automation_kind
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import SessionManager
+from nanobot.utils.clock import unix_time_ms
 from nanobot.webui.metadata import WEBUI_MESSAGE_SOURCE_METADATA_KEY, WEBUI_TURN_METADATA_KEY
 
 WEBUI_TRANSCRIPT_SCHEMA_VERSION = 3
@@ -1257,7 +1257,7 @@ def replay_transcript_to_ui_messages(
     active_activity_segment_id: str | None = None
     active_file_edit_segment_id: str | None = None
     activity_segment_counter = 0
-    _ts_base = int(time.time() * 1000)
+    _ts_base = unix_time_ms()
     closed_turn_ids: set[str] = set()
     replay_turn_aliases: dict[str, str] = {}
 

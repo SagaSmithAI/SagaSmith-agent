@@ -24,6 +24,7 @@ from nanobot.utils.helpers import (
     load_bundled_template,
     truncate_text_to_tokens,
 )
+from nanobot.utils.message_content import merge_message_content
 from nanobot.utils.prompt_templates import render_template
 
 
@@ -144,21 +145,7 @@ class ContextBuilder:
 
     @staticmethod
     def _merge_message_content(left: Any, right: Any) -> str | list[dict[str, Any]]:
-        if isinstance(left, str) and isinstance(right, str):
-            if not left:
-                return right
-            if not right:
-                return left
-            return f"{left}\n\n{right}"
-
-        def _to_blocks(value: Any) -> list[dict[str, Any]]:
-            if isinstance(value, list):
-                return [item if isinstance(item, dict) else {"type": "text", "text": str(item)} for item in value]
-            if value is None:
-                return []
-            return [{"type": "text", "text": str(value)}]
-
-        return _to_blocks(left) + _to_blocks(right)
+        return merge_message_content(left, right)
 
     def _load_bootstrap_files(self, workspace: Path | None = None) -> str:
         """Load all bootstrap files from workspace."""

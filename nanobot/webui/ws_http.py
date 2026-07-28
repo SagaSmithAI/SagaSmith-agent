@@ -28,6 +28,7 @@ from nanobot.cron.session_turns import is_bound_cron_job
 from nanobot.cron.types import CronJob, CronSchedule
 from nanobot.runtime_context import public_history_messages
 from nanobot.triggers.local_types import LocalTrigger
+from nanobot.utils.clock import unix_time_ms
 from nanobot.utils.subagent_channel_display import scrub_subagent_messages_for_channel
 from nanobot.webui.file_preview import WebUIFilePreviewError, file_preview_payload
 from nanobot.webui.gateway_tokens import GatewayTokenStore, token_response_payload
@@ -988,7 +989,7 @@ def _schedule_matches_job(schedule: CronSchedule, job: CronJob) -> bool:
 
 def _validate_automation_schedule(schedule: CronSchedule) -> str | None:
     if schedule.kind == "at":
-        if not schedule.at_ms or schedule.at_ms <= int(time.time() * 1000):
+        if not schedule.at_ms or schedule.at_ms <= unix_time_ms():
             return "one-time schedule must be in the future"
         return None
     if schedule.kind != "cron":

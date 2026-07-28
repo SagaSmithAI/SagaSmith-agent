@@ -17,11 +17,11 @@ import time
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from nanobot.config.paths import get_data_dir
+from nanobot.utils.clock import utc_now_iso as _utc_now
 
 
 @dataclass(frozen=True)
@@ -425,10 +425,6 @@ def _platform_name() -> str:
     if sys.platform == "darwin":
         return "Darwin"
     return "Linux"
-
-
-def _utc_now() -> str:
-    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
 def _as_int(value: object) -> int | None:

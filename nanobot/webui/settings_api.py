@@ -30,13 +30,15 @@ from nanobot.providers.image_generation import (
 )
 from nanobot.providers.registry import PROVIDERS, create_dynamic_spec, find_by_name
 from nanobot.security.workspace_access import workspace_sandbox_status
+from nanobot.utils.clock import unix_time_ms
+from nanobot.webui.http_utils import QueryParams
+from nanobot.webui.http_utils import query_first as _query_first
 from nanobot.webui.token_usage import token_usage_payload
 from nanobot.webui.workspaces import (
     read_webui_default_access_mode,
     write_webui_default_access_mode,
 )
 
-QueryParams = dict[str, list[str]]
 RuntimeSurface = Literal["browser", "native"]
 
 
@@ -172,11 +174,6 @@ def decorate_settings_payload(
     return result
 
 
-def _query_first(query: QueryParams, key: str) -> str | None:
-    values = query.get(key)
-    return values[0] if values else None
-
-
 def _query_first_alias(query: QueryParams, snake: str, camel: str) -> str | None:
     value = _query_first(query, snake)
     return _query_first(query, camel) if value is None else value
@@ -246,7 +243,7 @@ def _oauth_provider_status(spec: Any) -> dict[str, Any]:
                 token_filename=OPENAI_CODEX_PROVIDER.token_filename,
             ).load()
         expires_at = getattr(token, "expires", None) if token else None
-        now_ms = int(time.time() * 1000)
+        now_ms = unix_time_ms()
         return {
             "configured": bool(
                 token
@@ -272,7 +269,7 @@ def _oauth_provider_status(spec: Any) -> dict[str, Any]:
         with suppress(Exception):
             token = get_github_copilot_login_status()
         return {
-            "configured": bool(token and token.access and token.expires > int(time.time() * 1000)),
+            "configured": bool(token and token.access and token.expires > unix_time_ms()),
             "account": getattr(token, "account_id", None) if token else None,
             "expires_at": getattr(token, "expires", None) if token else None,
             "login_supported": True,

@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 import threading
-import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -15,6 +14,7 @@ from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.config.paths import get_webui_dir
+from nanobot.utils.clock import utc_now_iso as _utc_now_iso
 
 TOKEN_USAGE_SCHEMA_VERSION = 1
 _MAX_STATE_FILE_BYTES = 512 * 1024
@@ -42,11 +42,6 @@ def default_token_usage_state() -> dict[str, Any]:
         "days": {},
         "updated_at": None,
     }
-
-
-def _utc_now_iso() -> str:
-    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-
 
 def _zone(timezone_name: str | None) -> timezone | ZoneInfo:
     if not timezone_name:

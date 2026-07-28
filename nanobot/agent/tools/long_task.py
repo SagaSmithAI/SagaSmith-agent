@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from nanobot.agent.goal_permission import (
@@ -26,6 +25,7 @@ from nanobot.session.goal_state import (
     sustained_goal_active,
 )
 from nanobot.session.turn_continuation import reset_goal_continuation_rounds
+from nanobot.utils.clock import utc_now_iso
 from nanobot.utils.prompt_templates import render_template
 
 if TYPE_CHECKING:
@@ -44,7 +44,7 @@ _REPLACE_UNAVAILABLE_ERROR = (
 
 
 def _iso_now() -> str:
-    return datetime.now().isoformat()
+    return utc_now_iso()
 
 
 class _GoalToolsMixin:

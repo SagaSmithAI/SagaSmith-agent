@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 import json
 from typing import Any, Awaitable, Callable
 
@@ -13,6 +12,7 @@ from nanobot.utils.helpers import IncrementalThinkExtractor, strip_think
 from nanobot.utils.progress_events import (
     build_tool_event_finish_payloads,
     build_tool_event_start_payload,
+    callback_accepts_keyword,
     invoke_on_progress,
     on_progress_accepts_tool_events,
 )
@@ -54,16 +54,6 @@ class AgentProgressHook(AgentHook):
 
     def _tool_hint(self, tool_calls: list[Any]) -> str:
         return format_tool_hints(tool_calls, max_length=self._tool_hint_max_length)
-
-    @staticmethod
-    def _on_progress_accepts(cb: Callable[..., Any], name: str) -> bool:
-        try:
-            sig = inspect.signature(cb)
-        except (TypeError, ValueError):
-            return False
-        if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
-            return True
-        return name in sig.parameters
 
     async def on_stream(self, context: AgentHookContext, delta: str) -> None:
         prev_clean = strip_think(self._stream_buf)
@@ -119,7 +109,7 @@ class AgentProgressHook(AgentHook):
         if (
             self._on_progress
             and reasoning_content
-            and self._on_progress_accepts(self._on_progress, "reasoning")
+            and callback_accepts_keyword(self._on_progress, "reasoning")
         ):
             self._reasoning_open = True
             await self._on_progress(reasoning_content, reasoning=True)

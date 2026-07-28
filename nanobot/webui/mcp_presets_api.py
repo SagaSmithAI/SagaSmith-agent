@@ -12,7 +12,6 @@ import urllib.parse
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal, Mapping
 
@@ -21,9 +20,17 @@ from nanobot.apps.protocol import app_manifest, compact_dict
 from nanobot.config.loader import load_config, resolve_config_env_vars, save_config
 from nanobot.config.paths import get_runtime_subdir
 from nanobot.config.schema import MCPServerConfig
+from nanobot.utils.clock import utc_now_iso as _checked_at
 from nanobot.utils.helpers import ensure_dir
-
-QueryParams = dict[str, list[str]]
+from nanobot.webui.http_utils import (
+    QueryParams,
+)
+from nanobot.webui.http_utils import (
+    clip_ws_string as _clip_ws_string,
+)
+from nanobot.webui.http_utils import (
+    query_first as _query_first,
+)
 
 _MCP_PRESET_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$", re.IGNORECASE)
 _SECRET_QUERY_RE = re.compile(
@@ -380,11 +387,6 @@ MCP_PRESETS: tuple[McpPreset, ...] = (
 )
 
 
-def _query_first(query: QueryParams, key: str) -> str | None:
-    values = query.get(key)
-    return values[0] if values else None
-
-
 def _query_value(query: QueryParams, key: str) -> str | None:
     raw = _query_first(query, key)
     if raw is None:
@@ -418,15 +420,6 @@ def _known_mcp_names() -> set[str]:
     with suppress(Exception):
         names.update(load_config().tools.mcp_servers)
     return names
-
-
-def _clip_ws_string(value: Any, limit: int = 240) -> str | None:
-    if not isinstance(value, str):
-        return None
-    text = value.strip()
-    if not text:
-        return None
-    return text[:limit]
 
 
 def normalize_mcp_preset_mentions(raw: Any) -> list[dict[str, Any]]:
@@ -891,10 +884,6 @@ def _scrub_test_error(text: str) -> str:
     scrubbed = _SECRET_QUERY_RE.sub(r"\1<redacted>", text.strip())
     scrubbed = _SECRET_ASSIGNMENT_RE.sub(r"\1<redacted>", scrubbed)
     return scrubbed[:400] if scrubbed else "Connection failed."
-
-
-def _checked_at() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _test_timeout(cfg: MCPServerConfig) -> int:

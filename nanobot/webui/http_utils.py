@@ -116,6 +116,17 @@ def query_first(query: QueryParams, key: str) -> str | None:
     return values[0] if values else None
 
 
+def clip_ws_string(value: Any, limit: int = 240) -> str | None:
+    """Normalize and bound an optional string from a WebSocket payload."""
+
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    return text[:limit]
+
+
 def is_localhost(connection: Any) -> bool:
     addr = getattr(connection, "remote_address", None)
     if not addr:

@@ -22,8 +22,6 @@ import asyncio
 import base64
 import mimetypes
 import os
-import re
-import time
 from collections import deque
 from contextlib import suppress
 from pathlib import Path
@@ -39,6 +37,8 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import Base
 from nanobot.security.network import validate_url_target
+from nanobot.utils.clock import unix_time_ms
+from nanobot.utils.helpers import safe_media_filename
 from nanobot.utils.logging_bridge import redirect_lib_logging
 
 try:
@@ -79,16 +79,9 @@ _IMAGE_EXTS = {
     ".svg",
 }
 
-# Replace unsafe characters with "_", keep Chinese and common safe punctuation.
-_SAFE_NAME_RE = re.compile(r"[^\w.\-()\[\]（）【】\u4e00-\u9fff]+", re.UNICODE)
-
-
 def _sanitize_filename(name: str) -> str:
     """Sanitize filename to avoid traversal and problematic chars."""
-    name = (name or "").strip()
-    name = Path(name).name
-    name = _SAFE_NAME_RE.sub("_", name).strip("._ ")
-    return name
+    return safe_media_filename(name)
 
 
 def _is_image_name(name: str) -> bool:
@@ -611,7 +604,7 @@ class QQChannel(BaseChannel):
             self._http = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120))
 
         safe = _sanitize_filename(filename_hint)
-        ts = int(time.time() * 1000)
+        ts = unix_time_ms()
         tmp_path: Path | None = None
 
         try:

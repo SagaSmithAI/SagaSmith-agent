@@ -31,6 +31,7 @@ from nanobot.utils.helpers import (
     strip_think,
 )
 from nanobot.utils.llm_runtime import LLMRuntime
+from nanobot.utils.message_content import merge_message_content
 from nanobot.utils.prompt_templates import render_template
 from nanobot.utils.runtime import (
     EMPTY_FINAL_RESPONSE_MESSAGE,
@@ -107,20 +108,7 @@ class AgentRunner:
 
     @staticmethod
     def _merge_message_content(left: Any, right: Any) -> str | list[dict[str, Any]]:
-        if isinstance(left, str) and isinstance(right, str):
-            return f"{left}\n\n{right}" if left else right
-
-        def _to_blocks(value: Any) -> list[dict[str, Any]]:
-            if isinstance(value, list):
-                return [
-                    item if isinstance(item, dict) else {"type": "text", "text": str(item)}
-                    for item in value
-                ]
-            if value is None:
-                return []
-            return [{"type": "text", "text": str(value)}]
-
-        return _to_blocks(left) + _to_blocks(right)
+        return merge_message_content(left, right)
 
     @classmethod
     def _append_injected_messages(

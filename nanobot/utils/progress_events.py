@@ -10,14 +10,16 @@ from nanobot.agent.hook import AgentHookContext
 
 
 def on_progress_accepts_tool_events(cb: Callable[..., Any]) -> bool:
-    return _on_progress_accepts(cb, "tool_events")
+    return callback_accepts_keyword(cb, "tool_events")
 
 
 def on_progress_accepts_file_edit_events(cb: Callable[..., Any]) -> bool:
-    return _on_progress_accepts(cb, "file_edit_events")
+    return callback_accepts_keyword(cb, "file_edit_events")
 
 
-def _on_progress_accepts(cb: Callable[..., Any], name: str) -> bool:
+def callback_accepts_keyword(cb: Callable[..., Any], name: str) -> bool:
+    """Return whether a callback accepts a named keyword or arbitrary keywords."""
+
     try:
         sig = inspect.signature(cb)
     except (TypeError, ValueError):

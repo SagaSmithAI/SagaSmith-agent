@@ -18,6 +18,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_runtime_subdir
 from nanobot.config.schema import Base
+from nanobot.utils.clock import utc_now_iso
 
 try:
     import socketio
@@ -100,7 +101,7 @@ def _make_synthetic_event(
         payload["authorInfo"] = _safe_dict(author_info)
     return {
         "type": "message.add",
-        "timestamp": timestamp or datetime.utcnow().isoformat(),
+        "timestamp": timestamp or utc_now_iso(),
         "payload": payload,
     }
 
@@ -896,7 +897,7 @@ class MochatChannel(BaseChannel):
         try:
             self._state_dir.mkdir(parents=True, exist_ok=True)
             self._cursor_path.write_text(json.dumps({
-                "schemaVersion": 1, "updatedAt": datetime.utcnow().isoformat(),
+                "schemaVersion": 1, "updatedAt": utc_now_iso(),
                 "cursors": self._session_cursor,
             }, ensure_ascii=False, indent=2) + "\n", "utf-8")
         except Exception as e:

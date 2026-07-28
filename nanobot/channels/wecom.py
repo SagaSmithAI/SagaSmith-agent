@@ -5,7 +5,6 @@ import base64
 import hashlib
 import importlib.util
 import os
-import re
 from collections import OrderedDict
 from pathlib import Path
 from typing import Any
@@ -18,22 +17,16 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
+from nanobot.utils.helpers import safe_media_filename
 
 WECOM_AVAILABLE = importlib.util.find_spec("wecom_aibot_sdk") is not None
 
 # Upload safety limits (matching QQ channel defaults)
 WECOM_UPLOAD_MAX_BYTES = 1024 * 1024 * 200  # 200MB
 
-# Replace unsafe characters with "_", keep Chinese and common safe punctuation.
-_SAFE_NAME_RE = re.compile(r"[^\w.\-()\[\]（）【】\u4e00-\u9fff]+", re.UNICODE)
-
-
 def _sanitize_filename(name: str) -> str:
     """Sanitize filename to avoid traversal and problematic chars."""
-    name = (name or "").strip()
-    name = Path(name).name
-    name = _SAFE_NAME_RE.sub("_", name).strip("._ ")
-    return name
+    return safe_media_filename(name)
 
 
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
