@@ -141,8 +141,8 @@ MCP `tools/list_changed` can instead use the dynamically refreshed native tool.
 `combat_start` and `combat_end` change the authoritative campaign phase and make
 incompatible loaded groups unavailable. `enabledTools` is therefore the outer
 allowlist for the core protocol, not a list of every D&D action.
-The D&D server's compact domain catalogue contains 82 public tools, with
-Lobby/Play/Combat ceilings of 61/46/44. The Agent allowlist remains exactly the
+The D&D server's compact domain catalogue contains 83 public tools, with
+Lobby/Play/Combat ceilings of 62/47/45. The Agent allowlist remains exactly the
 12 core tools shown above; do not add retired domain aliases to `enabledTools`.
 
 The CoC MCP follows the same protocol and server-owned session boundary. Its
@@ -204,6 +204,32 @@ The same contract applies to module-specific narrative consequences:
 the exact premise text or by itself for a source-independent DM event. The
 committed event retains that decision and reason; callers do not need a new Core
 mechanic for every one-off module situation.
+
+Standard D&D rules are different: mechanic ids registered in the campaign's
+active rule lock select version-locked engine implementations, so the Agent must
+not reinterpret or replace them with prose rulings. A core-looking string alone
+does not create an executable mechanic, and accounting or transaction mechanics
+do not settle a card's authored outcome. A locked standard card that returns
+`semantic_solution.status="engine_implementation_required"` must stop before
+payment and be implemented and tested in the engine. Imported or homebrew
+character cards without a reviewed executable mechanic use a first-use
+compilation boundary. The action returns
+`semantic_solution.status="compilation_required"` before consuming an action,
+spell slot, charge, or character revision. The Agent expands the exact
+module or active rule chunk, builds a constrained schema-v2 resolution plan, and
+calls DM-only `content_solution(action="compile")`. The server validates the
+citation and card wording, stores the versioned solution on that exact card, and
+later actions reuse the stored plan. A paid item-hit window instead uses
+`combat_choice(action="compile_solution")`, which stores the same durable
+solution while atomically upgrading the existing payment event; settle it with
+`combat_choice(action="execute_plan")`. Never invent a `dnd5e.core.*` id, attach
+arbitrary code, or fall back to a transient ruling merely because the custom
+card has not yet been compiled.
+
+Use a one-occurrence Agent ruling only when the current situation is genuinely
+unique or cannot be represented by the constrained plan operations. Such a
+ruling may settle that occurrence but must not masquerade as a reusable standard
+rule or silently transfer into another card.
 A safe engine prerequisite may return `pending_ruling` with `committed=false`,
 `missing`, and a `retry_contract`; this is a control return, not a fictional
 failed action. The Agent supplies ordinary scene/rule facts and retries at the
