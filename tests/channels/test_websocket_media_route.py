@@ -210,7 +210,7 @@ def test_local_markdown_image_rejects_workspace_escape(
 
 @pytest.mark.asyncio
 async def test_media_route_serves_signed_file(
-    bus: MagicMock, tmp_path: Path
+    bus: MagicMock, tmp_path: Path, unused_tcp_port: int
 ) -> None:
     """Valid signature + existing file => 200 with correct bytes + MIME."""
     media = tmp_path / "media"
@@ -218,14 +218,14 @@ async def test_media_route_serves_signed_file(
     target = media / "round-trip.png"
     target.write_bytes(_PNG_BYTES)
 
-    channel = _ch(bus, port=29920)
+    channel = _ch(bus, port=unused_tcp_port)
     with patch("nanobot.webui.media_gateway.get_media_dir", return_value=media):
         url_path = channel.gateway.media.sign_media_path(target)
         assert url_path is not None
         server_task = asyncio.create_task(channel.start())
         await asyncio.sleep(0.3)
         try:
-            resp = await _http_get(f"http://127.0.0.1:29920{url_path}")
+            resp = await _http_get(f"http://127.0.0.1:{unused_tcp_port}{url_path}")
         finally:
             await channel.stop()
             await server_task
@@ -243,7 +243,7 @@ async def test_media_route_serves_signed_file(
 
 @pytest.mark.asyncio
 async def test_media_route_serves_video_byte_ranges(
-    bus: MagicMock, tmp_path: Path
+    bus: MagicMock, tmp_path: Path, unused_tcp_port: int
 ) -> None:
     """MP4 playback needs HTTP Range support for mid-stream reads and seeking."""
     media = tmp_path / "media"
@@ -251,7 +251,7 @@ async def test_media_route_serves_video_byte_ranges(
     target = media / "clip.mp4"
     target.write_bytes(b"0123456789")
 
-    channel = _ch(bus, port=29927)
+    channel = _ch(bus, port=unused_tcp_port)
     with patch("nanobot.webui.media_gateway.get_media_dir", return_value=media):
         url_path = channel.gateway.media.sign_media_path(target)
         assert url_path is not None
@@ -259,7 +259,7 @@ async def test_media_route_serves_video_byte_ranges(
         await asyncio.sleep(0.3)
         try:
             resp = await _http_get(
-                f"http://127.0.0.1:29927{url_path}",
+                f"http://127.0.0.1:{unused_tcp_port}{url_path}",
                 headers={"Range": "bytes=2-5"},
             )
         finally:
@@ -276,14 +276,14 @@ async def test_media_route_serves_video_byte_ranges(
 
 @pytest.mark.asyncio
 async def test_media_route_serves_suffix_video_byte_ranges(
-    bus: MagicMock, tmp_path: Path
+    bus: MagicMock, tmp_path: Path, unused_tcp_port: int
 ) -> None:
     media = tmp_path / "media"
     media.mkdir()
     target = media / "clip.mp4"
     target.write_bytes(b"0123456789")
 
-    channel = _ch(bus, port=29928)
+    channel = _ch(bus, port=unused_tcp_port)
     with patch("nanobot.webui.media_gateway.get_media_dir", return_value=media):
         url_path = channel.gateway.media.sign_media_path(target)
         assert url_path is not None
@@ -291,7 +291,7 @@ async def test_media_route_serves_suffix_video_byte_ranges(
         await asyncio.sleep(0.3)
         try:
             resp = await _http_get(
-                f"http://127.0.0.1:29928{url_path}",
+                f"http://127.0.0.1:{unused_tcp_port}{url_path}",
                 headers={"Range": "bytes=-3"},
             )
         finally:
@@ -305,14 +305,14 @@ async def test_media_route_serves_suffix_video_byte_ranges(
 
 @pytest.mark.asyncio
 async def test_media_route_rejects_unsatisfiable_byte_range(
-    bus: MagicMock, tmp_path: Path
+    bus: MagicMock, tmp_path: Path, unused_tcp_port: int
 ) -> None:
     media = tmp_path / "media"
     media.mkdir()
     target = media / "clip.mp4"
     target.write_bytes(b"0123456789")
 
-    channel = _ch(bus, port=29929)
+    channel = _ch(bus, port=unused_tcp_port)
     with patch("nanobot.webui.media_gateway.get_media_dir", return_value=media):
         url_path = channel.gateway.media.sign_media_path(target)
         assert url_path is not None
@@ -320,7 +320,7 @@ async def test_media_route_rejects_unsatisfiable_byte_range(
         await asyncio.sleep(0.3)
         try:
             resp = await _http_get(
-                f"http://127.0.0.1:29929{url_path}",
+                f"http://127.0.0.1:{unused_tcp_port}{url_path}",
                 headers={"Range": "bytes=100-200"},
             )
         finally:
@@ -334,7 +334,7 @@ async def test_media_route_rejects_unsatisfiable_byte_range(
 
 @pytest.mark.asyncio
 async def test_media_route_rejects_bad_signature(
-    bus: MagicMock, tmp_path: Path
+    bus: MagicMock, tmp_path: Path, unused_tcp_port: int
 ) -> None:
     """A payload re-signed with a different secret must 401.
 
@@ -345,7 +345,7 @@ async def test_media_route_rejects_bad_signature(
     media.mkdir()
     (media / "f.png").write_bytes(_PNG_BYTES)
 
-    channel = _ch(bus, port=29921)
+    channel = _ch(bus, port=unused_tcp_port)
     with patch("nanobot.webui.media_gateway.get_media_dir", return_value=media):
         good = channel.gateway.media.sign_media_path(media / "f.png")
         assert good is not None
@@ -359,7 +359,7 @@ async def test_media_route_rejects_bad_signature(
         server_task = asyncio.create_task(channel.start())
         await asyncio.sleep(0.3)
         try:
-            resp = await _http_get(f"http://127.0.0.1:29921{forged}")
+            resp = await _http_get(f"http://127.0.0.1:{unused_tcp_port}{forged}")
         finally:
             await channel.stop()
             await server_task
@@ -368,7 +368,7 @@ async def test_media_route_rejects_bad_signature(
 
 @pytest.mark.asyncio
 async def test_media_route_rejects_path_traversal_payload(
-    bus: MagicMock, tmp_path: Path
+    bus: MagicMock, tmp_path: Path, unused_tcp_port: int
 ) -> None:
     """Even a validly-signed ``..`` payload must not escape the media root.
 
@@ -381,7 +381,7 @@ async def test_media_route_rejects_path_traversal_payload(
     secret_file = tmp_path / "secret.txt"
     secret_file.write_text("classified")
 
-    channel = _ch(bus, port=29922)
+    channel = _ch(bus, port=unused_tcp_port)
     # Hand-craft a traversal payload the legit signer would refuse to mint.
     payload = b64url_encode(b"../secret.txt")
     mac = hmac.new(
@@ -393,7 +393,7 @@ async def test_media_route_rejects_path_traversal_payload(
         server_task = asyncio.create_task(channel.start())
         await asyncio.sleep(0.3)
         try:
-            resp = await _http_get(f"http://127.0.0.1:29922{url}")
+            resp = await _http_get(f"http://127.0.0.1:{unused_tcp_port}{url}")
         finally:
             await channel.stop()
             await server_task
@@ -403,7 +403,7 @@ async def test_media_route_rejects_path_traversal_payload(
 
 @pytest.mark.asyncio
 async def test_media_route_404s_missing_file(
-    bus: MagicMock, tmp_path: Path
+    bus: MagicMock, tmp_path: Path, unused_tcp_port: int
 ) -> None:
     """A signed URL for a file that no longer exists degrades to 404 so the
     client can fall back to the placeholder tile instead of breaking."""
@@ -412,7 +412,7 @@ async def test_media_route_404s_missing_file(
     target = media / "gone.png"
     target.write_bytes(_PNG_BYTES)
 
-    channel = _ch(bus, port=29923)
+    channel = _ch(bus, port=unused_tcp_port)
     with patch("nanobot.webui.media_gateway.get_media_dir", return_value=media):
         url_path = channel.gateway.media.sign_media_path(target)
         assert url_path is not None
@@ -420,7 +420,7 @@ async def test_media_route_404s_missing_file(
         server_task = asyncio.create_task(channel.start())
         await asyncio.sleep(0.3)
         try:
-            resp = await _http_get(f"http://127.0.0.1:29923{url_path}")
+            resp = await _http_get(f"http://127.0.0.1:{unused_tcp_port}{url_path}")
         finally:
             await channel.stop()
             await server_task
@@ -429,7 +429,7 @@ async def test_media_route_404s_missing_file(
 
 @pytest.mark.asyncio
 async def test_media_route_degrades_non_image_to_octet_stream(
-    bus: MagicMock, tmp_path: Path
+    bus: MagicMock, tmp_path: Path, unused_tcp_port: int
 ) -> None:
     """A non-image extension must not be served as its native MIME.
 
@@ -440,7 +440,7 @@ async def test_media_route_degrades_non_image_to_octet_stream(
     media.mkdir()
     (media / "scary.html").write_bytes(b"<script>alert(1)</script>")
 
-    channel = _ch(bus, port=29924)
+    channel = _ch(bus, port=unused_tcp_port)
     with patch("nanobot.webui.media_gateway.get_media_dir", return_value=media):
         payload = b64url_encode(b"scary.html")
         mac = hmac.new(
@@ -450,7 +450,7 @@ async def test_media_route_degrades_non_image_to_octet_stream(
         server_task = asyncio.create_task(channel.start())
         await asyncio.sleep(0.3)
         try:
-            resp = await _http_get(f"http://127.0.0.1:29924{url}")
+            resp = await _http_get(f"http://127.0.0.1:{unused_tcp_port}{url}")
         finally:
             await channel.stop()
             await server_task
@@ -463,7 +463,7 @@ async def test_media_route_degrades_non_image_to_octet_stream(
 
 @pytest.mark.asyncio
 async def test_media_route_serves_svg_with_strict_csp(
-    bus: MagicMock, tmp_path: Path
+    bus: MagicMock, tmp_path: Path, unused_tcp_port: int
 ) -> None:
     """Generated SVG can preview as an image without becoming executable HTML."""
     media = tmp_path / "media"
@@ -471,14 +471,14 @@ async def test_media_route_serves_svg_with_strict_csp(
     target = media / "chart.svg"
     target.write_text("<svg xmlns='http://www.w3.org/2000/svg'><script>alert(1)</script></svg>")
 
-    channel = _ch(bus, port=29928)
+    channel = _ch(bus, port=unused_tcp_port)
     with patch("nanobot.webui.media_gateway.get_media_dir", return_value=media):
         url_path = channel.gateway.media.sign_media_path(target)
         assert url_path is not None
         server_task = asyncio.create_task(channel.start())
         await asyncio.sleep(0.3)
         try:
-            resp = await _http_get(f"http://127.0.0.1:29928{url_path}")
+            resp = await _http_get(f"http://127.0.0.1:{unused_tcp_port}{url_path}")
         finally:
             await channel.stop()
             await server_task
@@ -497,7 +497,7 @@ async def test_media_route_serves_svg_with_strict_csp(
 
 @pytest.mark.asyncio
 async def test_session_messages_exposes_signed_media_urls(
-    bus: MagicMock, tmp_path: Path
+    bus: MagicMock, tmp_path: Path, unused_tcp_port: int
 ) -> None:
     """The read path must map persisted ``media`` paths onto signed URLs
     and strip the raw path — the client never learns the server's layout."""
@@ -512,7 +512,7 @@ async def test_session_messages_exposes_signed_media_urls(
     sess.add_message("assistant", "nice")
     sm.save(sess)
 
-    channel = _ch(bus, session_manager=sm, port=29925)
+    channel = _ch(bus, session_manager=sm, port=unused_tcp_port)
     with patch("nanobot.webui.media_gateway.get_media_dir", return_value=media):
         server_task = asyncio.create_task(channel.start())
         await asyncio.sleep(0.3)
@@ -520,7 +520,8 @@ async def test_session_messages_exposes_signed_media_urls(
             token = channel.gateway.tokens.issue_api_token(300)
             auth = {"Authorization": f"Bearer {token}"}
             resp = await _http_get(
-                "http://127.0.0.1:29925/api/sessions/websocket:media-hydrate/messages",
+                f"http://127.0.0.1:{unused_tcp_port}/api/sessions/"
+                "websocket:media-hydrate/messages",
                 headers=auth,
             )
             body = resp.json()
@@ -534,7 +535,9 @@ async def test_session_messages_exposes_signed_media_urls(
             assert "media" not in user_msg
 
             # And the URL actually works.
-            fetched = await _http_get(f"http://127.0.0.1:29925{urls[0]['url']}")
+            fetched = await _http_get(
+                f"http://127.0.0.1:{unused_tcp_port}{urls[0]['url']}"
+            )
             assert fetched.status_code == 200
             assert fetched.content == _PNG_BYTES
         finally:
@@ -544,7 +547,7 @@ async def test_session_messages_exposes_signed_media_urls(
 
 @pytest.mark.asyncio
 async def test_session_messages_skips_vanished_media(
-    bus: MagicMock, tmp_path: Path
+    bus: MagicMock, tmp_path: Path, unused_tcp_port: int
 ) -> None:
     """Paths that no longer resolve inside the media root produce no URL —
     the message is still delivered, just without the preview."""
@@ -556,14 +559,15 @@ async def test_session_messages_skips_vanished_media(
     sess.add_message("user", "missing pic", media=[str(media / "absent.png")])
     sm.save(sess)
 
-    channel = _ch(bus, session_manager=sm, port=29926)
+    channel = _ch(bus, session_manager=sm, port=unused_tcp_port)
     with patch("nanobot.webui.media_gateway.get_media_dir", return_value=media):
         server_task = asyncio.create_task(channel.start())
         await asyncio.sleep(0.3)
         try:
             token = channel.gateway.tokens.issue_api_token(300)
             resp = await _http_get(
-                "http://127.0.0.1:29926/api/sessions/websocket:vanished/messages",
+                f"http://127.0.0.1:{unused_tcp_port}/api/sessions/"
+                "websocket:vanished/messages",
                 headers={"Authorization": f"Bearer {token}"},
             )
             user_msg = next(m for m in resp.json()["messages"] if m["role"] == "user")
@@ -572,7 +576,9 @@ async def test_session_messages_skips_vanished_media(
             # the listing). Fetching the URL is where the 404 surfaces.
             urls = user_msg.get("media_urls") or []
             assert len(urls) == 1
-            fetched = await _http_get(f"http://127.0.0.1:29926{urls[0]['url']}")
+            fetched = await _http_get(
+                f"http://127.0.0.1:{unused_tcp_port}{urls[0]['url']}"
+            )
             assert fetched.status_code == 404
             assert "media" not in user_msg
         finally:
