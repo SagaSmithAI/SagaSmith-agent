@@ -288,7 +288,11 @@ managed module, scene, printed heading, and PDF page; the MCP server verifies th
 asset checksum, performs layout OCR, and corroborates the complete critical
 fingerprint against embedded text or a second OCR scale before storing an
 immutable module review. This is the default for a blocked module candidate when
-the configured model has no image capability. Rendering and manual
+the configured model has no image capability. If the recovered custom card needs
+Multiattack semantics, the first response has `requires_agent_fill=true`,
+`review=null`, the normalized OCR text, and exact fill requirements. The parent
+Agent reasons over those returned fields and retries with a fresh idempotency key
+and `payload.agent_fill`; only the retry stores the immutable review. Rendering and manual
 `submit_content` transcription remain an image-capable fallback, never a
 text-only inference step.
 
