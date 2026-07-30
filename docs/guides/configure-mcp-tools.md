@@ -282,6 +282,16 @@ that card from text alone, so the parent Agent does not need image capability.
 Only missing or conflicting required facts proceed to the local
 `rule_import(action="recover_statblock")` OCR path.
 
+The equivalent module-card path is
+`module_review(action="recover_statblock")`. The parent Agent supplies the exact
+managed module, scene, printed heading, and PDF page; the MCP server verifies the
+asset checksum, performs layout OCR, and corroborates the complete critical
+fingerprint against embedded text or a second OCR scale before storing an
+immutable module review. This is the default for a blocked module candidate when
+the configured model has no image capability. Rendering and manual
+`submit_content` transcription remain an image-capable fallback, never a
+text-only inference step.
+
 The first inspection of a scanned or corrupt-text book may perform selective OCR.
 Keep `toolTimeout` at 900 seconds for real rulebook corpora; normalized and raw page
 extraction caches make exact subsequent runs fast. Stdio servers receive only their
