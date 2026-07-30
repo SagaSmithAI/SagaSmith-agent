@@ -205,6 +205,18 @@ the exact premise text or by itself for a source-independent DM event. The
 committed event retains that decision and reason; callers do not need a new Core
 mechanic for every one-off module situation.
 
+For reusable access to module-authored narrative context, the Agent creates a
+DM-only `kind="context_anchor"` through `memory_change(action="upsert")`. The
+anchor contains only opaque entity links and exact managed source bindings; it
+cannot contain a predicate, trigger, condition, action, result, paraphrase, or
+Agent instruction. Before adjudicating, call `continuity_context` with
+`related_refs` for the current NPC, scene/location, active quest, and key item.
+Its pinned `module_evidence` is exact source context, not an executable plan.
+The Agent combines it with current state, decides the situation, and invokes
+ordinary public MCP tools. Save only the outcome that actually occurred, and
+never expose DM evidence or transfer it into ActorKnowledge until an actor
+reasonably learns it.
+
 Standard D&D rules are different: mechanic ids registered in the campaign's
 active rule lock select version-locked engine implementations, so the Agent must
 not reinterpret or replace them with prose rulings. A core-looking string alone
