@@ -293,6 +293,10 @@ def test_agent_contract_requires_engine_resolution_for_mechanical_actions() -> N
     with pytest.raises(NpcTurnError, match="requires an explicit resolution request"):
         normalize_npc_turn_proposal(proposal)
 
+    invalid_version = {**proposal, "schema_version": True}
+    with pytest.raises(NpcTurnError, match="schema_version must be 1"):
+        normalize_npc_turn_proposal(invalid_version)
+
     proposal["resolution_requests"] = [
         {
             "kind": "attack",
