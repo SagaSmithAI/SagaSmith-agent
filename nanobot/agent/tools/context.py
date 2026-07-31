@@ -70,6 +70,7 @@ class ToolContext:
     workspace: str
     bus: Any | None = None
     subagent_manager: Any | None = None
+    npc_turn_runner: Any | None = None
     cron_service: Any | None = None
     sessions: Any | None = None
     file_state_store: Any = field(default=None)

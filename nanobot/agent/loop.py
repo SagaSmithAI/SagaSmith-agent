@@ -25,6 +25,7 @@ from nanobot.agent.cron_turns import CronTurnCoordinator
 from nanobot.agent.hook import AgentHook, AgentTurnHookFactory
 from nanobot.agent.memory import Consolidator
 from nanobot.agent.model_runtime import ModelRuntimeResolver
+from nanobot.agent.npc_turn import NpcTurnRunner
 from nanobot.agent.runner import _MAX_INJECTIONS_PER_TURN, AgentRunner, AgentRunSpec
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.context import RequestContext, bind_request_context, reset_request_context
@@ -362,6 +363,7 @@ class AgentLoop:
         # shared by this loop, so tools resolve the active state via contextvars.
         self._file_state_store = FileStateStore()
         self.runner = AgentRunner()
+        self.npc_turns = NpcTurnRunner()
         self.subagents = SubagentManager(
             workspace=workspace,
             bus=bus,
@@ -550,6 +552,7 @@ class AgentLoop:
             workspace=str(self.workspace),
             bus=self.bus,
             subagent_manager=self.subagents,
+            npc_turn_runner=self.npc_turns,
             cron_service=self.cron_service,
             sessions=self.sessions,
             provider_snapshot_loader=provider_snapshot_loader,

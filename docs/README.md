@@ -104,6 +104,7 @@ If a local `nanobot agent` session can already answer normally, you can also ask
 | Full configuration schema | [`configuration.md`](./configuration.md) | Exact fields, defaults, provider tables, web tools, MCP, security, and runtime options |
 | CLI commands | [`cli-reference.md`](./cli-reference.md) | Command names, common flags, and entrypoints |
 | Architecture | [`architecture.md`](./architecture.md) | Source-level runtime map for core flow, providers, channels, tools, WebUI, memory, security, and extension points |
+| Isolated NPC portrayal | [`npc-turn-isolation.md`](./npc-turn-isolation.md) | Fresh zero-tool actor-scoped model calls for SagaSmith D&D |
 | Release archive | [`release-archive.md`](./release-archive.md) | Older release and daily update highlights moved out of the README |
 | Development | [`development.md`](./development.md) | Contributor notes for adding providers and transcription adapters |
 | Memory | [`memory.md`](./memory.md) | Session history, Dream consolidation, memory files, and versioning |
