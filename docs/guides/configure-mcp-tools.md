@@ -93,7 +93,8 @@ when starting nanobot from the SagaSmith-agent repository root:
           "server_tool_profiles",
           "storage_status",
           "campaign_query",
-          "game_phase"
+          "game_phase",
+          "skill_query"
         ]
       },
       "sagasmith_coc": {
@@ -133,17 +134,27 @@ its ChromaDB collections and imported rule packs. Keep the agent workspace
 recreating game state through shell commands or local scripts.
 
 The D&D MCP owns the per-session `lobby`, `play`, and `combat` exposure; Nanobot
-does not duplicate a phase/profile filter. Keep only the core exposure tools in
-`enabledTools`, call `exposure_open`, then search, inspect, and load an MCP
-capability group. Nanobot currently retains its initial static tool schemas, so
-invoke every loaded domain tool through `exposure_call`. A host that supports
-MCP `tools/list_changed` can instead use the dynamically refreshed native tool.
+does not duplicate a phase/profile filter. Keep only the core protocol tools in
+`enabledTools`. Start with `skill_query(action="plan")`, read every document in
+`required_now`, call `exposure_open`, then search, inspect, and load an MCP
+capability group. Read each returned `skill_plan` or `skill_plan_delta` before
+using the affected group or operation. Nanobot currently retains its initial
+static tool schemas, so invoke every loaded domain tool through
+`exposure_call`. A host that supports MCP `tools/list_changed` can instead use
+the dynamically refreshed native tool.
 `combat_start` and `combat_end` change the authoritative campaign phase and make
 incompatible loaded groups unavailable. `enabledTools` is therefore the outer
 allowlist for the core protocol, not a list of every D&D action.
 The D&D server's compact domain catalogue contains 83 public tools, with
-Lobby/Play/Combat ceilings of 62/47/45. The Agent allowlist remains exactly the
-12 core tools shown above; do not add retired domain aliases to `enabledTools`.
+Lobby/Play/Combat ceilings of 62/48/46. The Agent allowlist remains exactly the
+13 core tools shown above; do not add retired domain aliases to `enabledTools`.
+`skill_query` is intentionally core so a zero-knowledge Agent can obtain the
+phase/tool-group plan and read each bounded Skill fragment even though a narrow
+`enabledTools` list suppresses MCP resources and prompts in NanoBot. The server
+tracks fragment checksums per trusted session: unchanged reads are reported as
+`already_satisfied`, while an updated fragment appears in `invalidated` and
+must be read again. If the plan is unavailable, repair the Skills installation
+instead of silently continuing a live campaign.
 
 The CoC MCP follows the same protocol and server-owned session boundary. Its
 Lobby groups cover campaign setup, investigators, scenario import, continuity,
@@ -179,7 +190,7 @@ retired raw import tools, or silently enable a pack. During play, use
 the active fingerprint and immutable settlement evidence; rule configuration
 changes are unavailable during combat.
 
-For the fixed 12-tool Agent path, an `exposure_call` response with live
+For the fixed 13-tool Agent path, an `exposure_call` response with live
 `status="pending_ruling"` carries `ruling_resolution` and refers to
 `server_capabilities.ruling_policy`. Its default resolver is `agent`; an
 explicitly classified external-input exception names `external_input` instead.

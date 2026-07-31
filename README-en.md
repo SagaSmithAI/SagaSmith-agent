@@ -25,13 +25,14 @@ It does **not** write D&D/CoC databases directly, reimplement rules/combat/modul
 
 ## D&D: the MCP-first path
 
-[SagaSmith D&D MCP](https://github.com/SagaSmithAI/SagaSmith-dnd-mcp) owns campaigns, rules, modules, characters, knowledge, branches, snapshots, and combat. The Agent keeps only 12 exposure/diagnostic tools enabled. Every chat session opens its own server-side exposure and loads a narrow `lobby`, `play`, or `combat` group.
+[SagaSmith D&D MCP](https://github.com/SagaSmithAI/SagaSmith-dnd-mcp) owns campaigns, rules, modules, characters, knowledge, branches, snapshots, and combat. The Agent keeps only 13 exposure, diagnostic, and bounded Skill-read tools enabled. Every chat session opens its own server-side exposure and loads a narrow `lobby`, `play`, or `combat` group.
 
 ```text
 inbound message
 → Host injects principal
+→ skill_query(plan) and read required_now
 → exposure_open
-→ search / inspect / load
+→ search / inspect / load and read skill_plan_delta
 → exposure_call (NanoBot static-schema fallback)
 → MCP validates phase / campaign / role / actor / revision
 → result returns to session and channel
@@ -67,7 +68,14 @@ uv sync --all-extras
 .\start.bat
 ```
 
-The script checks `uv`, the local config, Full D&D Skills exposure, the D&D core-tool allowlist, the 900-second PDF timeout, separate rulebook and campaign-module import allowlists, and both sibling MCP executables. It prepares their workspace homes, waits for the D&D UI Gateway health check, and then starts the foreground Agent gateway. It stops the UI adapter when the Agent exits. See [the MCP guide](docs/guides/configure-mcp-tools.md). Keep machine paths and secrets out of Git; reference provider keys through environment variables.
+The script checks `uv`, the local config, Full D&D Skills exposure and its
+phase plan, the D&D core-tool allowlist, the 900-second PDF timeout, separate
+rulebook and campaign-module import allowlists, and both sibling MCP
+executables. It prepares their workspace homes, waits for the D&D UI Gateway
+health check, and then starts the foreground Agent gateway. It stops the UI
+adapter when the Agent exits. See [the MCP guide](docs/guides/configure-mcp-tools.md).
+Keep machine paths and secrets out of Git; reference provider keys through
+environment variables.
 
 The UI connects to `http://127.0.0.1:8766` by default. Non-loopback access requires an explicit bearer token and origin allowlist; without a token, the adapter rejects remote requests.
 

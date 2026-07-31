@@ -38,13 +38,14 @@ SagaSmith Agent 负责：
 
 ## D&D：MCP-first 主路径
 
-[SagaSmith D&D MCP](https://github.com/SagaSmithAI/SagaSmith-dnd-mcp) 管理战役、规则、模组、角色、知识、分支、Snapshot 与战斗。Agent 只常驻其 12 个 exposure/诊断工具；每个聊天会话在服务端单独打开 exposure，按任务加载 `lobby`、`play` 或 `combat` 能力组。
+[SagaSmith D&D MCP](https://github.com/SagaSmithAI/SagaSmith-dnd-mcp) 管理战役、规则、模组、角色、知识、分支、Snapshot 与战斗。Agent 只常驻其 13 个 exposure/诊断/有界 Skill 读取工具；每个聊天会话在服务端单独打开 exposure，按任务加载 `lobby`、`play` 或 `combat` 能力组。
 
 ```text
 消息到达
 → Host 注入 principal
+→ skill_query(plan) 并读取 required_now
 → exposure_open
-→ search / inspect / load
+→ search / inspect / load，并读取 skill_plan_delta
 → exposure_call（NanoBot 静态 schema fallback）
 → MCP 校验 phase / campaign / role / actor / revision
 → 结果写回会话与频道
@@ -86,7 +87,12 @@ uv sync --all-extras
 .\start.bat
 ```
 
-脚本会检查 `uv`、Agent 配置、Full D&D Skills 暴露、D&D 核心工具清单、900 秒 PDF 超时、规则书与战役模组两个独立 allowlist，以及两个相邻 MCP executable，创建各自的 workspace MCP home，先等待 D&D UI Gateway 健康检查通过，再以前台启动 Agent gateway；退出 Agent 时会清理 UI Gateway 子进程。详细配置见 [configure-mcp-tools](docs/guides/configure-mcp-tools.md)。
+脚本会检查 `uv`、Agent 配置、Full D&D Skills 暴露及 phase plan、D&D
+核心工具清单、900 秒 PDF 超时、规则书与战役模组两个独立 allowlist，
+以及两个相邻 MCP executable，创建各自的 workspace MCP home，先等待 D&D
+UI Gateway 健康检查通过，再以前台启动 Agent gateway；退出 Agent 时会
+清理 UI Gateway 子进程。详细配置见
+[configure-mcp-tools](docs/guides/configure-mcp-tools.md)。
 
 UI 默认连接 `http://127.0.0.1:8766`。若要从非本机访问，必须设置 `SAGASMITH_DND_GATEWAY_TOKEN`、显式 origin allowlist 与 UI 对应 token；无 token 时 gateway 拒绝所有非 loopback 请求。
 

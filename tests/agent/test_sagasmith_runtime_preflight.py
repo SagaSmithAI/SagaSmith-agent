@@ -21,6 +21,59 @@ def _prepare_runtime(tmp_path: Path) -> tuple[Path, Path, dict]:
         target = skill_root / name / "SKILL.md"
         target.parent.mkdir(parents=True)
         target.write_text(f"# {name}\n", encoding="utf-8")
+    fragment = skill_root.parent / "references" / "skill-groups" / "test.md"
+    fragment.parent.mkdir(parents=True)
+    fragment.write_text("# Test\n", encoding="utf-8")
+    planned_document = {
+        "kind": "asset",
+        "identifier": "dnd:full/references/skill-groups/test.md",
+        "action": "read",
+        "max_chars": 512,
+    }
+    plan_path = skill_root.parent / "data" / "skill-plan.v1.json"
+    plan_path.parent.mkdir(parents=True)
+    plan_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "core_groups": ["core.bootstrap"],
+                "phase_baselines": {
+                    "lobby": ["phase.lobby"],
+                    "play": ["phase.play"],
+                    "combat": ["phase.combat"],
+                },
+                "groups": {
+                    "core.bootstrap": {
+                        "depends_on": [],
+                        "documents": [planned_document],
+                    },
+                    "phase.lobby": {
+                        "depends_on": ["core.bootstrap"],
+                        "documents": [planned_document],
+                    },
+                    "phase.play": {
+                        "depends_on": ["core.bootstrap"],
+                        "documents": [planned_document],
+                    },
+                    "phase.combat": {
+                        "depends_on": ["core.bootstrap"],
+                        "documents": [planned_document],
+                    },
+                    "campaign.lifecycle": {
+                        "depends_on": ["phase.lobby"],
+                        "documents": [planned_document],
+                    },
+                },
+                "tool_group_bindings": {
+                    "lobby.bootstrap": {
+                        "required": ["campaign.lifecycle"],
+                        "tools": ["campaign_create", "system_list"],
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
     executable = (
         tmp_path
         / "SagaSmith-dnd-mcp"
@@ -108,3 +161,67 @@ def test_sagasmith_runtime_preflight_requires_campaign_import_root(
     errors = VALIDATOR.validate_runtime(config_path, agent_root)
 
     assert any("MODULE_IMPORT_ROOTS" in error for error in errors)
+
+
+def test_sagasmith_runtime_preflight_requires_phase_skill_plan(
+    tmp_path: Path,
+) -> None:
+    agent_root, config_path, _ = _prepare_runtime(tmp_path)
+    plan_path = (
+        tmp_path
+        / "SagaSmith-dnd-skills"
+        / VALIDATOR.SKILL_PLAN_RELATIVE_PATH
+    )
+    plan_path.unlink()
+
+    errors = VALIDATOR.validate_runtime(config_path, agent_root)
+
+    assert any("skill-plan.v1.json" in error for error in errors)
+
+
+def test_sagasmith_runtime_preflight_rejects_invalid_phase_skill_plan(
+    tmp_path: Path,
+) -> None:
+    agent_root, config_path, _ = _prepare_runtime(tmp_path)
+    plan_path = (
+        tmp_path
+        / "SagaSmith-dnd-skills"
+        / VALIDATOR.SKILL_PLAN_RELATIVE_PATH
+    )
+    plan_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "core_groups": ["missing"],
+                "phase_baselines": {"lobby": ["missing"]},
+                "groups": {},
+                "tool_group_bindings": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    errors = VALIDATOR.validate_runtime(config_path, agent_root)
+
+    assert any("schema_version" in error for error in errors)
+    assert any("lobby, play, and combat" in error for error in errors)
+    assert any("tool_group_bindings" in error for error in errors)
+
+
+def test_sagasmith_runtime_preflight_rejects_missing_planned_fragment(
+    tmp_path: Path,
+) -> None:
+    agent_root, config_path, _ = _prepare_runtime(tmp_path)
+    fragment = (
+        tmp_path
+        / "SagaSmith-dnd-skills"
+        / "full"
+        / "references"
+        / "skill-groups"
+        / "test.md"
+    )
+    fragment.unlink()
+
+    errors = VALIDATOR.validate_runtime(config_path, agent_root)
+
+    assert any("references a missing asset" in error for error in errors)
