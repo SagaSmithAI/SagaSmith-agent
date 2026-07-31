@@ -7,7 +7,12 @@ from typing import Any
 
 import pytest
 
-from nanobot.agent.npc_turn import NpcTurnError, NpcTurnRunner
+from nanobot.agent.npc_turn import (
+    NpcTurnError,
+    NpcTurnRunner,
+    normalize_npc_turn_proposal,
+    validate_proposal_against_bundle,
+)
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.context import RequestContext, request_context
 from nanobot.agent.tools.npc_portrayal import PortrayNpcTool
@@ -272,3 +277,34 @@ def test_background_subagents_cannot_recursively_portray_npcs(tmp_path: Path) ->
     )
 
     assert not manager._build_tools().has("portray_npc")
+
+
+def test_agent_contract_requires_engine_resolution_for_mechanical_actions() -> None:
+    proposal = _proposal()
+    proposal["utterance"]["text"] = ""
+    proposal["speech_acts"] = []
+    proposal["proposed_action"] = {
+        "kind": "attack",
+        "target_ref": "actor:pc-1",
+        "summary": "Attack the envoy.",
+    }
+
+    with pytest.raises(NpcTurnError, match="requires an explicit resolution request"):
+        normalize_npc_turn_proposal(proposal)
+
+    proposal["resolution_requests"] = [
+        {
+            "kind": "attack",
+            "reason": "Resolve the attack through the combat engine.",
+            "actor_ids": ["npc-1", "outsider"],
+            "suggested_skill": "",
+        }
+    ]
+    normalized = normalize_npc_turn_proposal(proposal)
+    with pytest.raises(NpcTurnError, match="target actors outside its bundle"):
+        validate_proposal_against_bundle(normalized, _bundle())
+
+    normalized["resolution_requests"][0]["actor_ids"] = ["npc-1", "pc-1"]
+    normalized["proposed_action"]["target_ref"] = "actor:outsider"
+    with pytest.raises(NpcTurnError, match="action target is outside its bundle"):
+        validate_proposal_against_bundle(normalized, _bundle())

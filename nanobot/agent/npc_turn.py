@@ -36,6 +36,7 @@ NPC_ACTION_KINDS = frozenset(
         "other",
     }
 )
+NPC_NARRATIVE_ACTION_KINDS = frozenset({"none", "gesture", "refuse"})
 NPC_RESOLUTION_KINDS = frozenset(
     {"ability_check", "contest", "saving_throw", "attack", "dm_adjudication"}
 )
@@ -269,6 +270,14 @@ def normalize_npc_turn_proposal(value: Any) -> dict[str, Any]:
                 ),
             }
         )
+        if (
+            truth_posture in {"believes_true", "uncertain", "intentional_deception"}
+            and kind in {"assert", "reveal", "lie"}
+            and not speech_acts[-1]["basis_refs"]
+        ):
+            raise NpcTurnError(
+                f"speech_acts[{index}] factual/deceptive content requires a basis_ref"
+            )
 
     action = _object(data.get("proposed_action") or {}, "npc_turn.proposal.proposed_action")
     _strict(action, "npc_turn.proposal.proposed_action", {"kind", "target_ref", "summary"})
@@ -287,6 +296,7 @@ def normalize_npc_turn_proposal(value: Any) -> dict[str, Any]:
             f"npc_turn.proposal.resolution_requests[{index}]",
             {"kind", "reason", "actor_ids", "suggested_skill"},
         )
+
         kind = _text(item.get("kind"), f"resolution_requests[{index}].kind", required=True)
         if kind not in NPC_RESOLUTION_KINDS:
             raise NpcTurnError(f"unsupported NPC resolution kind: {kind}")
@@ -308,6 +318,11 @@ def normalize_npc_turn_proposal(value: Any) -> dict[str, Any]:
                     maximum=100,
                 ),
             }
+        )
+
+    if action_kind not in NPC_NARRATIVE_ACTION_KINDS and not resolution_requests:
+        raise NpcTurnError(
+            f"NPC action {action_kind!r} requires an explicit resolution request"
         )
 
     deltas = _object(data.get("proposed_deltas") or {}, "npc_turn.proposal.proposed_deltas")
@@ -388,8 +403,17 @@ def validate_proposal_against_bundle(
     cited_targets = {
         target for speech_act in proposal["speech_acts"] for target in speech_act["targets"]
     }
+    cited_targets.update(
+        actor_id
+        for request in proposal["resolution_requests"]
+        for actor_id in request["actor_ids"]
+    )
     if unknown := sorted(cited_targets - allowed_targets):
         raise NpcTurnError(f"NPC proposal cites target actors outside its bundle: {unknown}")
+    action_target_ref = str(proposal["proposed_action"].get("target_ref") or "")
+    allowed_target_refs = {f"actor:{actor_id}" for actor_id in allowed_targets}
+    if action_target_ref and action_target_ref not in allowed_target_refs:
+        raise NpcTurnError("NPC proposal action target is outside its bundle")
 
 
 def _extract_json_object(content: str | None) -> dict[str, Any]:
