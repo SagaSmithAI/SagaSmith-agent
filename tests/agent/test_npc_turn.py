@@ -202,6 +202,7 @@ async def test_npc_turn_runner_repairs_once_without_exposing_tools_or_history() 
     assert all(len(call["messages"]) == 2 for call in provider.calls)
     repair_payload = json.loads(provider.calls[1]["messages"][1]["content"])
     assert repair_payload["task"] == "propose_npc_turn"
+    assert repair_payload["repair"]["invalid_output"] == "not json"
     assert "did not return one JSON object" in repair_payload["repair"]["validation_error"]
 
 

@@ -45,6 +45,10 @@ NPC_RESOLUTION_KINDS = frozenset(
 class NpcTurnError(ValueError):
     """Raised when an isolated portrayal response violates its contract."""
 
+    def __init__(self, message: str, *, raw_output: str = "") -> None:
+        super().__init__(message)
+        self.raw_output = raw_output
+
 
 @dataclass(frozen=True, slots=True)
 class NpcTurnResult:
@@ -485,11 +489,14 @@ class NpcTurnRunner:
         response = await self._request(runtime, payload)
         if response.finish_reason == "error":
             raise NpcTurnError(response.content or "NPC portrayal model failed")
-        if response.tool_calls:
-            raise NpcTurnError("NPC portrayal attempted a forbidden tool call")
         raw = response.content or ""
-        proposal = normalize_npc_turn_proposal(_extract_json_object(raw))
-        validate_proposal_against_bundle(proposal, bundle)
+        try:
+            if response.tool_calls:
+                raise NpcTurnError("NPC portrayal attempted a forbidden tool call")
+            proposal = normalize_npc_turn_proposal(_extract_json_object(raw))
+            validate_proposal_against_bundle(proposal, bundle)
+        except NpcTurnError as exc:
+            raise NpcTurnError(str(exc), raw_output=raw) from exc
         return proposal, raw
 
     async def _guardian(
@@ -544,6 +551,7 @@ class NpcTurnRunner:
             attempts += 1
             proposal, invalid_raw = await self._generate(runtime, normalized_bundle)
         except NpcTurnError as exc:
+            invalid_raw = exc.raw_output
             invalid_error = str(exc)
             attempts += 1
             proposal, _ = await self._generate(
