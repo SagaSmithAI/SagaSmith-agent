@@ -50,6 +50,17 @@ DM-ruling proposals; `portray_npc` retains the richer named-NPC dialogue
 contract. Both run without tools or child-session persistence and neither can
 author authoritative state.
 
+### Shareable content remains MCP-owned
+
+The Agent does not parse, rewrite, or cache a second creature catalog. Unified
+PC/NPC/monster actor cards, bundled SRD preset packs, and module packages with a
+Scene Atlas, assets, reviewed content, and pregenerated actors are imported and
+exported through D&D MCP Lobby exposures. Imports return fresh actor ids. The
+Agent must discard source database identity and must not copy old session,
+workspace, or ActorKnowledge context into the new actor. A chat attachment may
+transport a package, but only MCP validation, allowlisted file access, and public
+transactions can place it in a campaign.
+
 ## Start the full Windows workspace
 
 [`start.bat`](start.bat) is the single Agent + D&D MCP + D&D UI Gateway entry point. NanoBot starts the stdio MCP as a child process; the script also starts a principal-aware HTTP/SSE adapter on `127.0.0.1:8766`.
@@ -114,6 +125,7 @@ nanobot gateway
 - `enabledTools` is the Host's outer allowlist. Domain phase, role, and exposure should narrow access again on the server.
 - `injectPrincipal` authenticates the caller field; grant targets remain model-visible and separate.
 - Domain MCPs own persistence and domain Skills. The Agent workspace owns persona, sessions, and cross-domain orchestration.
+- Portable actor/module/preset packages are domain content, not Host session memory or permission carriers.
 
 ## Memory layers
 

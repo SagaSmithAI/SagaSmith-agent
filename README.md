@@ -62,6 +62,15 @@ SagaSmith Agent 负责：
 NPC 对话继续使用 `portray_npc`。两者都不带工具、不持久化子会话，也不直接
 产生权威状态。
 
+### 可分享内容仍由 MCP 拥有
+
+Agent 不解析或改写 portable card/package，也不缓存第二份怪物目录。PC、NPC、
+怪物的统一 actor card、SRD 默认 preset pack，以及包含 Scene Atlas、资产、审核
+内容和预设角色的 module pack 都通过 Lobby exposure 调用 D&D MCP 导入/导出。
+导入返回新的 actor id；Agent 必须丢弃来源数据库 identity，且不得把旧会话、
+workspace memory 或 actor knowledge 填进新角色。分享文件可作为聊天附件或
+workspace artifact 传递，但只有 MCP 校验、白名单读取和公开写事务才能使其进入战役。
+
 ## Windows 一键启动当前工作区
 
 仓库根目录的 [`start.bat`](start.bat) 是 Agent + D&D MCP + D&D UI Gateway 的单一入口。D&D MCP 使用 stdio，由 NanoBot 根据配置启动为子进程；脚本同时在 `127.0.0.1:8766` 启动 principal-aware HTTP/SSE adapter，供 D&D UI 观察权威状态与提交受 MCP 校验的战斗移动。
@@ -150,6 +159,7 @@ nanobot gateway
 - `enabledTools` 是 Host 外层允许列表；领域内的 phase/role/exposure 应由服务端继续收窄。
 - `injectPrincipal` 只隐藏/注入调用者字段，不隐藏授权目标字段。
 - MCP domains 拥有其持久化和 Skills；Agent workspace 只保留人格、会话和跨领域编排。
+- Portable actor/module/preset package 也是 domain content，不是 Host session memory 或权限载体。
 
 ## 记忆分层
 

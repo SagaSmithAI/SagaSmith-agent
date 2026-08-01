@@ -321,6 +321,12 @@ separate multiple roots with `;`. Before staging a suspected character document,
 the Agent uses `character_query(view="document")`; it must not force that file
 through module import.
 
+Portable `.sagasmith.json` actor, preset, and module packages may be read only
+from those same rule/module roots, or by managed artifact name after the MCP
+exported them. Pass an allowlisted attachment path to the portable Lobby facade;
+the Agent must not deserialize it and write domain state itself. Imported cards
+receive fresh actor ids and never inherit Host/session memory or ActorKnowledge.
+
 `externalSkillsDirs` belongs to `agents.defaults` because nanobot loads skills
 in the parent agent process. MCP server `env` values are visible only to the
 child server process and cannot configure the agent's skill loader.
