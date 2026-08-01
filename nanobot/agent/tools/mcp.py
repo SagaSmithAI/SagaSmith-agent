@@ -621,6 +621,7 @@ class MCPToolWrapper(_MCPWrapperBase):
             if isinstance(domain_context, str) and domain_context.strip()
             else None
         )
+        self._context_sync = meta.get("sagasmith_context_sync") is True
         properties = self._parameters.get("properties", {})
         # Grant tools have a subject principal_id and a separate caller field.
         # Prefer the caller field so transport identity can never overwrite the

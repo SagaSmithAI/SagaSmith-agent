@@ -41,7 +41,7 @@ if not exist "%COC_MCP_EXE%" (
     exit /b 6
 )
 
-uv run python scripts\validate_sagasmith_runtime.py --config config\config.json
+"%MCP_PYTHON%" ..\SagaSmith-dnd-mcp\scripts\validate_agent_runtime.py --config config\config.json --agent-root .
 if errorlevel 1 (
     echo [ERROR] SagaSmith Skills and MCP configuration preflight failed.
     pause

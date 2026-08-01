@@ -26,6 +26,7 @@ from nanobot.agent.context import ContextBuilder
 from nanobot.agent.cron_turns import CronTurnCoordinator
 from nanobot.agent.domain_context import (
     admit_current_user_to_context_epoch,
+    binding_from_metadata,
     history_attributes,
 )
 from nanobot.agent.hook import AgentHook, AgentTurnHookFactory
@@ -1669,6 +1670,8 @@ class AgentLoop:
         return "dispatch"
 
     async def _state_build(self, ctx: TurnContext) -> str:
+        ctx.request_context = self._request_context_for_turn(ctx)
+        await self._synchronize_authoritative_domain_context(ctx)
         replay_max_messages = replay_max_messages_for_context(
             ctx.runtime.context_window_tokens
         )
@@ -1693,7 +1696,6 @@ class AgentLoop:
             ctx.runtime,
         )
 
-        ctx.request_context = self._request_context_for_turn(ctx)
         ctx.runtime_context_blocks = await self._resolve_runtime_context_for_turn(ctx)
         ctx.initial_messages = self._build_initial_messages(
             ctx.msg,
@@ -1715,6 +1717,50 @@ class AgentLoop:
             ctx.on_retry_wait = await self._build_retry_wait_callback(ctx.msg)
 
         return "ok"
+
+    async def _synchronize_authoritative_domain_context(
+        self,
+        ctx: TurnContext,
+    ) -> None:
+        """Refresh an existing MCP-owned replay boundary before reading history."""
+
+        binding = binding_from_metadata(ctx.session.metadata)
+        if binding is None:
+            return
+        tools = ctx.tools or self.tools
+        matches = tools.domain_context_sync_tools(binding.domain)
+        if len(matches) != 1:
+            raise RuntimeError(
+                "Authoritative domain context cannot be synchronized: expected "
+                f"one sync capability for {binding.domain!r}, found {len(matches)}."
+            )
+        assert ctx.request_context is not None
+        token = bind_request_context(ctx.request_context)
+        try:
+            result = await tools.execute(
+                matches[0][0],
+                {
+                    "view": "binding",
+                    "payload": {"campaign_id": binding.campaign_id},
+                },
+            )
+        finally:
+            reset_request_context(token)
+        if bool(getattr(result, "is_error", False)):
+            raise RuntimeError(
+                "Authoritative domain context synchronization failed; refusing "
+                "to replay the previous campaign context."
+            )
+        refreshed = binding_from_metadata(ctx.session.metadata)
+        if (
+            refreshed is None
+            or refreshed.domain != binding.domain
+            or refreshed.campaign_id != binding.campaign_id
+            or refreshed.principal_fingerprint != binding.principal_fingerprint
+        ):
+            raise RuntimeError(
+                "Authoritative domain context synchronization returned an invalid binding."
+            )
 
     async def _state_run(self, ctx: TurnContext) -> str:
         if ctx.visible_run_started_at is None:

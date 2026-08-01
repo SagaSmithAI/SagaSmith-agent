@@ -60,7 +60,7 @@ async def handle_runtime_control(state: Any, msg: InboundMessage, tools: ToolReg
 class ContextBuilder:
     """Builds the context (system prompt + messages) for the agent."""
 
-    BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md"]
+    BOOTSTRAP_FILES = ["AGENTS.md", "IDENTITY.md", "SOUL.md", "USER.md"]
     _RUNTIME_CONTEXT_TAG = RUNTIME_CONTEXT_TAG
     _MAX_RECENT_HISTORY = 50
     _MAX_HISTORY_TOKENS = 8_000  # hard cap on recent history section size (tokens)
@@ -102,7 +102,7 @@ class ContextBuilder:
         if memory_policy == MEMORY_POLICY_DOMAIN_AUTHORITATIVE:
             # USER.md and workspace memory are single-workspace conveniences,
             # not safe inputs for a campaign/principal-scoped conversation.
-            bootstrap_files = ["AGENTS.md", "SOUL.md"]
+            bootstrap_files = ["AGENTS.md", "IDENTITY.md", "SOUL.md"]
         elif memory_policy == MEMORY_POLICY_ISOLATED:
             bootstrap_files = []
         bootstrap = self._load_bootstrap_files(root, filenames=bootstrap_files)

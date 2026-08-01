@@ -50,6 +50,16 @@ class ToolRegistry:
                 providers.append(provider)
         return providers
 
+    def domain_context_sync_tools(self, domain: str) -> list[tuple[str, Tool]]:
+        """Return code-advertised pre-turn context synchronizers for one domain."""
+
+        return [
+            (name, tool)
+            for name, tool in self._tools.items()
+            if getattr(tool, "_context_sync", False)
+            and getattr(tool, "_domain_context", None) == domain
+        ]
+
     @staticmethod
     def _lookup_key(name: str) -> str:
         """Normalize names for suggestions only; never for execution."""

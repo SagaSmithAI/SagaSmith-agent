@@ -137,7 +137,6 @@ def _proposal(kind: str) -> dict[str, Any]:
             "proposed_action": {"kind": "none", "target_ref": "", "summary": ""},
             "claims": [],
             "resolution_requests": [],
-            "proposed_deltas": [],
             "decision_summary": "The actor does not commit.",
         }
     if kind == "audience_render":
@@ -163,7 +162,6 @@ def _proposal(kind: str) -> dict[str, Any]:
             ],
             "claims": [],
             "resolution_requests": [],
-            "proposed_deltas": [],
             "decision_summary": "No state is declared changed.",
         }
     if kind == "source_interpretation":
@@ -234,6 +232,15 @@ def test_claims_cannot_promote_decision_only_source_context() -> None:
 
     with pytest.raises(IsolatedEvaluationError, match="decision-only"):
         contract.validate_proposal(normalized, bundle)
+
+
+@pytest.mark.parametrize("kind", ["actor_turn", "faction_turn"])
+def test_generic_turn_contracts_reject_untyped_state_deltas(kind: str) -> None:
+    proposal = _proposal(kind)
+    proposal["proposed_deltas"] = [{"hp": -99}]
+
+    with pytest.raises(IsolatedEvaluationError, match="unknown fields.*proposed_deltas"):
+        DEFAULT_ISOLATED_CONTRACTS[kind].normalize_proposal(proposal)
 
 
 def test_source_interpretation_cannot_change_question_or_self_approve_ambiguity() -> None:

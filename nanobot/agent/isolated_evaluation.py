@@ -359,13 +359,9 @@ def _normalize_actor_turn(value: Any) -> dict[str, Any]:
             "proposed_action",
             "claims",
             "resolution_requests",
-            "proposed_deltas",
             "decision_summary",
         },
     )
-    deltas = data.get("proposed_deltas") or []
-    if not isinstance(deltas, list) or not all(isinstance(item, dict) for item in deltas):
-        raise IsolatedEvaluationError("actor_turn.proposal.proposed_deltas must be objects")
     action = _object(data.get("proposed_action") or {}, "proposed_action")
     _strict(action, "proposed_action", {"kind", "target_ref", "summary"})
     action_kind = _text(action.get("kind"), "proposed_action.kind", maximum=50) or "none"
@@ -395,7 +391,6 @@ def _normalize_actor_turn(value: Any) -> dict[str, Any]:
         },
         "claims": _normalize_claims(data.get("claims"), "claims"),
         "resolution_requests": requests,
-        "proposed_deltas": [deepcopy(item) for item in deltas],
         "decision_summary": _text(data.get("decision_summary"), "decision_summary", maximum=500),
     }
     return result
@@ -432,7 +427,6 @@ def _normalize_faction_turn(value: Any) -> dict[str, Any]:
             "proposed_actions",
             "claims",
             "resolution_requests",
-            "proposed_deltas",
             "decision_summary",
         },
     )
@@ -451,9 +445,6 @@ def _normalize_faction_turn(value: Any) -> dict[str, Any]:
                 "basis_refs": _string_list(item.get("basis_refs"), f"proposed_actions[{index}].basis_refs"),
             }
         )
-    deltas = data.get("proposed_deltas") or []
-    if not isinstance(deltas, list) or not all(isinstance(item, dict) for item in deltas):
-        raise IsolatedEvaluationError("faction_turn.proposal.proposed_deltas must be objects")
     return {
         "schema_version": 1,
         "bundle_id": _text(data.get("bundle_id"), "bundle_id", required=True, maximum=100),
@@ -463,7 +454,6 @@ def _normalize_faction_turn(value: Any) -> dict[str, Any]:
         "proposed_actions": normalized_actions,
         "claims": _normalize_claims(data.get("claims"), "claims"),
         "resolution_requests": _normalize_resolution_requests(data.get("resolution_requests"), "resolution_requests"),
-        "proposed_deltas": [deepcopy(item) for item in deltas],
         "decision_summary": _text(data.get("decision_summary"), "decision_summary", maximum=500),
     }
 
@@ -642,7 +632,6 @@ _OUTPUT_SHAPES: dict[str, dict[str, Any]] = {
         },
         "claims": [_COMMON_CLAIM_SHAPE],
         "resolution_requests": [_COMMON_REQUEST_SHAPE],
-        "proposed_deltas": ["proposal object; never authoritative"],
         "decision_summary": "string",
     },
     "audience_render": {
@@ -670,7 +659,6 @@ _OUTPUT_SHAPES: dict[str, dict[str, Any]] = {
         ],
         "claims": [_COMMON_CLAIM_SHAPE],
         "resolution_requests": [_COMMON_REQUEST_SHAPE],
-        "proposed_deltas": ["proposal object; never authoritative"],
         "decision_summary": "string",
     },
     "source_interpretation": {

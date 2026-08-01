@@ -15,7 +15,7 @@ from nanobot.agent.tools.schema import BooleanSchema, ObjectSchema, tool_paramet
 @tool_parameters(
     tool_parameters_schema(
         bundle=ObjectSchema(
-            description="Signed purpose=npc_turn bundle returned by D&D continuity_context",
+            description="Signed purpose=npc_turn bundle returned by a domain context tool",
             additional_properties=True,
         ),
         strict_guardian=BooleanSchema(
@@ -44,7 +44,7 @@ class PortrayNpcTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Portray one NPC from a signed D&D npc_turn context bundle in a fresh, "
+            "Portray one NPC from a signed domain npc_turn context bundle in a fresh, "
             "tool-free, non-persistent model call. Returns a proposal only; the caller "
             "must resolve mechanics and explicitly accept deltas through MCP."
         )

@@ -227,7 +227,7 @@ def validate_npc_turn_bundle(value: Any) -> dict[str, Any]:
 
 
 def normalize_npc_turn_proposal(value: Any) -> dict[str, Any]:
-    """Normalize the exact proposal contract accepted by the D&D MCP."""
+    """Normalize the exact proposal contract accepted by the owning domain MCP."""
 
     data = _object(value, "npc_turn.proposal")
     _strict(

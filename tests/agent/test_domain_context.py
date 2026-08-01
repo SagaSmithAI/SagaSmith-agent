@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -13,7 +14,11 @@ from nanobot.agent.domain_context import (
     history_attributes,
     principal_fingerprint,
 )
+from nanobot.agent.loop import AgentLoop
 from nanobot.agent.memory import Consolidator, MemoryStore
+from nanobot.agent.tools.base import Tool, ToolResult
+from nanobot.agent.tools.context import RequestContext
+from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.session.manager import Session, SessionManager
 
 
@@ -101,6 +106,7 @@ def test_context_epoch_uses_utf8_canonical_json_compatible_with_mcp() -> None:
 
 def test_domain_prompt_excludes_workspace_user_memory_and_history(tmp_path) -> None:
     (tmp_path / "AGENTS.md").write_text("agent rules", encoding="utf-8")
+    (tmp_path / "IDENTITY.md").write_text("stable identity", encoding="utf-8")
     (tmp_path / "SOUL.md").write_text("safe identity", encoding="utf-8")
     (tmp_path / "USER.md").write_text("other user's private profile", encoding="utf-8")
     store = MemoryStore(tmp_path)
@@ -115,6 +121,7 @@ def test_domain_prompt_excludes_workspace_user_memory_and_history(tmp_path) -> N
     )
 
     assert "agent rules" in prompt
+    assert "stable identity" in prompt
     assert "safe identity" in prompt
     assert "other user's private profile" not in prompt
     assert "dm-only global memory" not in prompt
@@ -164,3 +171,80 @@ def test_consolidator_reads_domain_policy_from_session_metadata_record(tmp_path)
     assert attributes["classification"] == "campaign_private"
     assert attributes["dream_eligible"] is False
     assert attributes["prompt_eligible"] is False
+
+
+@pytest.mark.asyncio
+async def test_pre_turn_sync_advances_branch_barrier_before_history_replay() -> None:
+    session = Session(key="discord:table")
+    bind_session_context(session, _binding(branch_id="branch-a"))
+    session.add_message("assistant", "branch-a secret")
+    seen: dict[str, object] = {}
+
+    class SyncTool(Tool):
+        _context_sync = True
+        _domain_context = "sagasmith-dnd"
+
+        @property
+        def name(self) -> str:
+            return "mcp_sagasmith_dnd_campaign_query"
+
+        @property
+        def description(self) -> str:
+            return "sync"
+
+        @property
+        def parameters(self) -> dict[str, object]:
+            return {"type": "object", "additionalProperties": True}
+
+        async def execute(self, **kwargs: object) -> ToolResult:
+            seen.update(kwargs)
+            bind_session_context(session, _binding(branch_id="branch-b"))
+            return ToolResult("ok", context_barrier=True)
+
+    tools = ToolRegistry()
+    tools.register(SyncTool())
+    ctx = SimpleNamespace(
+        session=session,
+        tools=tools,
+        request_context=RequestContext(
+            channel="discord",
+            chat_id="table",
+            sender_id="user-1",
+            session_key=session.key,
+        ),
+    )
+
+    await AgentLoop._synchronize_authoritative_domain_context(
+        SimpleNamespace(tools=tools),
+        ctx,
+    )
+
+    assert seen == {
+        "view": "binding",
+        "payload": {"campaign_id": "campaign-1"},
+    }
+    assert session.get_history() == []
+    assert session.metadata[DOMAIN_CONTEXT_BINDING_KEY]["branch_id"] == "branch-b"
+
+
+@pytest.mark.asyncio
+async def test_pre_turn_sync_fails_closed_without_domain_capability() -> None:
+    session = Session(key="discord:table")
+    bind_session_context(session, _binding())
+    tools = ToolRegistry()
+    ctx = SimpleNamespace(
+        session=session,
+        tools=tools,
+        request_context=RequestContext(
+            channel="discord",
+            chat_id="table",
+            sender_id="user-1",
+            session_key=session.key,
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="cannot be synchronized"):
+        await AgentLoop._synchronize_authoritative_domain_context(
+            SimpleNamespace(tools=tools),
+            ctx,
+        )

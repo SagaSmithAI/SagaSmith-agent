@@ -91,12 +91,15 @@ class TestLoadBootstrapFiles:
 
     def test_multiple_bootstrap_files(self, tmp_path):
         (tmp_path / "AGENTS.md").write_text("Rules.", encoding="utf-8")
+        (tmp_path / "IDENTITY.md").write_text("Identity.", encoding="utf-8")
         (tmp_path / "SOUL.md").write_text("Soul.", encoding="utf-8")
         builder = _builder(tmp_path)
         result = builder._load_bootstrap_files()
         assert "## AGENTS.md" in result
+        assert "## IDENTITY.md" in result
         assert "## SOUL.md" in result
         assert "Rules." in result
+        assert "Identity." in result
         assert "Soul." in result
 
     def test_all_bootstrap_files(self, tmp_path):
