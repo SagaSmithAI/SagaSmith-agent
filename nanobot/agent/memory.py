@@ -11,10 +11,11 @@ import weakref
 from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Iterator
+from typing import TYPE_CHECKING, Any, Callable, Iterator, Mapping
 
 from loguru import logger
 
+from nanobot.agent.domain_context import history_attributes, stamp_summary_metadata
 from nanobot.runtime_context import public_history_messages
 from nanobot.session.manager import Session
 from nanobot.utils.gitstore import GitStore
@@ -268,6 +269,7 @@ class MemoryStore:
         *,
         max_chars: int | None = None,
         session_key: str | None = None,
+        attributes: Mapping[str, Any] | None = None,
     ) -> int:
         """Append *entry* to history.jsonl and return its auto-incrementing cursor.
 
@@ -310,6 +312,18 @@ class MemoryStore:
             record = {"cursor": cursor, "timestamp": ts, "content": content}
             if session_key:
                 record["session_key"] = session_key
+            if attributes:
+                allowed_attributes = {
+                    "classification",
+                    "dream_eligible",
+                    "prompt_eligible",
+                    "context_namespace",
+                    "context_epoch",
+                }
+                unknown = set(attributes) - allowed_attributes
+                if unknown:
+                    raise ValueError(f"unsupported history attributes: {sorted(unknown)}")
+                record.update(dict(attributes))
             with open(self.history_file, "a", encoding="utf-8") as f:
                 f.write(json.dumps(record, ensure_ascii=False) + "\n")
             self._cursor_file.write_text(str(cursor), encoding="utf-8")
@@ -360,7 +374,15 @@ class MemoryStore:
         if not isinstance(entry.get("content"), str):
             return False
         session_key = entry.get("session_key")
-        return session_key is None or isinstance(session_key, str)
+        if session_key is not None and not isinstance(session_key, str):
+            return False
+        for name in ("classification", "context_namespace", "context_epoch"):
+            if (value := entry.get(name)) is not None and not isinstance(value, str):
+                return False
+        for name in ("dream_eligible", "prompt_eligible"):
+            if (value := entry.get(name)) is not None and not isinstance(value, bool):
+                return False
+        return True
 
     def _read_cursor_counter(self) -> int | None:
         """Return the persisted cursor counter when it is usable."""
@@ -411,7 +433,11 @@ class MemoryStore:
         unified_session: bool = False,
     ) -> list[dict[str, Any]]:
         """Return unprocessed history entries safe to inject into a turn prompt."""
-        entries = self.read_unprocessed_history(since_cursor=since_cursor)
+        entries = [
+            entry
+            for entry in self.read_unprocessed_history(since_cursor=since_cursor)
+            if entry.get("prompt_eligible", True) is True
+        ]
         if session_key is None:
             return entries
         if not unified_session:
@@ -592,10 +618,15 @@ class MemoryStore:
             return None
 
         batch = entries[:max_entries]
-        history_text = "\n".join(
-            f"[{e['timestamp']}] {truncate_text(e['content'], 500)}"
-            for e in batch
-        )
+        history_lines = []
+        for entry in batch:
+            if entry.get("dream_eligible", True) is not True:
+                history_lines.append("[skip] private domain history omitted")
+            else:
+                history_lines.append(
+                    f"[{entry['timestamp']}] {truncate_text(entry['content'], 500)}"
+                )
+        history_text = "\n".join(history_lines)
         template = self._dream_template()
         files_section = self._render_current_memory_files()
         prompt = (
@@ -707,6 +738,7 @@ class MemoryStore:
         *,
         max_chars: int | None = None,
         session_key: str | None = None,
+        attributes: Mapping[str, Any] | None = None,
     ) -> None:
         """Fallback: dump raw messages to history.jsonl without LLM summarization."""
         limit = max_chars if max_chars is not None else _RAW_ARCHIVE_MAX_CHARS
@@ -718,6 +750,7 @@ class MemoryStore:
             f"[RAW] {len(messages)} messages\n"
             f"{formatted}",
             session_key=session_key,
+            attributes=attributes,
         )
         logger.warning(
             "Memory consolidation degraded: raw-archived {} messages", len(messages)
@@ -814,6 +847,16 @@ class Consolidator:
     def get_lock(self, session_key: str) -> asyncio.Lock:
         """Return the shared consolidation lock for one session."""
         return self._locks.setdefault(session_key, asyncio.Lock())
+
+    def _history_attributes(self, session_key: str | None) -> dict[str, Any]:
+        if not session_key:
+            return {}
+        try:
+            record = self.sessions.read_session_metadata(session_key)
+        except (AttributeError, OSError, ValueError):
+            return {}
+        metadata = record.get("metadata") if isinstance(record, Mapping) else None
+        return history_attributes(metadata if isinstance(metadata, Mapping) else None)
 
     def pick_consolidation_boundary(
         self,
@@ -918,6 +961,7 @@ class Consolidator:
             session.metadata["_last_summary"] = {
                 "text": summary,
                 "last_active": session.updated_at.isoformat(),
+                **stamp_summary_metadata(session.metadata),
             }
             self.sessions.save(session)
 
@@ -985,6 +1029,7 @@ class Consolidator:
         """
         if not messages:
             return None
+        archive_attributes = self._history_attributes(session_key)
         messages_to_summarize = public_history_messages(
             summary_messages if summary_messages is not None else messages
         )
@@ -1016,11 +1061,16 @@ class Consolidator:
                 summary,
                 max_chars=_ARCHIVE_SUMMARY_MAX_CHARS,
                 session_key=session_key,
+                attributes=archive_attributes,
             )
             return summary
         except Exception:
             logger.warning("Consolidation LLM call failed, raw-dumping to history")
-            self.store.raw_archive(messages, session_key=session_key)
+            self.store.raw_archive(
+                messages,
+                session_key=session_key,
+                attributes=archive_attributes,
+            )
             return None
 
     async def maybe_consolidate_by_tokens(
@@ -1196,6 +1246,7 @@ class Consolidator:
                 session.metadata["_last_summary"] = {
                     "text": summary,
                     "last_active": last_active.isoformat(),
+                    **stamp_summary_metadata(session.metadata),
                 }
 
             session.messages = messages_to_keep

@@ -2,6 +2,7 @@
 
 import asyncio
 import hashlib
+import inspect
 import json
 import os
 import re
@@ -15,6 +16,12 @@ from weakref import WeakKeyDictionary
 import httpx
 from loguru import logger
 
+from nanobot.agent.domain_context import (
+    DomainContextBinding,
+    bind_session_context,
+    binding_from_metadata,
+    principal_fingerprint,
+)
 from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tools.context import RequestContext, current_request_context
 from nanobot.agent.tools.registry import ToolRegistry
@@ -58,6 +65,41 @@ _RELOAD_LOCKS: WeakKeyDictionary[Any, asyncio.Lock] = WeakKeyDictionary()
 _ReconnectCallback = Callable[[str, str, Tool], Awaitable[Tool | None]]
 _MCP_CONTEXT_TOOL_LIMIT = 48
 _SESSION_MCP_TOOL_PROFILES: dict[tuple[str, str], str] = {}
+
+
+def _first_string_field(value: Any, names: frozenset[str]) -> str | None:
+    """Read identity fields only from protocol-owned envelope containers."""
+
+    if isinstance(value, Mapping):
+        for name in names:
+            candidate = value.get(name)
+            if isinstance(candidate, str) and candidate.strip():
+                return candidate.strip()
+        for key in ("authority", "branch", "payload", "result"):
+            nested = value.get(key)
+            if not isinstance(nested, Mapping):
+                continue
+            if (candidate := _first_string_field(nested, names)) is not None:
+                return candidate
+    return None
+
+
+def _host_context_binding(value: Any) -> Mapping[str, Any] | None:
+    """Read a binding only from code-owned MCP envelope positions."""
+
+    if isinstance(value, Mapping):
+        candidate = value.get("host_context_binding")
+        if isinstance(candidate, Mapping):
+            return candidate
+        authority = value.get("authority")
+        if isinstance(authority, Mapping):
+            candidate = authority.get("host_context_binding")
+            if isinstance(candidate, Mapping):
+                return candidate
+        result = value.get("result")
+        if isinstance(result, Mapping):
+            return _host_context_binding(result)
+    return None
 
 
 def _profile_session_key(ctx: RequestContext | None) -> str | None:
@@ -552,6 +594,7 @@ class MCPToolWrapper(_MCPWrapperBase):
         *,
         inject_principal: bool = False,
         default_tool_profile: str | None = None,
+        session_store: Any | None = None,
     ):
         self._set_mcp_connection(session, server_name)
         self._original_name = tool_def.name
@@ -561,6 +604,7 @@ class MCPToolWrapper(_MCPWrapperBase):
         self._parameters = _normalize_schema_for_openai(raw_schema)
         self._tool_timeout = tool_timeout
         self._inject_principal = inject_principal
+        self._session_store = session_store
         meta = getattr(tool_def, "meta", None)
         if not isinstance(meta, dict):
             meta = {}
@@ -570,6 +614,12 @@ class MCPToolWrapper(_MCPWrapperBase):
         )
         self._default_tool_profile = (
             str(default_tool_profile).strip().lower() if default_tool_profile else None
+        )
+        domain_context = meta.get("sagasmith_domain_context")
+        self._domain_context = (
+            domain_context.strip()
+            if isinstance(domain_context, str) and domain_context.strip()
+            else None
         )
         properties = self._parameters.get("properties", {})
         # Grant tools have a subject principal_id and a separate caller field.
@@ -652,8 +702,10 @@ class MCPToolWrapper(_MCPWrapperBase):
         return f"{channel}:{sender}"
 
     async def execute(self, **kwargs: Any) -> str:
+        trusted_principal: str | None = None
         if self._inject_principal and self._principal_argument is not None:
-            kwargs = {**kwargs, self._principal_argument: self._trusted_principal()}
+            trusted_principal = self._trusted_principal()
+            kwargs = {**kwargs, self._principal_argument: trusted_principal}
         retried_transient = False
         refreshed_session = False
         while True:
@@ -717,7 +769,15 @@ class MCPToolWrapper(_MCPWrapperBase):
                     session_key = _profile_session_key(current_request_context())
                     if profile and session_key is not None:
                         _SESSION_MCP_TOOL_PROFILES[(session_key, self._server_name)] = profile
-                    return rendered
+                    context_changed = self._persist_domain_context(
+                        rendered,
+                        kwargs,
+                        trusted_principal=trusted_principal,
+                    )
+                    return ToolResult(
+                        rendered,
+                        context_barrier=context_changed,
+                    )
                 except Exception as exc:
                     logger.exception(
                         "MCP tool '{}' failed while rendering result: {}: {}",
@@ -728,6 +788,86 @@ class MCPToolWrapper(_MCPWrapperBase):
                     return ToolResult.error(
                         f"(MCP tool returned malformed content: {type(exc).__name__})"
                     )
+
+    def _persist_domain_context(
+        self,
+        rendered: str,
+        arguments: Mapping[str, Any],
+        *,
+        trusted_principal: str | None,
+    ) -> bool:
+        if self._domain_context is None or self._session_store is None:
+            return False
+        request = current_request_context()
+        session_key = _profile_session_key(request)
+        if session_key is None:
+            return False
+        try:
+            payload = json.loads(rendered)
+        except (TypeError, json.JSONDecodeError):
+            payload = None
+
+        session = self._session_store.get_or_create(session_key)
+        previous = binding_from_metadata(session.metadata)
+        trusted_fingerprint = (
+            principal_fingerprint(trusted_principal)
+            if trusted_principal is not None
+            else (previous.principal_fingerprint if previous is not None else "")
+        )
+        exact = _host_context_binding(payload)
+        if exact is not None:
+            binding = DomainContextBinding.from_mapping(exact)
+            if binding.domain != self._domain_context:
+                raise ValueError("MCP host_context_binding names another domain")
+            requested_campaign = _first_string_field(
+                arguments, frozenset({"campaign_id"})
+            )
+            if requested_campaign and binding.campaign_id != requested_campaign:
+                raise ValueError("MCP host_context_binding names another campaign")
+            if not trusted_fingerprint:
+                raise ValueError(
+                    "MCP host_context_binding has no transport-authenticated principal"
+                )
+            if binding.principal_fingerprint != trusted_fingerprint:
+                raise ValueError("MCP host_context_binding names another principal")
+        else:
+            campaign_id = _first_string_field(arguments, frozenset({"campaign_id"}))
+            campaign_id = campaign_id or (previous.campaign_id if previous else "")
+            if not campaign_id:
+                return False
+            if not trusted_fingerprint:
+                return False
+            branch_id = _first_string_field(
+                payload,
+                frozenset({"active_branch_id", "branch_id"}),
+            )
+            requested_audience = _first_string_field(
+                arguments,
+                frozenset({"audience"}),
+            )
+            fallback_audience = previous.audience if previous else ""
+            if previous and not requested_audience:
+                if previous.role in {"owner", "dm"}:
+                    fallback_audience = "dm"
+                elif previous.role == "player":
+                    fallback_audience = "player"
+            binding = DomainContextBinding(
+                domain=self._domain_context,
+                campaign_id=campaign_id,
+                principal_fingerprint=trusted_fingerprint,
+                role=previous.role if previous else "",
+                audience=requested_audience or fallback_audience,
+                branch_id=branch_id or (previous.branch_id if previous else ""),
+            )
+        changed = bind_session_context(session, binding)
+        self._session_store.save(session)
+        if changed:
+            logger.info(
+                "MCP domain context barrier advanced for {} ({})",
+                session_key,
+                binding.domain,
+            )
+        return changed
 
     def _render_call_result(self, content: Any, arguments: Mapping[str, Any]) -> str:
         """Turn MCP content blocks into a tool result string.
@@ -1016,7 +1156,10 @@ class MCPPromptWrapper(_MCPWrapperBase):
 
 
 async def connect_mcp_servers(
-    mcp_servers: dict, registry: ToolRegistry
+    mcp_servers: dict,
+    registry: ToolRegistry,
+    *,
+    session_store: Any | None = None,
 ) -> dict[str, MCPConnection]:
     """Connect to configured MCP servers and register their tools, resources, prompts.
 
@@ -1166,6 +1309,7 @@ async def connect_mcp_servers(
                     tool_timeout=cfg.tool_timeout,
                     inject_principal=cfg.inject_principal,
                     default_tool_profile=cfg.default_tool_profile,
+                    session_store=session_store,
                 )
                 registry.register(wrapper)
                 logger.debug("MCP: registered tool '{}' from server '{}'", wrapper.name, name)
@@ -1331,7 +1475,11 @@ async def connect_missing_servers(state: Any, registry: ToolRegistry) -> None:
             return
         state._mcp_connecting = True
         try:
-            connected = await connect_mcp_servers(missing_servers, registry)
+            connected = await _connect_mcp_servers_for_state(
+                missing_servers,
+                registry,
+                state,
+            )
             if getattr(state, "_mcp_closing", False):
                 for connection in connected.values():
                     await connection.aclose()
@@ -1399,7 +1547,11 @@ async def reload_servers(state: Any, registry: ToolRegistry) -> dict[str, Any]:
         to_connect = {name: next_servers[name] for name in to_connect_names}
         connected: dict[str, MCPConnection] = {}
         if to_connect:
-            connected = await connect_mcp_servers(to_connect, registry)
+            connected = await _connect_mcp_servers_for_state(
+                to_connect,
+                registry,
+                state,
+            )
             if getattr(state, "_mcp_closing", False):
                 for connection in connected.values():
                     await connection.aclose()
@@ -1567,7 +1719,11 @@ async def _refresh_terminated_server(
         _unregister_server_tools(state, registry, server_name)
         await _close_server(state, server_name)
 
-        connected = await connect_mcp_servers({server_name: cfg}, registry)
+        connected = await _connect_mcp_servers_for_state(
+            {server_name: cfg},
+            registry,
+            state,
+        )
         if getattr(state, "_mcp_closing", False):
             for connection in connected.values():
                 await connection.aclose()
@@ -1586,6 +1742,36 @@ def _server_signature(cfg: Any) -> Any:
     if hasattr(cfg, "model_dump"):
         return cfg.model_dump(mode="json")
     return cfg
+
+
+async def _connect_mcp_servers_for_state(
+    servers: Mapping[str, Any],
+    registry: ToolRegistry,
+    state: Any,
+) -> dict[str, MCPConnection]:
+    """Connect with session context while retaining narrow test/host compatibility.
+
+    Older embedders may replace ``connect_mcp_servers`` with a two-argument
+    adapter.  Introspection lets those adapters keep working without falling
+    back after an arbitrary ``TypeError`` raised inside a real connector.
+    """
+    try:
+        parameters = inspect.signature(connect_mcp_servers).parameters.values()
+    except (TypeError, ValueError):
+        accepts_session_store = True
+    else:
+        accepts_session_store = any(
+            parameter.name == "session_store"
+            or parameter.kind is inspect.Parameter.VAR_KEYWORD
+            for parameter in parameters
+        )
+    if accepts_session_store:
+        return await connect_mcp_servers(
+            servers,
+            registry,
+            session_store=getattr(state, "sessions", None),
+        )
+    return await connect_mcp_servers(servers, registry)
 
 
 def _tool_prefix(server_name: str) -> str:

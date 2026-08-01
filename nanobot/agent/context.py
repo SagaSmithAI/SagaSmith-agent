@@ -6,6 +6,13 @@ import platform
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from nanobot.agent.domain_context import (
+    MEMORY_POLICY_DOMAIN_AUTHORITATIVE,
+    MEMORY_POLICY_ISOLATED,
+    MEMORY_POLICY_STANDARD,
+    memory_policy_for_metadata,
+    summary_matches_context,
+)
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
 from nanobot.agent.tools import mcp as mcp_tools
@@ -84,32 +91,45 @@ class ContextBuilder:
         include_memory_recent_history: bool = True,
         session_key: str | None = None,
         unified_session: bool = False,
+        session_metadata: Mapping[str, Any] | None = None,
     ) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         root = workspace or self.workspace
+        memory_policy = memory_policy_for_metadata(session_metadata)
         parts = [self._get_identity(channel=channel, workspace=root)]
 
-        bootstrap = self._load_bootstrap_files(root)
+        bootstrap_files = self.BOOTSTRAP_FILES
+        if memory_policy == MEMORY_POLICY_DOMAIN_AUTHORITATIVE:
+            # USER.md and workspace memory are single-workspace conveniences,
+            # not safe inputs for a campaign/principal-scoped conversation.
+            bootstrap_files = ["AGENTS.md", "SOUL.md"]
+        elif memory_policy == MEMORY_POLICY_ISOLATED:
+            bootstrap_files = []
+        bootstrap = self._load_bootstrap_files(root, filenames=bootstrap_files)
         if bootstrap:
             parts.append(bootstrap)
 
         parts.append(render_template("agent/tool_contract.md"))
 
-        memory = self.memory.get_memory_context()
-        if memory and not self._is_template_content(self.memory.read_memory(), "memory/MEMORY.md"):
-            parts.append(f"# Memory\n\n{memory}")
+        if memory_policy == MEMORY_POLICY_STANDARD:
+            memory = self.memory.get_memory_context()
+            if memory and not self._is_template_content(
+                self.memory.read_memory(), "memory/MEMORY.md"
+            ):
+                parts.append(f"# Memory\n\n{memory}")
 
-        always_skills = self.skills.get_always_skills()
-        if always_skills:
-            always_content = self.skills.load_skills_for_context(always_skills)
-            if always_content:
-                parts.append(f"# Active Skills\n\n{always_content}")
+        if memory_policy != MEMORY_POLICY_ISOLATED:
+            always_skills = self.skills.get_always_skills()
+            if always_skills:
+                always_content = self.skills.load_skills_for_context(always_skills)
+                if always_content:
+                    parts.append(f"# Active Skills\n\n{always_content}")
 
-        skills_summary = self.skills.build_skills_summary(exclude=set(always_skills))
-        if skills_summary:
-            parts.append(render_template("agent/skills_section.md", skills_summary=skills_summary))
+            skills_summary = self.skills.build_skills_summary(exclude=set(always_skills))
+            if skills_summary:
+                parts.append(render_template("agent/skills_section.md", skills_summary=skills_summary))
 
-        if include_memory_recent_history:
+        if include_memory_recent_history and memory_policy == MEMORY_POLICY_STANDARD:
             entries = self.memory.read_recent_history_for_prompt(
                 since_cursor=self.memory.get_last_dream_cursor(),
                 session_key=session_key,
@@ -123,7 +143,15 @@ class ContextBuilder:
                 history_text = truncate_text_to_tokens(history_text, self._MAX_HISTORY_TOKENS)
                 parts.append("# Recent History\n\n" + history_text)
 
-        if session_summary:
+        last_summary = (
+            session_metadata.get("_last_summary")
+            if isinstance(session_metadata, Mapping)
+            else None
+        )
+        if session_summary and summary_matches_context(
+            session_metadata,
+            last_summary if isinstance(last_summary, Mapping) else None,
+        ):
             parts.append(f"[Archived Context Summary]\n\n{session_summary}")
 
         return "\n\n---\n\n".join(parts)
@@ -147,12 +175,17 @@ class ContextBuilder:
     def _merge_message_content(left: Any, right: Any) -> str | list[dict[str, Any]]:
         return merge_message_content(left, right)
 
-    def _load_bootstrap_files(self, workspace: Path | None = None) -> str:
+    def _load_bootstrap_files(
+        self,
+        workspace: Path | None = None,
+        *,
+        filenames: Sequence[str] | None = None,
+    ) -> str:
         """Load all bootstrap files from workspace."""
         parts = []
         root = workspace or self.workspace
 
-        for filename in self.BOOTSTRAP_FILES:
+        for filename in self.BOOTSTRAP_FILES if filenames is None else filenames:
             file_path = root / filename
             if file_path.exists():
                 content = file_path.read_text(encoding="utf-8")
@@ -202,6 +235,7 @@ class ContextBuilder:
                     include_memory_recent_history=include_memory_recent_history,
                     session_key=session_key,
                     unified_session=unified_session,
+                    session_metadata=session_metadata,
                 ),
             },
             *history,

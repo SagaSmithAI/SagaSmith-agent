@@ -133,10 +133,18 @@ class ToolResult(str):
     """String-compatible tool output with structured status."""
 
     is_error: bool
+    context_barrier: bool
 
-    def __new__(cls, content: str, *, is_error: bool = False) -> ToolResult:
+    def __new__(
+        cls,
+        content: str,
+        *,
+        is_error: bool = False,
+        context_barrier: bool = False,
+    ) -> ToolResult:
         obj = str.__new__(cls, content)
         obj.is_error = is_error
+        obj.context_barrier = context_barrier
         return obj
 
     @classmethod

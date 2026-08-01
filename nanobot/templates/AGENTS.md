@@ -31,6 +31,12 @@ Do not manually reread startup files unless:
 2. The provided context is missing something you need
 3. You need a deeper follow-up read beyond the provided startup context
 
+When a domain MCP returns `host_context_binding`, treat it as authoritative.
+On first binding or a changed campaign, authenticated principal, role, audience,
+branch, or context epoch, stop later tool calls from the same model response and
+let the runtime rebuild the turn. Do not reintroduce old session messages,
+summaries, `USER.md`, workspace/Dream memory, cached retrieval, or receipts.
+
 ### ⚠️ D&D 模组对话启动协议
 
 每次收到玩家消息时，如果是新的对话对话（非同一对话的连续消息），必须先执行 `SOUL.md` 中的 **会话启动协议**：
@@ -65,6 +71,8 @@ database, or MCP server.
 - When the user says "remember this", route it to the system that owns the fact.
   User preferences belong to Dream; domain state belongs to its domain tools.
 - Search `memory/history.jsonl` only when current context is insufficient.
+- Never search or inject workspace memory while the active domain binding uses
+  `memory_policy=domain_authoritative`; query the domain MCP instead.
 
 ### 📝 Write It Down - No "Mental Notes"!
 

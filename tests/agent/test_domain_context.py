@@ -1,0 +1,166 @@
+from __future__ import annotations
+
+import json
+
+import pytest
+
+from nanobot.agent.context import ContextBuilder
+from nanobot.agent.domain_context import (
+    DOMAIN_CONTEXT_BINDING_KEY,
+    DomainContextBinding,
+    admit_current_user_to_context_epoch,
+    bind_session_context,
+    history_attributes,
+    principal_fingerprint,
+)
+from nanobot.agent.memory import Consolidator, MemoryStore
+from nanobot.session.manager import Session, SessionManager
+
+
+def _binding(*, branch_id: str = "branch-a") -> DomainContextBinding:
+    return DomainContextBinding.from_mapping({
+        "domain": "sagasmith-dnd",
+        "campaign_id": "campaign-1",
+        "principal_fingerprint": principal_fingerprint("discord:user-1"),
+        "role": "player",
+        "audience": "principal",
+        "branch_id": branch_id,
+    })
+
+
+def test_binding_change_creates_hard_replay_barrier() -> None:
+    session = Session(key="discord:table")
+    session.add_message("user", "old branch secret")
+    session.metadata["_last_summary"] = {"text": "old", "last_active": "2026-01-01"}
+
+    assert bind_session_context(session, _binding()) is True
+    assert session.last_consolidated == 1
+    assert "_last_summary" not in session.metadata
+    assert session.get_history() == []
+
+    session.add_message("user", "current branch")
+    assert bind_session_context(session, _binding()) is False
+    assert session.get_history() == [{"role": "user", "content": "current branch"}]
+
+    assert bind_session_context(session, _binding(branch_id="branch-b")) is True
+    assert session.get_history() == []
+
+
+def test_current_pending_user_can_be_admitted_to_the_new_epoch() -> None:
+    session = Session(key="discord:table")
+    session.add_message("user", "old campaign request")
+    assert bind_session_context(session, _binding()) is True
+
+    session.add_message("user", "resume campaign one")
+    assert bind_session_context(session, _binding(branch_id="branch-b")) is True
+    assert session.get_history() == []
+
+    assert admit_current_user_to_context_epoch(session) is True
+    assert session.get_history() == [
+        {"role": "user", "content": "resume campaign one"}
+    ]
+    expected_attributes = {
+        "role": "user",
+        "content": "resume campaign one",
+        "classification": "campaign_private",
+        "dream_eligible": False,
+        "prompt_eligible": False,
+        "context_namespace": (
+            "sagasmith-dnd:campaign-1:"
+            f"{principal_fingerprint('discord:user-1')}"
+        ),
+        "context_epoch": _binding(branch_id="branch-b").context_epoch,
+    }
+    assert {
+        key: session.messages[-1].get(key) for key in expected_attributes
+    } == expected_attributes
+
+
+def test_binding_rejects_untrusted_epoch_and_principal_shapes() -> None:
+    valid = _binding().to_dict()
+    with pytest.raises(ValueError, match="does not match"):
+        DomainContextBinding.from_mapping({**valid, "context_epoch": "0" * 64})
+    with pytest.raises(ValueError, match="lowercase SHA-256"):
+        DomainContextBinding.from_mapping({**valid, "principal_fingerprint": "user-1"})
+
+
+def test_context_epoch_uses_utf8_canonical_json_compatible_with_mcp() -> None:
+    binding = DomainContextBinding(
+        domain="sagasmith-dnd",
+        campaign_id="战役一",
+        principal_fingerprint="a" * 64,
+        role="dm",
+        audience="dm",
+        branch_id="分支甲",
+    )
+
+    assert binding.derived_epoch() == (
+        "759e2a7cef0011d39799f8e2e57b04e4ad5142f75a1acdf0451c75ff096e48b5"
+    )
+
+
+def test_domain_prompt_excludes_workspace_user_memory_and_history(tmp_path) -> None:
+    (tmp_path / "AGENTS.md").write_text("agent rules", encoding="utf-8")
+    (tmp_path / "SOUL.md").write_text("safe identity", encoding="utf-8")
+    (tmp_path / "USER.md").write_text("other user's private profile", encoding="utf-8")
+    store = MemoryStore(tmp_path)
+    store.write_memory("dm-only global memory")
+    store.append_history("other session secret", session_key="discord:other")
+    metadata = {DOMAIN_CONTEXT_BINDING_KEY: _binding().to_dict()}
+
+    prompt = ContextBuilder(tmp_path).build_system_prompt(
+        session_key="discord:table",
+        unified_session=True,
+        session_metadata=metadata,
+    )
+
+    assert "agent rules" in prompt
+    assert "safe identity" in prompt
+    assert "other user's private profile" not in prompt
+    assert "dm-only global memory" not in prompt
+    assert "other session secret" not in prompt
+
+
+def test_private_domain_history_is_redacted_from_dream_and_prompt(tmp_path) -> None:
+    store = MemoryStore(tmp_path)
+    attributes = history_attributes({DOMAIN_CONTEXT_BINDING_KEY: _binding().to_dict()})
+    store.append_history(
+        "the duke is secretly a dragon",
+        session_key="discord:dm",
+        attributes=attributes,
+    )
+
+    persisted = json.loads(store.history_file.read_text(encoding="utf-8"))
+    assert persisted["classification"] == "campaign_private"
+    assert persisted["dream_eligible"] is False
+    assert persisted["prompt_eligible"] is False
+    assert store.read_recent_history_for_prompt(
+        0,
+        session_key="discord:dm",
+        unified_session=True,
+    ) == []
+
+    built = store.build_dream_prompt()
+    assert built is not None
+    prompt, _ = built
+    assert "the duke is secretly a dragon" not in prompt
+    assert "private domain history omitted" in prompt
+
+
+def test_consolidator_reads_domain_policy_from_session_metadata_record(tmp_path) -> None:
+    sessions = SessionManager(tmp_path)
+    session = sessions.get_or_create("discord:table")
+    bind_session_context(session, _binding())
+    sessions.save(session)
+    consolidator = Consolidator(
+        MemoryStore(tmp_path),
+        sessions,
+        build_messages=lambda **_kwargs: [],
+        get_tool_definitions=lambda: [],
+    )
+
+    attributes = consolidator._history_attributes("discord:table")
+
+    assert attributes["classification"] == "campaign_private"
+    assert attributes["dream_eligible"] is False
+    assert attributes["prompt_eligible"] is False

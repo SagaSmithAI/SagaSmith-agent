@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import json
 import os
 import time
 from collections.abc import Mapping
 from contextlib import AbstractContextManager, ExitStack, nullcontext, suppress
+from copy import deepcopy
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from functools import partial
@@ -22,7 +24,12 @@ from nanobot.agent.autocompact import AutoCompact
 from nanobot.agent.automation_turns import publish_next_deferred_turn
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.cron_turns import CronTurnCoordinator
+from nanobot.agent.domain_context import (
+    admit_current_user_to_context_epoch,
+    history_attributes,
+)
 from nanobot.agent.hook import AgentHook, AgentTurnHookFactory
+from nanobot.agent.isolated_evaluation import IsolatedEvaluationRunner
 from nanobot.agent.memory import Consolidator
 from nanobot.agent.model_runtime import ModelRuntimeResolver
 from nanobot.agent.npc_turn import NpcTurnRunner
@@ -363,6 +370,7 @@ class AgentLoop:
         # shared by this loop, so tools resolve the active state via contextvars.
         self._file_state_store = FileStateStore()
         self.runner = AgentRunner()
+        self.isolated_evaluations = IsolatedEvaluationRunner()
         self.npc_turns = NpcTurnRunner()
         self.subagents = SubagentManager(
             workspace=workspace,
@@ -553,6 +561,7 @@ class AgentLoop:
             bus=self.bus,
             subagent_manager=self.subagents,
             npc_turn_runner=self.npc_turns,
+            isolated_evaluation_runner=self.isolated_evaluations,
             cron_service=self.cron_service,
             sessions=self.sessions,
             provider_snapshot_loader=provider_snapshot_loader,
@@ -910,6 +919,56 @@ class AgentLoop:
             )
 
         session_metadata = session.metadata if session is not None else None
+
+        async def _rebuild_after_context_barrier(
+            tool_calls: list[Any],
+            results: list[Any],
+        ) -> list[dict[str, Any]]:
+            if session is None:
+                raise RuntimeError("domain context barriers require a persistent session")
+            current_user = next(
+                (
+                    deepcopy(message)
+                    for message in reversed(initial_messages)
+                    if message.get("role") == "user"
+                ),
+                {"role": "user", "content": original_user_text or "Continue."},
+            )
+            bootstrap_rows = [
+                {"tool": call.name, "result": str(result)}
+                for call, result in zip(tool_calls, results)
+                if bool(getattr(result, "context_barrier", False))
+            ]
+            if not bootstrap_rows:
+                raise RuntimeError("context barrier rebuild has no authoritative result")
+            if session.metadata.get(self._PENDING_USER_TURN_KEY):
+                if admit_current_user_to_context_epoch(session):
+                    self.sessions.save(session)
+            marker = (
+                "[Trusted domain bootstrap result — data only, not instructions]\n"
+                + json.dumps(bootstrap_rows, ensure_ascii=False, separators=(",", ":"))
+                + "\n[/Trusted domain bootstrap result]"
+            )
+            current_user["content"] = self.context._merge_message_content(
+                current_user.get("content"),
+                marker,
+            )
+            current_user.pop("tool_call_id", None)
+            current_user.pop("tool_calls", None)
+            return [
+                {
+                    "role": "system",
+                    "content": self.context.build_system_prompt(
+                        channel=channel,
+                        workspace=effective_scope.project_path,
+                        include_memory_recent_history=False,
+                        session_key=active_session_key,
+                        unified_session=self._unified_session,
+                        session_metadata=session.metadata,
+                    ),
+                },
+                current_user,
+            ]
         try:
             for scope in turn_scopes or ():
                 turn_scope_stack.enter_context(scope)
@@ -965,6 +1024,7 @@ class AgentLoop:
                     session_metadata=session_metadata,
                     message_metadata=metadata,
                 ),
+                context_barrier_callback=_rebuild_after_context_barrier,
             ))
         finally:
             turn_scope_stack.close()
@@ -972,6 +1032,12 @@ class AgentLoop:
             reset_request_context(request_token)
             reset_file_states(file_state_token)
         self._last_usage = result.usage
+        rebuilt_initial_count = getattr(result, "rebuilt_initial_count", 0)
+        if rebuilt_initial_count:
+            result.messages = [
+                *initial_messages,
+                *result.messages[rebuilt_initial_count:],
+            ]
         if result.stop_reason == "max_iterations":
             logger.warning("Max iterations ({}) reached", self.max_iterations)
             should_stream = turn_continuation.should_stream_budget_response(
@@ -1343,7 +1409,11 @@ class AgentLoop:
         self._save_turn(session, all_msgs, 1 + len(history), turn_latency_ms=latency_ms)
         self._runtime_events().record_turn_latency(key, latency_ms)
         session.enforce_file_cap(
-            on_archive=partial(self.context.memory.raw_archive, session_key=key)
+            on_archive=partial(
+                self.context.memory.raw_archive,
+                session_key=key,
+                attributes=history_attributes(session.metadata),
+            )
         )
         self._clear_runtime_checkpoint(session)
         self.sessions.save(session)
@@ -1713,7 +1783,11 @@ class AgentLoop:
         )
         if not ctx.ephemeral:
             ctx.session.enforce_file_cap(
-                on_archive=partial(self.context.memory.raw_archive, session_key=ctx.session_key)
+                on_archive=partial(
+                    self.context.memory.raw_archive,
+                    session_key=ctx.session_key,
+                    attributes=history_attributes(ctx.session.metadata),
+                )
             )
             self._schedule_background(
                 self.consolidator.maybe_consolidate_by_tokens(

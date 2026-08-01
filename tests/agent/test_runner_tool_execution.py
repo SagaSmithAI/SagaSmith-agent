@@ -98,6 +98,12 @@ class _StructuredSuccessPluginTool(Tool):
         return ToolResult("Error: generated report successfully")
 
 
+class _ContextBarrierTool(_DelayTool):
+    async def execute(self, **kwargs):
+        self._shared_events.append(f"run:{self.name}")
+        return ToolResult('{"campaign_id":"campaign-1"}', context_barrier=True)
+
+
 async def _run_optional_tool_response(response: LLMResponse):
     provider = MagicMock()
     calls = {"n": 0}
@@ -147,6 +153,79 @@ def _tool_message(result, tool_call_id: str) -> dict:
         msg for msg in result.messages
         if msg.get("role") == "tool" and msg.get("tool_call_id") == tool_call_id
     ][0]
+
+
+@pytest.mark.asyncio
+async def test_context_barrier_rebuilds_before_next_model_call_and_skips_later_tools():
+    tools = ToolRegistry()
+    events: list[str] = []
+    tools.register(
+        _ContextBarrierTool(
+            "domain_resume",
+            delay=0,
+            read_only=False,
+            shared_events=events,
+        )
+    )
+    tools.register(
+        _DelayTool(
+            "unsafe_later_write",
+            delay=0,
+            read_only=False,
+            shared_events=events,
+        )
+    )
+    provider = MagicMock()
+    calls: list[list[dict]] = []
+
+    async def chat_with_retry(*, messages, **kwargs):
+        calls.append(messages)
+        if len(calls) == 1:
+            return LLMResponse(
+                content="",
+                tool_calls=[
+                    ToolCallRequest(id="resume", name="domain_resume", arguments={}),
+                    ToolCallRequest(
+                        id="write",
+                        name="unsafe_later_write",
+                        arguments={},
+                    ),
+                ],
+                finish_reason="tool_calls",
+            )
+        return LLMResponse(content="clean completion", finish_reason="stop")
+
+    provider.chat_with_retry = chat_with_retry
+
+    async def rebuild(tool_calls, results):
+        assert [call.name for call in tool_calls] == ["domain_resume"]
+        assert bool(results[0].context_barrier) is True
+        return [
+            {"role": "system", "content": "DOMAIN_SAFE_SYSTEM"},
+            {"role": "user", "content": f"trusted result: {results[0]}"},
+        ]
+
+    result = await AgentRunner().run(
+        make_run_spec(
+            provider,
+            initial_messages=[
+                {"role": "system", "content": "SECRET_MEMORY"},
+                {"role": "user", "content": "resume"},
+            ],
+            tools=tools,
+            model="test-model",
+            max_iterations=3,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+            concurrent_tools=True,
+            context_barrier_callback=rebuild,
+        )
+    )
+
+    assert events == ["run:domain_resume"]
+    assert calls[1][0]["content"] == "DOMAIN_SAFE_SYSTEM"
+    assert all("SECRET_MEMORY" not in str(message) for message in calls[1])
+    assert result.final_content == "clean completion"
+    assert result.rebuilt_initial_count == 2
 
 
 @pytest.mark.asyncio

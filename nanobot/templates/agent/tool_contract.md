@@ -17,6 +17,12 @@ Tool signatures are provided automatically via function calling. This section do
 - Treat MCP tools as the owner of their domain state. Do not reproduce their workflow with local CLI calls or ad hoc scripts.
 - Read an MCP prompt or resource when it covers the task; use its matching MCP tool for state changes.
 - The current turn may include a runtime MCP capability index. Use the narrowest listed capability that matches the request.
+- Treat a returned `host_context_binding` change as a hard context barrier; do
+  not call another tool from the same model response after it.
+- Use `isolated_evaluate` only with a signed fixed-purpose domain bundle. It
+  returns an untrusted proposal; validate it through the domain MCP and execute
+  mechanics with ordinary public tools. Use `portray_npc` for its richer
+  specialized NPC-dialogue bundle. Never substitute a generic subagent.
 
 ## Discovery and Reading
 

@@ -35,10 +35,20 @@ inbound message
 → search / inspect / load and read skill_plan_delta
 → exposure_call (NanoBot static-schema fallback)
 → MCP validates phase / campaign / role / actor / revision
+→ a first or changed host_context_binding causes an in-turn hard barrier
+→ isolated_evaluate / portray_npc returns a proposal from a fresh zero-tool context
 → result returns to session and channel
 ```
 
 One MCP process can therefore maintain different tool surfaces for different channels, users, and campaigns, without trusting model-supplied authority.
+
+When campaign, principal, role, audience, branch, or restore state changes, the
+Agent stops later calls from the same model response and rebuilds without old
+messages, summaries, workspace/Dream memory, cached retrieval, or receipts.
+`isolated_evaluate` uses fixed schemas for actor, audience, faction, source, and
+DM-ruling proposals; `portray_npc` retains the richer named-NPC dialogue
+contract. Both run without tools or child-session persistence and neither can
+author authoritative state.
 
 ## Start the full Windows workspace
 
@@ -115,7 +125,10 @@ nanobot gateway
 | Campaign memory | Domain MCP/Core | branch-aware facts across sessions |
 | Actor knowledge | Domain MCP/Core | independent PC/NPC knowledge and visibility |
 
-Agent summaries never replace authoritative campaign state and must not leak GM-only facts into player-visible sessions.
+In domain-authoritative campaign context, workspace/Dream memory is excluded
+from the model prompt and campaign messages are classified `campaign_private`
+inside their session. Agent summaries never replace authoritative campaign
+state and must not leak GM-only facts into player-visible sessions.
 
 ## Development
 

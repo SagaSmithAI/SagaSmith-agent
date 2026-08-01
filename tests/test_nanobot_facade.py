@@ -10,6 +10,11 @@ from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 
+from nanobot.agent.domain_context import (
+    DomainContextBinding,
+    bind_session_context,
+    principal_fingerprint,
+)
 from nanobot.nanobot import (
     STREAM_EVENT_REASONING_COMPLETED,
     STREAM_EVENT_REASONING_DELTA,
@@ -1334,6 +1339,31 @@ def test_memory_helpers_read_write_append_and_filter_history(tmp_path):
     session_entries = bot.memory.read_history(session_key="sdk:history")
     assert len(session_entries) == 1
     assert session_entries[0]["content"] == "session event"
+
+
+def test_memory_sdk_marks_domain_history_private(tmp_path):
+    config_path = _write_config(tmp_path)
+    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+    session = bot._loop.sessions.get_or_create("sdk:campaign")
+    bind_session_context(
+        session,
+        DomainContextBinding(
+            domain="sagasmith-dnd",
+            campaign_id="campaign-1",
+            principal_fingerprint=principal_fingerprint("sdk:dm"),
+            role="dm",
+            audience="dm",
+            branch_id="branch-1",
+        ),
+    )
+    bot._loop.sessions.save(session)
+
+    bot.memory.append_history("private campaign event", session_key="sdk:campaign")
+
+    entry = bot.memory.read_history(session_key="sdk:campaign")[0]
+    assert entry["classification"] == "campaign_private"
+    assert entry["dream_eligible"] is False
+    assert entry["prompt_eligible"] is False
 
 
 @pytest.mark.asyncio

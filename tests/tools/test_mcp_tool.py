@@ -11,6 +11,7 @@ import httpx
 import pytest
 
 import nanobot.agent.tools.mcp as mcp_mod
+from nanobot.agent.domain_context import DomainContextBinding
 from nanobot.agent.tools.context import RequestContext, request_context
 from nanobot.agent.tools.mcp import (
     MCPPromptWrapper,
@@ -23,6 +24,7 @@ from nanobot.agent.tools.mcp import (
 )
 from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result
 from nanobot.config.schema import MCPServerConfig
+from nanobot.session.manager import SessionManager
 
 _PROXY_ENV_VARS = (
     "HTTP_PROXY",
@@ -493,6 +495,155 @@ def test_local_principal_comes_from_server_schema_default() -> None:
     )
     with pytest.raises(RuntimeError, match="does not advertise"):
         missing._trusted_principal()
+
+
+@pytest.mark.asyncio
+async def test_mcp_exact_domain_binding_emits_a_one_time_context_barrier(
+    tmp_path: Path,
+) -> None:
+    local_principal = "service:local-dm"
+    binding = DomainContextBinding(
+        domain="sagasmith-dnd",
+        campaign_id="campaign-1",
+        principal_fingerprint=mcp_mod.principal_fingerprint(local_principal),
+        role="dm",
+        audience="dm",
+        branch_id="branch-1",
+    ).to_dict()
+
+    class Session:
+        async def call_tool(self, name, arguments):
+            return SimpleNamespace(
+                content=[
+                    _FakeTextContent(
+                        json.dumps(
+                            {
+                                "authority": {
+                                    "host_context_binding": dict(binding)
+                                }
+                            }
+                        )
+                    )
+                ],
+                isError=False,
+            )
+
+    definition = SimpleNamespace(
+        name="campaign_query",
+        description="resume",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "campaign_id": {"type": "string"},
+                "principal_id": {
+                    "type": "string",
+                    "default": local_principal,
+                },
+            },
+        },
+        meta={"sagasmith_domain_context": "sagasmith-dnd"},
+    )
+    sessions = SessionManager(tmp_path)
+    wrapper = MCPToolWrapper(
+        Session(),
+        "sagasmith_dnd",
+        definition,
+        inject_principal=True,
+        session_store=sessions,
+    )
+    ctx = RequestContext(
+        channel="cli",
+        chat_id="direct",
+        session_key="cli:direct",
+    )
+
+    with request_context(ctx):
+        first = await wrapper.execute(campaign_id="campaign-1")
+        second = await wrapper.execute(campaign_id="campaign-1")
+        binding.update(
+                DomainContextBinding(
+                    domain="sagasmith-dnd",
+                    campaign_id="campaign-1",
+                    principal_fingerprint=mcp_mod.principal_fingerprint(
+                        local_principal
+                    ),
+                role="dm",
+                audience="player",
+                branch_id="branch-1",
+            ).to_dict()
+        )
+        third = await wrapper.execute(campaign_id="campaign-1")
+
+    assert first.context_barrier is True
+    assert second.context_barrier is False
+    assert third.context_barrier is True
+    stored = sessions.get_or_create("cli:direct")
+    assert stored.metadata["_domain_context_binding"]["audience"] == "player"
+    assert stored.last_consolidated == len(stored.messages)
+
+
+def test_domain_binding_is_not_read_from_arbitrary_nested_content() -> None:
+    binding = DomainContextBinding(
+        domain="sagasmith-dnd",
+        campaign_id="campaign-secret",
+        principal_fingerprint="a" * 64,
+    ).to_dict()
+
+    assert mcp_mod._host_context_binding(
+        {"module_content": {"host_context_binding": binding}}
+    ) is None
+    assert mcp_mod._host_context_binding(
+        {"result": {"authority": {"host_context_binding": binding}}}
+    ) == binding
+
+
+@pytest.mark.asyncio
+async def test_exact_domain_binding_requires_transport_authenticated_principal(
+    tmp_path: Path,
+) -> None:
+    binding = DomainContextBinding(
+        domain="sagasmith-dnd",
+        campaign_id="campaign-1",
+        principal_fingerprint="a" * 64,
+    ).to_dict()
+
+    async def call_tool(_name: str, arguments: dict) -> object:
+        assert arguments == {"campaign_id": "campaign-1"}
+        return SimpleNamespace(
+            content=[
+                _FakeTextContent(
+                    json.dumps({"authority": {"host_context_binding": binding}})
+                )
+            ],
+            isError=False,
+        )
+
+    definition = SimpleNamespace(
+        name="unsafe_context",
+        description="missing transport identity",
+        inputSchema={
+            "type": "object",
+            "properties": {"campaign_id": {"type": "string"}},
+        },
+        meta={"sagasmith_domain_context": "sagasmith-dnd"},
+    )
+    sessions = SessionManager(tmp_path)
+    wrapper = MCPToolWrapper(
+        SimpleNamespace(call_tool=call_tool),
+        "sagasmith_dnd",
+        definition,
+        session_store=sessions,
+    )
+    with request_context(
+        RequestContext(channel="cli", chat_id="direct", session_key="cli:direct")
+    ):
+        result = await wrapper.execute(campaign_id="campaign-1")
+
+    assert is_tool_error_result(wrapper.name, result)
+    assert "malformed content: ValueError" in result
+    assert "_domain_context_binding" not in sessions.get_or_create(
+        "cli:direct"
+    ).metadata
 
 
 @pytest.mark.asyncio

@@ -7,10 +7,12 @@ from typing import Any
 
 import pytest
 
+from nanobot.agent.domain_context import DomainContextBinding, principal_fingerprint
 from nanobot.agent.npc_turn import (
     NpcTurnError,
     NpcTurnRunner,
     normalize_npc_turn_proposal,
+    validate_npc_turn_bundle,
     validate_proposal_against_bundle,
 )
 from nanobot.agent.subagent import SubagentManager
@@ -45,6 +47,14 @@ def _runtime(provider: QueueProvider) -> LLMRuntime:
 
 def _bundle() -> dict[str, Any]:
     allowed = ["actor:npc-1:identity", "stimulus:abc"]
+    host_binding = DomainContextBinding(
+        domain="sagasmith-dnd",
+        campaign_id="campaign-1",
+        principal_fingerprint=principal_fingerprint("principal-1"),
+        role="dm",
+        audience="dm",
+        branch_id="branch-1",
+    ).to_dict()
     bundle = {
         "schema_version": 1,
         "bundle_id": "bundle-1",
@@ -57,6 +67,7 @@ def _bundle() -> dict[str, Any]:
             "latest_event_sequence": 8,
             "actor_revision": 2,
             "scene_state_version": 1,
+            "host_context_binding": host_binding,
         },
         "actor": {
             "id": "npc-1",
@@ -107,6 +118,7 @@ def _bundle() -> dict[str, Any]:
         "bundle_receipt": {
             "bundle_id": "bundle-1",
             "actor_id": "npc-1",
+            "principal_fingerprint": host_binding["principal_fingerprint"],
             "allowed_basis_refs": allowed,
             "signature": "signed-by-mcp",
         },
@@ -169,6 +181,9 @@ async def test_npc_turn_runner_uses_fresh_tool_free_nonpersistent_call() -> None
     assert len(provider.calls[0]["messages"]) == 2
     assert [item["role"] for item in provider.calls[0]["messages"]] == ["system", "user"]
     assert "workspace" not in provider.calls[0]["messages"][1]["content"]
+    payload = json.loads(provider.calls[0]["messages"][1]["content"])
+    assert payload["output_shape"]["speaker_actor_id"] == "copy bundle.actor.id"
+    assert payload["output_shape"]["speech_acts"][0]["basis_refs"]
 
 
 @pytest.mark.asyncio
@@ -183,6 +198,14 @@ async def test_npc_turn_runner_rejects_a_bundle_changed_after_receipt_issue() ->
         await NpcTurnRunner().run(bundle, runtime=_runtime(provider))
 
     assert provider.calls == []
+
+
+def test_npc_turn_bundle_requires_host_context_binding() -> None:
+    bundle = _bundle()
+    del bundle["authority"]["host_context_binding"]
+
+    with pytest.raises(NpcTurnError, match="host_context_binding.*required"):
+        validate_npc_turn_bundle(bundle)
 
 
 @pytest.mark.asyncio

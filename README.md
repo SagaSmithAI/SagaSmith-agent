@@ -48,10 +48,19 @@ SagaSmith Agent 负责：
 → search / inspect / load，并读取 skill_plan_delta
 → exposure_call（NanoBot 静态 schema fallback）
 → MCP 校验 phase / campaign / role / actor / revision
+→ 首次或变化的 host_context_binding 触发当前轮硬切换
+→ isolated_evaluate / portray_npc 在全新零工具上下文中只生成提案
 → 结果写回会话与频道
 ```
 
 因此同一个 D&D MCP 进程可以为不同频道、用户与战役维护不同的可见工具面，模型不能靠构造参数提升权限。
+
+战役、principal、role、audience、branch 或 restore 变化时，Agent 会停止同一
+模型回复中余下的工具调用，丢弃旧模型消息、摘要、workspace/Dream memory、
+缓存检索与旧 receipt，再从当前请求和可信 MCP 结果重建上下文。角色、受众、
+阵营、来源解释和 DM ruling 使用固定 schema 的 `isolated_evaluate`；丰富的命名
+NPC 对话继续使用 `portray_npc`。两者都不带工具、不持久化子会话，也不直接
+产生权威状态。
 
 ## Windows 一键启动当前工作区
 
@@ -152,7 +161,9 @@ nanobot gateway
 | Campaign memory | Domain MCP/Core | 跨 session、分支感知的长期事实 |
 | Actor knowledge | Domain MCP/Core | 每个 PC/NPC 独立的所知事实与可见边界 |
 
-Agent 摘要不能替代后四者，也不应把隐藏 GM 内容写进玩家可见 session。
+进入 domain-authoritative 战役上下文后，workspace/Dream memory 不进入模型
+提示；战役消息标为 `campaign_private`，只留在对应 session。Agent 摘要不能
+替代后四者，也不应把隐藏 GM 内容写进玩家可见 session。
 
 ## 开发
 

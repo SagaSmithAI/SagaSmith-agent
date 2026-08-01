@@ -7,6 +7,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from nanobot.agent.domain_context import history_attributes
 from nanobot.runtime_context import RUNTIME_CONTEXT_HISTORY_META
 from nanobot.sdk.types import (
     SessionInfo,
@@ -167,7 +168,16 @@ class MemoryClient:
 
     def append_history(self, text: str, *, session_key: str | None = None) -> int:
         """Append one entry to ``memory/history.jsonl`` and return its cursor."""
-        return self._loop.context.memory.append_history(text, session_key=session_key)
+        attributes: dict[str, Any] = {}
+        if session_key is not None:
+            record = self._loop.sessions.read_session_metadata(session_key)
+            metadata = record.get("metadata") if isinstance(record, Mapping) else None
+            attributes = history_attributes(metadata)
+        return self._loop.context.memory.append_history(
+            text,
+            session_key=session_key,
+            attributes=attributes,
+        )
 
     def read_history(self, *, session_key: str | None = None) -> list[dict[str, Any]]:
         """Read memory history entries, optionally filtered by session."""

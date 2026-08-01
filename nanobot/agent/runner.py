@@ -9,7 +9,7 @@ from contextlib import suppress
 from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Awaitable, Callable
 
 from loguru import logger
 
@@ -45,6 +45,10 @@ from nanobot.utils.runtime import (
 )
 
 GoalContinueMessage = str | Callable[[], str | None]
+ContextBarrierCallback = Callable[
+    [list[ToolCallRequest], list[Any]],
+    list[dict[str, Any]] | Awaitable[list[dict[str, Any]]],
+]
 
 _DEFAULT_ERROR_MESSAGE = "Sorry, I encountered an error calling the AI model."
 _ARREARAGE_ERROR_MESSAGE = (
@@ -84,6 +88,7 @@ class AgentRunSpec:
     goal_active_predicate: Callable[[], bool] | None = None
     goal_continue_message: GoalContinueMessage | None = None
     finalize_on_max_iterations: bool = True
+    context_barrier_callback: ContextBarrierCallback | None = None
 
 
 @dataclass(slots=True)
@@ -98,6 +103,7 @@ class AgentRunResult:
     error: str | None = None
     tool_events: list[dict[str, str]] = field(default_factory=list)
     had_injections: bool = False
+    rebuilt_initial_count: int = 0
 
 
 class AgentRunner:
@@ -327,6 +333,7 @@ class AgentRunner:
         had_injections = False
         injection_cycles = 0
         compacted_tool_call_ids: set[str] = set()
+        rebuilt_initial_count = 0
         governance_config = ContextGovernanceConfig(
             provider=spec.runtime.provider,
             model=spec.runtime.model,
@@ -453,6 +460,50 @@ class AgentRunner:
                     }
                     messages.append(tool_message)
                     completed_tool_results.append(tool_message)
+                context_barrier = any(
+                    bool(getattr(result, "context_barrier", False))
+                    for result in results
+                )
+                if context_barrier and fatal_error is None:
+                    if spec.context_barrier_callback is None:
+                        fatal_error = RuntimeError(
+                            "tool advanced a context boundary but the host cannot rebuild context"
+                        )
+                    else:
+                        rebuilt = spec.context_barrier_callback(
+                            response.tool_calls[: len(results)],
+                            results,
+                        )
+                        if inspect.isawaitable(rebuilt):
+                            rebuilt = await rebuilt
+                        if (
+                            not isinstance(rebuilt, list)
+                            or not rebuilt
+                            or rebuilt[0].get("role") != "system"
+                        ):
+                            fatal_error = RuntimeError(
+                                "context barrier callback returned invalid messages"
+                            )
+                        else:
+                            messages[:] = deepcopy(rebuilt)
+                            rebuilt_initial_count = len(messages)
+                            governance_config.inflight_start_index = len(messages)
+                            compacted_tool_call_ids.clear()
+                            await self._emit_checkpoint(
+                                spec,
+                                {
+                                    "phase": "context_barrier_rebuilt",
+                                    "iteration": iteration,
+                                    "model": spec.runtime.model,
+                                    "assistant_message": None,
+                                    "completed_tool_results": [],
+                                    "pending_tool_calls": [],
+                                },
+                            )
+                            empty_content_retries = 0
+                            length_recovery_count = 0
+                            await hook.after_iteration(context)
+                            continue
                 if fatal_error is not None:
                     error = f"Error: {type(fatal_error).__name__}: {fatal_error}"
                     final_content = error
@@ -674,6 +725,7 @@ class AgentRunner:
             error=error,
             tool_events=tool_events,
             had_injections=had_injections,
+            rebuilt_initial_count=rebuilt_initial_count,
         )
 
     def _build_request_kwargs(
@@ -1108,6 +1160,11 @@ class AgentRunner:
                     )
                     tool_results.append(result)
                     batch_results.append(result)
+            if any(
+                bool(getattr(result, "context_barrier", False))
+                for result, _event, _error in batch_results
+            ):
+                break
 
         results: list[Any] = []
         events: list[dict[str, str]] = []

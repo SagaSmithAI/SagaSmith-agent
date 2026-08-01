@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Callable, Coroutine
 
 from loguru import logger
 
+from nanobot.agent.domain_context import summary_matches_context
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
@@ -116,10 +117,14 @@ class AutoCompact:
             session = self.sessions.get_or_create(key)
         # Hot path: summary from in-memory dict (process hasn't restarted).
         entry = self._summaries.pop(key, None)
-        if entry:
+        meta = session.metadata.get("_last_summary")
+        current_summary = summary_matches_context(
+            session.metadata,
+            meta if isinstance(meta, dict) else None,
+        )
+        if entry and current_summary:
             return session, self._format_summary(entry[0], entry[1])
         # Cold path: summary persisted in session metadata (process restarted).
-        meta = session.metadata.get("_last_summary")
-        if isinstance(meta, dict):
+        if isinstance(meta, dict) and current_summary:
             return session, self._format_summary(meta["text"], datetime.fromisoformat(meta["last_active"]))
         return session, None
