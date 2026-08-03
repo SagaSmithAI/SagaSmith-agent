@@ -232,22 +232,28 @@ Standard D&D rules are different: mechanic ids registered in the campaign's
 active rule lock select version-locked engine implementations, so the Agent must
 not reinterpret or replace them with prose rulings. A core-looking string alone
 does not create an executable mechanic, and accounting or transaction mechanics
-do not settle a card's authored outcome. A locked standard card that returns
-`semantic_solution.status="engine_implementation_required"` must stop before
-payment and be implemented and tested in the engine. Imported or homebrew
-character cards without a reviewed executable mechanic use a first-use
-compilation boundary. The action returns
-`semantic_solution.status="compilation_required"` before consuming an action,
-spell slot, charge, or character revision. The Agent expands the exact
-module or active rule chunk, builds a constrained schema-v2 resolution plan, and
-calls DM-only `content_solution(action="compile")`. The server validates the
-citation and card wording, stores the versioned solution on that exact card, and
-later actions reuse the stored plan. A paid item-hit window instead uses
-`combat_choice(action="compile_solution")`, which stores the same durable
-solution while atomically upgrading the existing payment event; settle it with
-`combat_choice(action="execute_plan")`. Never invent a `dnd5e.core.*` id, attach
-arbitrary code, or fall back to a transient ruling merely because the custom
-card has not yet been compiled.
+do not settle a card's authored outcome. A locked standard card with neither an
+exact registered mechanic nor a persisted source-bound content clause returns
+`semantic_solution.status="engine_implementation_required"` and must stop before
+payment. A bundled spell, item, or creature-specific ability may instead carry
+a reviewed exact-source Agent-ruling clause; that clause applies only the card's
+content while action economy, accounting, attacks, damage, and transactions
+remain engine-owned. Imported or homebrew boundaries are likewise fixed before
+play: import, review, or portable export stores either a constrained schema-v2
+plan or a direct exact-source Agent-ruling requirement on every mechanical
+entry. Standalone rule-pack export/import/install and composed-addon
+export/import each recompute the stored `build_time_complete` audit and fail on
+any missing, stale, or deferred semantic entry. All current public actor-card
+write paths prefill unresolved custom prose with an exact-source direct Agent
+ruling before persistence. `content_solution(action="compile")` is available
+only in Lobby for explicit old-card migration or authoring. Play and Combat
+never call it. A `semantic_solution.status="content_authoring_required"` result
+therefore identifies legacy/corrupt data that bypassed the invariant; it consumes
+no action, spell slot, charge, or revision. Return to Lobby and migrate or
+reimport it. An existing plan may be settled through
+`combat_choice(action="execute_plan")`; an existing direct ruling is decided from
+current facts in its bounded DM window. Never invent a `dnd5e.core.*` id, attach
+arbitrary code, or use a paid event to change the card's execution contract.
 
 Use a one-occurrence Agent ruling only when the current situation is genuinely
 unique or cannot be represented by the constrained plan operations. Such a
@@ -292,6 +298,19 @@ with source-established `chunk_ids` and the exact printed heading in
 that card from text alone, so the parent Agent does not need image capability.
 Only missing or conflicting required facts proceed to the local
 `rule_import(action="recover_statblock")` OCR path.
+
+Whole-book preset/addon builds settle every reusable card before publication.
+Explicit `Actions for Type ...` sections produce separate cards; bounded OCR
+may recompute a damaged redundant ability modifier from its visible score or
+restore one missing label from an otherwise complete, uniquely ordered six-score
+row. It never invents a score. Only a 2014 Monster Manual source with one unique
+identity match may reuse a bundled SRD card, and the rebuilt private card records
+that source checksum. None of these paths asks the runtime Agent to author a
+resolution on first use.
+Unmatched dice procedures, numbered random-effect tables, and adjudication
+guidance remain mechanical review candidates. Whole-book regression binds each
+retained mechanical chunk to an exact-source Agent ruling; it does not treat a
+single descriptive probe as coverage for an otherwise unparsed publication.
 
 The equivalent module-card path is
 `module_review(action="recover_statblock")`. The parent Agent supplies the exact
