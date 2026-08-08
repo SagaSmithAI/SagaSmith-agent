@@ -88,6 +88,7 @@ class WsTestClient:
         self._uri = uri + sep + "&".join(params) if params else uri
         self._extra_headers = extra_headers
         self._ws: ClientConnection | None = None
+        self._chat_id: str | None = None
 
     async def connect(self) -> None:
         self._ws = await websockets.connect(
@@ -128,6 +129,7 @@ class WsTestClient:
         """Receive and validate the 'ready' event."""
         msg = await self.recv(timeout)
         assert msg.event == "ready", f"Expected 'ready' event, got '{msg.event}'"
+        self._chat_id = msg.chat_id
         return msg
 
     async def recv_message(self, timeout: float = 10.0) -> WsMessage:
@@ -165,16 +167,17 @@ class WsTestClient:
     # -- Sending ----------------------------------------------------------
 
     async def send_text(self, text: str) -> None:
-        """Send a plain text frame."""
-        await self.ws.send(text)
+        """Send a typed message envelope to the attached chat."""
+        assert self._chat_id is not None, "recv_ready() must be called before send_text()"
+        await self.send_json({"type": "message", "chat_id": self._chat_id, "content": text})
 
     async def send_json(self, data: dict[str, Any]) -> None:
         """Send a JSON frame."""
         await self.ws.send(json.dumps(data, ensure_ascii=False))
 
     async def send_content(self, content: str) -> None:
-        """Send content in the preferred JSON format ``{"content": ...}``."""
-        await self.send_json({"content": content})
+        """Send content in the typed message envelope."""
+        await self.send_text(content)
 
     # -- Connection introspection -----------------------------------------
 

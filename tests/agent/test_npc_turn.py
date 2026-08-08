@@ -8,9 +8,9 @@ from typing import Any
 import pytest
 
 from nanobot.agent.domain_context import DomainContextBinding, principal_fingerprint
+from nanobot.agent.isolated_evaluation import IsolatedEvaluationError, IsolatedEvaluationRunner
 from nanobot.agent.npc_turn import (
     NpcTurnError,
-    NpcTurnRunner,
     normalize_npc_turn_proposal,
     validate_npc_turn_bundle,
     validate_proposal_against_bundle,
@@ -78,9 +78,7 @@ def _bundle() -> dict[str, Any]:
             "profile": {},
             "self_state": {},
         },
-        "interlocutors": [
-            {"id": "pc-1", "name": "Envoy", "character_type": "pc"}
-        ],
+        "interlocutors": [{"id": "pc-1", "name": "Envoy", "character_type": "pc"}],
         "stimulus": {
             "kind": "speech",
             "speaker_actor_id": "pc-1",
@@ -165,12 +163,10 @@ def _proposal() -> dict[str, Any]:
 
 @pytest.mark.asyncio
 async def test_npc_turn_runner_uses_fresh_tool_free_nonpersistent_call() -> None:
-    provider = QueueProvider(
-        [LLMResponse(content=json.dumps(_proposal()), finish_reason="stop")]
-    )
-    runner = NpcTurnRunner()
+    provider = QueueProvider([LLMResponse(content=json.dumps(_proposal()), finish_reason="stop")])
+    runner = IsolatedEvaluationRunner()
 
-    result = await runner.run(_bundle(), runtime=_runtime(provider))
+    result = await runner.run("npc_turn", _bundle(), runtime=_runtime(provider))
 
     assert result.proposal == _proposal()
     assert result.tools_exposed == 0
@@ -188,14 +184,12 @@ async def test_npc_turn_runner_uses_fresh_tool_free_nonpersistent_call() -> None
 
 @pytest.mark.asyncio
 async def test_npc_turn_runner_rejects_a_bundle_changed_after_receipt_issue() -> None:
-    provider = QueueProvider(
-        [LLMResponse(content=json.dumps(_proposal()), finish_reason="stop")]
-    )
+    provider = QueueProvider([LLMResponse(content=json.dumps(_proposal()), finish_reason="stop")])
     bundle = _bundle()
     bundle["actor"]["summary"] = "Injected replacement identity"
 
-    with pytest.raises(NpcTurnError, match="bundle digest"):
-        await NpcTurnRunner().run(bundle, runtime=_runtime(provider))
+    with pytest.raises(IsolatedEvaluationError, match="bundle digest"):
+        await IsolatedEvaluationRunner().run("npc_turn", bundle, runtime=_runtime(provider))
 
     assert provider.calls == []
 
@@ -217,7 +211,7 @@ async def test_npc_turn_runner_repairs_once_without_exposing_tools_or_history() 
         ]
     )
 
-    result = await NpcTurnRunner().run(_bundle(), runtime=_runtime(provider))
+    result = await IsolatedEvaluationRunner().run("npc_turn", _bundle(), runtime=_runtime(provider))
 
     assert result.generation_attempts == 2
     assert len(provider.calls) == 2
@@ -242,8 +236,8 @@ async def test_npc_turn_runner_rejects_second_invalid_or_forbidden_output() -> N
         ]
     )
 
-    with pytest.raises(NpcTurnError, match="did not return one JSON object"):
-        await NpcTurnRunner().run(_bundle(), runtime=_runtime(provider))
+    with pytest.raises(IsolatedEvaluationError, match="did not return one JSON object"):
+        await IsolatedEvaluationRunner().run("npc_turn", _bundle(), runtime=_runtime(provider))
 
     assert all(call["tools"] is None for call in provider.calls)
 
@@ -260,7 +254,8 @@ async def test_npc_turn_runner_can_apply_a_fresh_zero_tool_guardian() -> None:
         ]
     )
 
-    result = await NpcTurnRunner().run(
+    result = await IsolatedEvaluationRunner().run(
+        "npc_turn",
         _bundle(),
         runtime=_runtime(provider),
         strict_guardian=True,
@@ -274,10 +269,8 @@ async def test_npc_turn_runner_can_apply_a_fresh_zero_tool_guardian() -> None:
 
 @pytest.mark.asyncio
 async def test_npc_portrayal_tool_returns_a_proposal_not_authoritative_state() -> None:
-    provider = QueueProvider(
-        [LLMResponse(content=json.dumps(_proposal()), finish_reason="stop")]
-    )
-    tool = PortrayNpcTool(NpcTurnRunner())
+    provider = QueueProvider([LLMResponse(content=json.dumps(_proposal()), finish_reason="stop")])
+    tool = PortrayNpcTool(IsolatedEvaluationRunner())
     context = RequestContext(
         channel="cli",
         chat_id="direct",

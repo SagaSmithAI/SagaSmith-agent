@@ -939,7 +939,7 @@ def test_telegram_group_policy_defaults_to_mention() -> None:
     assert TelegramConfig().group_policy == "mention"
 
 
-def test_is_allowed_accepts_legacy_telegram_id_username_formats() -> None:
+def test_is_allowed_accepts_canonical_telegram_identity_or_either_component() -> None:
     channel = TelegramChannel(TelegramConfig(allow_from=["12345", "alice", "67890|bob"]), MessageBus())
 
     assert channel.is_allowed("12345|carol") is True
@@ -947,7 +947,7 @@ def test_is_allowed_accepts_legacy_telegram_id_username_formats() -> None:
     assert channel.is_allowed("67890|bob") is True
 
 
-def test_is_allowed_rejects_invalid_legacy_telegram_sender_shapes() -> None:
+def test_is_allowed_rejects_invalid_telegram_sender_shapes() -> None:
     channel = TelegramChannel(TelegramConfig(allow_from=["alice"]), MessageBus())
 
     assert channel.is_allowed("attacker|alice|extra") is False

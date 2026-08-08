@@ -17,7 +17,7 @@ The docs show concrete provider names so the JSON is copyable, not because nanob
 | If you have... | Configure... |
 |---|---|
 | An API key from a hosted provider or gateway | That provider's `providers.<name>.apiKey`, then a preset with that provider name and a model ID from that service. |
-| An OpenCode Zen or Go key | `providers.opencodeZen.apiKey` or `providers.opencodeGo.apiKey`, then a preset with `provider: "opencode_zen"` or `provider: "opencode_go"`. |
+| An OpenCode Zen or Go key | `providers.opencode.apiKey` or `providers.opencodeGo.apiKey`, then a preset with `provider: "opencode"` or `provider: "opencode_go"`. |
 | A company proxy or regional endpoint | The matching provider block plus `apiBase` if the proxy gives you a URL. |
 | A local OpenAI-compatible server | A local provider block such as `ollama`, `vllm`, `lmStudio`, or `custom`, usually with `apiBase`. |
 | An OAuth-based account | Run the matching `nanobot provider login ...` command, then select that provider explicitly in a preset. |
@@ -107,13 +107,13 @@ URLs in nanobot.
 ```json
 {
   "providers": {
-    "opencodeZen": {
+    "opencode": {
       "apiKey": "${OPENCODE_API_KEY}"
     }
   },
   "modelPresets": {
     "primary": {
-      "provider": "opencode_zen",
+      "provider": "opencode",
       "model": "opencode/deepseek-v4-pro",
       "maxTokens": 8192,
       "contextWindowTokens": 65536

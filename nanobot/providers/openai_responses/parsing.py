@@ -98,20 +98,6 @@ async def iter_sse(response: httpx.Response) -> AsyncGenerator[dict[str, Any], N
             yield event
 
 
-async def consume_sse(
-    response: httpx.Response,
-    on_content_delta: Callable[[str], Awaitable[None]] | None = None,
-    on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
-) -> tuple[str, list[ToolCallRequest], str]:
-    """Consume a Responses API SSE stream into ``(content, tool_calls, finish_reason)``."""
-    content, tool_calls, finish_reason, _, _ = await consume_sse_with_reasoning(
-        response,
-        on_content_delta=on_content_delta,
-        on_tool_call_delta=on_tool_call_delta,
-    )
-    return content, tool_calls, finish_reason
-
-
 async def consume_sse_with_reasoning(
     response: httpx.Response,
     on_content_delta: Callable[[str], Awaitable[None]] | None = None,

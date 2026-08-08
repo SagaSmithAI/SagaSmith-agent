@@ -330,7 +330,7 @@ def test_apply_patch_edits_rejects_outside_paths_when_restricted(tmp_path):
     assert not (outside / "parent.txt").exists()
 
 
-def test_apply_patch_legacy_extra_allowed_dirs_are_read_only(tmp_path):
+def test_apply_patch_extra_read_allowed_dirs_are_read_only(tmp_path):
     workspace = tmp_path / "workspace"
     skills = tmp_path / "skills"
     workspace.mkdir()
@@ -340,7 +340,7 @@ def test_apply_patch_legacy_extra_allowed_dirs_are_read_only(tmp_path):
     tool = ApplyPatchTool(
         workspace=workspace,
         allowed_dir=workspace,
-        extra_allowed_dirs=[skills],
+        extra_read_allowed_dirs=[skills],
     )
 
     result = asyncio.run(

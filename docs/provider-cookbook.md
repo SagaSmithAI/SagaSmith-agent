@@ -107,14 +107,14 @@ OpenCode Zen:
 ```json
 {
   "providers": {
-    "opencodeZen": {
+    "opencode": {
       "apiKey": "${OPENCODE_API_KEY}"
     }
   },
   "modelPresets": {
     "primary": {
       "label": "OpenCode Zen",
-      "provider": "opencode_zen",
+      "provider": "opencode",
       "model": "opencode/deepseek-v4-pro",
       "maxTokens": 4096,
       "contextWindowTokens": 65536,
@@ -163,7 +163,7 @@ nanobot status
 nanobot agent -m "Hello!"
 ```
 
-OpenCode's docs list models across multiple endpoint types. The `opencode_zen`
+OpenCode's docs list models across multiple endpoint types. The `opencode`
 and `opencode_go` providers in nanobot use the OpenAI-compatible
 `chat/completions` path. If a model fails with `model not found` or an endpoint
 shape error, choose a model that OpenCode lists under `chat/completions` for the

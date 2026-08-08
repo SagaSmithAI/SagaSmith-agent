@@ -13,9 +13,8 @@ import pytest
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.subagent import SubagentManager, SubagentStatus
 from nanobot.agent.tools.search import FindFilesTool, GrepTool
-from nanobot.agent.tools.web import WebSearchTool
+from nanobot.agent.tools.web import WebSearchConfig, WebSearchTool
 from nanobot.bus.queue import MessageBus
-from nanobot.config.schema import WebSearchConfig
 from nanobot.providers.base import GenerationSettings
 from nanobot.utils.llm_runtime import LLMRuntime
 
@@ -270,7 +269,7 @@ async def test_grep_files_with_matches_mode_respects_max_results(tmp_path: Path)
         pattern="needle",
         path="src",
         output_mode="files_with_matches",
-        max_results=2,
+        head_limit=2,
     )
 
     assert result.splitlines()[:2] == ["src/c.py", "src/b.py"]

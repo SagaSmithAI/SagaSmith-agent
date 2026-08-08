@@ -3,7 +3,11 @@ from pathlib import Path
 import tiktoken
 
 from nanobot.utils import helpers
-from nanobot.utils.helpers import _write_text_atomic, split_message, truncate_text_to_tokens
+from nanobot.utils.helpers import (
+    split_message,
+    truncate_text_to_tokens,
+    write_text_atomic,
+)
 
 
 def test_split_message_no_code_blocks_unchanged():
@@ -36,9 +40,7 @@ def test_truncate_text_to_tokens_non_positive_budget_returns_text():
     assert truncate_text_to_tokens(text, 0) == text
 
 
-def test_write_text_atomic_fsyncs_file_and_parent_directory(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_write_text_atomic_fsyncs_file_and_parent_directory(tmp_path: Path, monkeypatch) -> None:
     target = tmp_path / "pairing.json"
     fsync_calls: list[int] = []
     closed_fds: list[int] = []
@@ -50,7 +52,7 @@ def test_write_text_atomic_fsyncs_file_and_parent_directory(
     monkeypatch.setattr(helpers.os, "open", lambda path, flags: 12345)
     monkeypatch.setattr(helpers.os, "close", lambda fd: closed_fds.append(fd))
 
-    _write_text_atomic(target, '{"approved": {}}')
+    write_text_atomic(target, '{"approved": {}}')
 
     assert target.read_text(encoding="utf-8") == '{"approved": {}}'
     assert len(fsync_calls) == 2
@@ -71,7 +73,7 @@ def test_write_text_atomic_keeps_file_when_directory_fsync_is_unsupported(
     monkeypatch.setattr(helpers.os, "fsync", lambda fd: fsync_calls.append(fd))
     monkeypatch.setattr(helpers.os, "open", fake_open)
 
-    _write_text_atomic(target, '{"pending": {}}')
+    write_text_atomic(target, '{"pending": {}}')
 
     assert target.read_text(encoding="utf-8") == '{"pending": {}}'
     assert len(fsync_calls) == 1

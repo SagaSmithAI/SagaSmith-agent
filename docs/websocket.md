@@ -178,19 +178,8 @@ Reasoning frames only flow when the channel's `showReasoning` is `true` (default
 
 ### Client → Server
 
-**Legacy (default chat):** send a plain string, or a JSON object with a recognized text field:
-
-```json
-"Hello nanobot!"
-```
-
-```json
-{"content": "Hello nanobot!"}
-```
-
-Recognized fields: `content`, `text`, `message` (checked in that order). Invalid JSON is treated as plain text. These frames route to the connection's default `chat_id` (the one announced in `ready`).
-
-**Typed envelopes (multi-chat):** any JSON object with a string `type` field is a typed envelope:
+Clients must send a typed JSON envelope with a string `type` field. Untyped or
+malformed frames receive an `error` event and are not dispatched:
 
 | `type` | Fields | Effect |
 |--------|--------|--------|
@@ -339,10 +328,6 @@ client                                server
 - `chat_id` format: `^[A-Za-z0-9_:-]{1,64}$`. Non-matching values return `error`.
 - `message` auto-attaches on first use — no separate `attach` is required for chats the server minted (`new_chat`) on the same connection.
 - Errors (invalid envelope, unknown `type`, bad `chat_id`) are soft: the server replies with `{"event":"error","detail":"..."}` and keeps the connection open.
-
-### Backward compatibility
-
-Legacy clients that only send plain text or `{"content": ...}` keep working unchanged: those frames route to the connection's default `chat_id` (the one from `ready`). No config flag is needed.
 
 ### Security boundary
 

@@ -1,8 +1,8 @@
 """Registry for speech-to-text providers.
 
 Provider-specific HTTP adapters live in ``nanobot.providers.transcription``.
-This module is the app-level source of truth for provider names, aliases,
-default models, and adapter class paths.
+This module is the app-level source of truth for provider names, default
+models, and adapter class paths.
 """
 
 from __future__ import annotations
@@ -32,7 +32,6 @@ class TranscriptionProviderSpec:
     name: str
     default_model: str
     adapter: str
-    aliases: tuple[str, ...] = ()
 
     def load_adapter(self) -> type[TranscriptionProviderAdapter]:
         module_name, _, class_name = self.adapter.partition(":")
@@ -62,7 +61,6 @@ TRANSCRIPTION_PROVIDERS: tuple[TranscriptionProviderSpec, ...] = (
         name="xiaomi_mimo",
         default_model="mimo-v2.5-asr",
         adapter="nanobot.providers.transcription:XiaomiMiMoTranscriptionProvider",
-        aliases=("mimo", "xiaomi"),
     ),
     TranscriptionProviderSpec(
         name="stepfun",
@@ -78,12 +76,10 @@ TRANSCRIPTION_PROVIDERS: tuple[TranscriptionProviderSpec, ...] = (
         name="siliconflow",
         default_model="FunAudioLLM/SenseVoiceSmall",
         adapter="nanobot.providers.transcription:OpenAITranscriptionProvider",
-        aliases=("silicon",),
     ),
 )
 
 _BY_NAME = {spec.name: spec for spec in TRANSCRIPTION_PROVIDERS}
-_BY_ALIAS = {alias: spec for spec in TRANSCRIPTION_PROVIDERS for alias in spec.aliases}
 
 
 def transcription_provider_names() -> tuple[str, ...]:
@@ -98,4 +94,4 @@ def resolve_transcription_provider(value: Any) -> TranscriptionProviderSpec | No
     if not isinstance(value, str):
         return None
     name = value.strip().lower()
-    return _BY_NAME.get(name) or _BY_ALIAS.get(name)
+    return _BY_NAME.get(name)

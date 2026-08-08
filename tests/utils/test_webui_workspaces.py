@@ -1,10 +1,11 @@
 import json
 
+import pytest
+
 from nanobot.security.workspace_access import default_workspace_scope
 from nanobot.session.manager import SessionManager
 from nanobot.webui.workspaces import (
     WebUIWorkspaceController,
-    read_webui_default_access_mode,
     read_webui_workspace_state,
     webui_workspace_state_path,
     workspaces_payload,
@@ -105,11 +106,11 @@ def test_workspace_payload_uses_webui_default_access_mode(tmp_path, monkeypatch)
     assert payload["default_scope"]["access_mode"] == "full"
 
 
-def test_legacy_restricted_webui_default_access_mode_maps_to_default(tmp_path, monkeypatch) -> None:
+def test_restricted_is_not_a_valid_webui_default_access_mode(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr("nanobot.webui.workspaces.get_webui_dir", lambda: tmp_path / "webui")
 
-    assert write_webui_default_access_mode("restricted") is False
-    assert read_webui_default_access_mode() == "default"
+    with pytest.raises(ValueError, match="default or full"):
+        write_webui_default_access_mode("restricted")
 
 
 def test_webui_default_access_applies_to_unscoped_old_sessions(tmp_path, monkeypatch) -> None:
@@ -133,7 +134,9 @@ def test_webui_default_access_applies_to_unscoped_old_sessions(tmp_path, monkeyp
     assert new_scope.access_mode == "full"
 
 
-def test_webui_default_access_does_not_override_explicit_session_scope(tmp_path, monkeypatch) -> None:
+def test_webui_default_access_does_not_override_explicit_session_scope(
+    tmp_path, monkeypatch
+) -> None:
     monkeypatch.setattr("nanobot.webui.workspaces.get_webui_dir", lambda: tmp_path / "webui")
     default = tmp_path / "default"
     project = tmp_path / "project"

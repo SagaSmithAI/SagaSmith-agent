@@ -262,7 +262,7 @@ def validate_workspace_scope_payload(
     if not isinstance(raw, dict):
         raise WorkspaceScopeError("workspace_scope must be an object")
 
-    raw_path = raw.get("project_path") or raw.get("path")
+    raw_path = raw.get("project_path")
     if raw_path is None or raw_path == "":
         raw_path = str(Path(default_workspace).expanduser().resolve(strict=False))
     if not isinstance(raw_path, str):
@@ -361,12 +361,12 @@ def current_tool_workspace(
     project_path = (
         scope.project_path
         if scope is not None
-        else Path(default_workspace).expanduser() if default_workspace is not None else None
+        else Path(default_workspace).expanduser()
+        if default_workspace is not None
+        else None
     )
     restrict = (
-        scope.restrict_to_workspace
-        if scope is not None
-        else bool(restrict_to_workspace)
+        scope.restrict_to_workspace if scope is not None else bool(restrict_to_workspace)
     ) or sandbox_restricts_workspace
     return ToolWorkspace(
         project_path=project_path,
@@ -392,9 +392,7 @@ def _env_system_provider(environ: dict[str, str] | None = None) -> str | None:
     env = environ if environ is not None else os.environ
     explicit_provider = env.get("NANOBOT_WORKSPACE_SANDBOX_PROVIDER")
     enforced = env.get("NANOBOT_WORKSPACE_SANDBOX_ENFORCED")
-    compatibility = env.get("NANOBOT_SANDBOX_ENFORCED")
-
-    marker = enforced if enforced is not None else compatibility
+    marker = enforced
     if marker is None:
         return None
 
@@ -421,10 +419,6 @@ def _provider_label(provider: str) -> str:
 
 def _normalize_access_mode(value: str) -> WorkspaceAccessMode:
     mode = value.strip().lower().replace("_", "-")
-    if mode == "restrict":
-        mode = "restricted"
-    if mode == "full-access":
-        mode = "full"
     if mode not in _ACCESS_MODES:
         raise WorkspaceScopeError("access_mode must be restricted or full")
     return mode  # type: ignore[return-value]

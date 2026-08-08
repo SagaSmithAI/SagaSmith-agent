@@ -1,4 +1,4 @@
-"""Tests for channel plugin discovery, merging, and config compatibility."""
+"""Tests for channel plugin discovery, merging, and current config contracts."""
 
 from __future__ import annotations
 
@@ -16,17 +16,15 @@ import pytest
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import (
-    ProgressEvent,
     StreamDeltaEvent,
     StreamedResponseEvent,
-    StreamEndEvent,
     outbound_message_for_event,
 )
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.channels.manager import ChannelManager
 from nanobot.config.loader import save_config
-from nanobot.config.schema import ChannelsConfig, Config
+from nanobot.config.schema import ChannelsConfig, Config, TranscriptionConfig
 from nanobot.providers.transcription import GroqTranscriptionProvider as _GroqProvider
 from nanobot.providers.transcription import OpenAITranscriptionProvider as _OpenAIProvider
 from nanobot.utils.restart import RestartNotice
@@ -34,6 +32,7 @@ from nanobot.utils.restart import RestartNotice
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 class _FakePlugin(BaseChannel):
     name = "fakeplugin"
@@ -59,6 +58,7 @@ class _FakePlugin(BaseChannel):
 
 class _FakeTelegram(BaseChannel):
     """Plugin that tries to shadow built-in telegram."""
+
     name = "telegram"
     display_name = "Fake Telegram"
 
@@ -90,7 +90,9 @@ def _stub_optional_feature_cli(
     monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: channels or [])
     monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
     if channel_cls is not None:
-        monkeypatch.setattr("nanobot.channels.registry.load_channel_class", lambda _name: channel_cls)
+        monkeypatch.setattr(
+            "nanobot.channels.registry.load_channel_class", lambda _name: channel_cls
+        )
     monkeypatch.setattr("nanobot.optional_features.optional_dependency_groups", lambda: extras)
     monkeypatch.setattr("nanobot.optional_features.extra_installed", lambda _name, _deps: installed)
     if commands is not None:
@@ -104,10 +106,13 @@ def _stub_optional_feature_cli(
 # ChannelsConfig extra="allow"
 # ---------------------------------------------------------------------------
 
+
 def test_channels_config_accepts_unknown_keys():
-    cfg = ChannelsConfig.model_validate({
+    cfg = ChannelsConfig.model_validate(
+        {
         "myplugin": {"enabled": True, "token": "abc"},
-    })
+        }
+    )
     extra = cfg.model_extra
     assert extra is not None
     assert extra["myplugin"]["enabled"] is True
@@ -188,6 +193,7 @@ def test_discover_plugins_handles_load_error():
 # discover_all — merge & priority
 # ---------------------------------------------------------------------------
 
+
 def test_discover_all_includes_builtins():
     from nanobot.channels.registry import discover_all, discover_channel_names
 
@@ -235,7 +241,9 @@ def test_discover_enabled_warns_for_enabled_builtin_import_errors():
     from nanobot.channels.registry import discover_enabled
 
     with (
-        patch("nanobot.channels.registry.load_channel_class", side_effect=ImportError("missing sdk")),
+        patch(
+            "nanobot.channels.registry.load_channel_class", side_effect=ImportError("missing sdk")
+        ),
         patch(_EP_TARGET, return_value=[]),
         patch("nanobot.channels.registry.logger.warning") as warning,
     ):
@@ -280,15 +288,18 @@ def test_discover_all_builtin_name_shadows_plugin_when_dependency_missing():
 # Manager _init_channels with dict config (plugin scenario)
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_manager_loads_plugin_from_dict_config():
     """ChannelManager should instantiate a plugin channel from a raw dict config."""
     from nanobot.channels.manager import ChannelManager
 
     fake_config = SimpleNamespace(
-        channels=ChannelsConfig.model_validate({
+        channels=ChannelsConfig.model_validate(
+            {
             "fakeplugin": {"enabled": True, "allowFrom": ["*"]},
-        }),
+            }
+        ),
         providers=SimpleNamespace(groq=SimpleNamespace(api_key="", api_base="")),
     )
 
@@ -379,26 +390,30 @@ async def test_base_channel_reads_current_transcription_config_each_call(
 
     class _StubOpenAI:
         def __init__(self, api_key=None, api_base=None, language=None, model=None):
-            calls.append({
+            calls.append(
+                {
                 "provider": "openai",
                 "api_key": api_key,
                 "api_base": api_base,
                 "language": language,
                 "model": model,
-            })
+                }
+            )
 
         async def transcribe(self, file_path):
             return "openai-ok"
 
     class _StubGroq:
         def __init__(self, api_key=None, api_base=None, language=None, model=None):
-            calls.append({
+            calls.append(
+                {
                 "provider": "groq",
                 "api_key": api_key,
                 "api_base": api_base,
                 "language": language,
                 "model": model,
-            })
+                }
+            )
 
         async def transcribe(self, file_path):
             return "groq-ok"
@@ -484,6 +499,7 @@ class _StubResponse:
 
 def _stub_async_client(captured: dict[str, object]):
     """Return an httpx.AsyncClient stub that records POST calls into *captured*."""
+
     class _AsyncClient:
         async def __aenter__(self):
             return self
@@ -510,7 +526,10 @@ async def test_transcription_provider_includes_language(tmp_path, provider_cls, 
     audio.write_bytes(b"audio")
     captured: dict[str, object] = {}
 
-    with patch("nanobot.providers.transcription.httpx.AsyncClient", return_value=_stub_async_client(captured)):
+    with patch(
+        "nanobot.providers.transcription.httpx.AsyncClient",
+        return_value=_stub_async_client(captured),
+    ):
         provider = provider_cls(api_key="k", language=language)
         result = await provider.transcribe(audio)
 
@@ -530,7 +549,10 @@ async def test_transcription_provider_omits_language_when_none(tmp_path, provide
     audio.write_bytes(b"audio")
     captured: dict[str, object] = {}
 
-    with patch("nanobot.providers.transcription.httpx.AsyncClient", return_value=_stub_async_client(captured)):
+    with patch(
+        "nanobot.providers.transcription.httpx.AsyncClient",
+        return_value=_stub_async_client(captured),
+    ):
         provider = provider_cls(api_key="k")
         result = await provider.transcribe(audio)
 
@@ -832,9 +854,10 @@ def test_plugins_disable_rejects_non_channel_and_allows_websocket(monkeypatch, t
     assert "Feature 'bedrock' cannot be disabled" in non_channel.output
     assert websocket.exit_code == 0
     assert "Disabled channel 'websocket'" in websocket.output
-    assert json.loads(config_path.read_text(encoding="utf-8"))["channels"]["websocket"][
-        "enabled"
-    ] is False
+    assert (
+        json.loads(config_path.read_text(encoding="utf-8"))["channels"]["websocket"]["enabled"]
+        is False
+    )
 
 
 def test_enable_optional_feature_blocks_install_when_disallowed(monkeypatch, tmp_path):
@@ -970,7 +993,9 @@ def test_disable_optional_feature_writes_channel_disabled(monkeypatch, tmp_path)
         json.dumps({"channels": {"matrix": {"enabled": True, "homeserver": "keep"}}}),
         encoding="utf-8",
     )
-    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: ["matrix", "websocket"])
+    monkeypatch.setattr(
+        "nanobot.channels.registry.discover_channel_names", lambda: ["matrix", "websocket"]
+    )
     monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
     monkeypatch.setattr("nanobot.optional_features.optional_dependency_groups", lambda: {})
 
@@ -1049,7 +1074,9 @@ def test_install_extra_logs_command_and_output(monkeypatch):
 
     assert result.ok is True
     assert any("Installing optional feature 'weixin':" in record for record in records)
-    assert any("Optional feature 'weixin' install exited with code 0" in record for record in records)
+    assert any(
+        "Optional feature 'weixin' install exited with code 0" in record for record in records
+    )
     assert any("install ok" in record for record in records)
 
 
@@ -1210,9 +1237,11 @@ def test_requirement_installed_validates_requested_extras(monkeypatch):
 @pytest.mark.asyncio
 async def test_manager_skips_disabled_plugin():
     fake_config = SimpleNamespace(
-        channels=ChannelsConfig.model_validate({
+        channels=ChannelsConfig.model_validate(
+            {
             "fakeplugin": {"enabled": False},
-        }),
+            }
+        ),
         providers=SimpleNamespace(groq=SimpleNamespace(api_key="")),
     )
 
@@ -1232,9 +1261,11 @@ async def test_manager_skips_disabled_plugin():
 # Built-in channel default_config() and dict->Pydantic conversion
 # ---------------------------------------------------------------------------
 
+
 def test_builtin_channel_default_config():
     """Built-in channels expose default_config() returning a dict with 'enabled': False."""
     from nanobot.channels.dingtalk import DingTalkChannel
+
     cfg = DingTalkChannel.default_config()
     assert isinstance(cfg, dict)
     assert cfg["enabled"] is False
@@ -1244,6 +1275,7 @@ def test_builtin_channel_default_config():
 def test_builtin_channel_init_from_dict():
     """Built-in channels accept a raw dict and convert to Pydantic internally."""
     from nanobot.channels.dingtalk import DingTalkChannel
+
     bus = MessageBus()
     ch = DingTalkChannel({"enabled": False, "clientId": "test-id", "allowFrom": ["*"]}, bus)
     assert ch.config.client_id == "test-id"
@@ -1253,7 +1285,7 @@ def test_builtin_channel_init_from_dict():
 def test_channels_config_send_max_retries_default():
     """ChannelsConfig should have send_max_retries with default value of 3."""
     cfg = ChannelsConfig()
-    assert hasattr(cfg, 'send_max_retries')
+    assert hasattr(cfg, "send_max_retries")
     assert cfg.send_max_retries == 3
 
 
@@ -1281,27 +1313,28 @@ def test_channels_config_send_max_retries_upper_bound():
         ChannelsConfig(send_max_retries=11)
 
 
-def test_channels_config_transcription_language_pattern():
-    """transcription_language must match ISO-639 format (2-3 lowercase letters) or be None."""
+def test_transcription_config_language_pattern():
+    """Transcription language must match ISO-639 format or be None."""
     from pydantic import ValidationError
 
     # Valid values
-    assert ChannelsConfig(transcription_language="en").transcription_language == "en"
-    assert ChannelsConfig(transcription_language="kor").transcription_language == "kor"
-    assert ChannelsConfig(transcription_language=None).transcription_language is None
+    assert TranscriptionConfig(language="en").language == "en"
+    assert TranscriptionConfig(language="kor").language == "kor"
+    assert TranscriptionConfig(language=None).language is None
 
     # Invalid values
     with pytest.raises(ValidationError):
-        ChannelsConfig(transcription_language="EN")       # uppercase
+        TranscriptionConfig(language="EN")  # uppercase
     with pytest.raises(ValidationError):
-        ChannelsConfig(transcription_language="english")   # full word
+        TranscriptionConfig(language="english")  # full word
     with pytest.raises(ValidationError):
-        ChannelsConfig(transcription_language="en-US")     # BCP 47 tag
+        TranscriptionConfig(language="en-US")  # BCP 47 tag
 
 
 # ---------------------------------------------------------------------------
 # _send_with_retry
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_send_with_retry_succeeds_first_try():
@@ -1473,134 +1506,6 @@ async def test_send_with_retry_calls_send_delta():
 
 
 @pytest.mark.asyncio
-async def test_send_with_retry_supports_legacy_stream_delta_signature():
-    """External plugins with the old send_delta signature should keep working."""
-    calls: list[tuple[str, str, dict]] = []
-
-    class _LegacyStreamingChannel(BaseChannel):
-        name = "legacy_streaming"
-        display_name = "Legacy Streaming"
-
-        async def start(self) -> None:
-            pass
-
-        async def stop(self) -> None:
-            pass
-
-        async def send(self, msg: OutboundMessage) -> None:
-            pass
-
-        async def send_delta(
-            self,
-            chat_id: str,
-            delta: str,
-            metadata: dict | None = None,
-        ) -> None:
-            calls.append((chat_id, delta, dict(metadata or {})))
-
-    fake_config = SimpleNamespace(
-        channels=ChannelsConfig(send_max_retries=3),
-        providers=SimpleNamespace(groq=SimpleNamespace(api_key="")),
-    )
-    mgr = ChannelManager.__new__(ChannelManager)
-    mgr.config = fake_config
-    mgr.bus = MessageBus()
-    mgr.channels = {"legacy_streaming": _LegacyStreamingChannel(fake_config, mgr.bus)}
-    mgr._dispatch_task = None
-
-    await mgr._send_with_retry(
-        mgr.channels["legacy_streaming"],
-        outbound_message_for_event(
-            channel="legacy_streaming",
-            chat_id="123",
-            event=StreamDeltaEvent(content="hello", stream_id="s1"),
-        ),
-    )
-    await mgr._send_with_retry(
-        mgr.channels["legacy_streaming"],
-        outbound_message_for_event(
-            channel="legacy_streaming",
-            chat_id="123",
-            event=StreamEndEvent(content="", stream_id="s1", resuming=True),
-        ),
-    )
-
-    assert calls == [
-        ("123", "hello", {"_stream_id": "s1", "_stream_delta": True}),
-        ("123", "", {"_stream_id": "s1", "_stream_end": True}),
-    ]
-
-
-@pytest.mark.asyncio
-async def test_send_with_retry_supports_legacy_reasoning_signature():
-    """External plugins with the old reasoning hook signature should keep working."""
-    deltas: list[tuple[str, str, dict]] = []
-    ends: list[tuple[str, dict]] = []
-
-    class _LegacyReasoningChannel(BaseChannel):
-        name = "legacy_reasoning"
-        display_name = "Legacy Reasoning"
-
-        async def start(self) -> None:
-            pass
-
-        async def stop(self) -> None:
-            pass
-
-        async def send(self, msg: OutboundMessage) -> None:
-            pass
-
-        async def send_reasoning_delta(
-            self,
-            chat_id: str,
-            delta: str,
-            metadata: dict | None = None,
-        ) -> None:
-            deltas.append((chat_id, delta, dict(metadata or {})))
-
-        async def send_reasoning_end(
-            self,
-            chat_id: str,
-            metadata: dict | None = None,
-        ) -> None:
-            ends.append((chat_id, dict(metadata or {})))
-
-    fake_config = SimpleNamespace(
-        channels=ChannelsConfig(send_max_retries=3),
-        providers=SimpleNamespace(groq=SimpleNamespace(api_key="")),
-    )
-    mgr = ChannelManager.__new__(ChannelManager)
-    mgr.config = fake_config
-    mgr.bus = MessageBus()
-    mgr.channels = {"legacy_reasoning": _LegacyReasoningChannel(fake_config, mgr.bus)}
-    mgr._dispatch_task = None
-
-    await mgr._send_with_retry(
-        mgr.channels["legacy_reasoning"],
-        outbound_message_for_event(
-            channel="legacy_reasoning",
-            chat_id="123",
-            event=ProgressEvent(content="thinking", reasoning_delta=True, stream_id="r1"),
-        ),
-    )
-    await mgr._send_with_retry(
-        mgr.channels["legacy_reasoning"],
-        outbound_message_for_event(
-            channel="legacy_reasoning",
-            chat_id="123",
-            event=ProgressEvent(reasoning_end=True, stream_id="r1"),
-        ),
-    )
-
-    assert deltas == [
-        ("123", "thinking", {"_reasoning_delta": True, "_stream_id": "r1"}),
-    ]
-    assert ends == [
-        ("123", {"_reasoning_end": True, "_stream_id": "r1"}),
-    ]
-
-
-@pytest.mark.asyncio
 async def test_send_with_retry_skips_send_when_streamed():
     """_send_with_retry should not call send for streamed response events."""
     send_called = False
@@ -1703,6 +1608,7 @@ def test_outbound_duplicate_suppression_is_scoped_to_origin_message() -> None:
 @pytest.mark.asyncio
 async def test_send_with_retry_propagates_cancelled_error():
     """_send_with_retry should re-raise CancelledError for graceful shutdown."""
+
     class _CancellingChannel(BaseChannel):
         name = "cancelling"
         display_name = "Cancelling"
@@ -1782,8 +1688,10 @@ async def test_send_with_retry_propagates_cancelled_error_during_sleep():
 # ChannelManager - lifecycle and getters
 # ---------------------------------------------------------------------------
 
+
 class _ChannelWithAllowFrom(BaseChannel):
     """Channel with configurable allow_from."""
+
     name = "withallow"
     display_name = "With Allow"
 
@@ -1806,6 +1714,7 @@ class _ChannelWithAllowFrom(BaseChannel):
 
 class _StartableChannel(BaseChannel):
     """Channel that tracks start/stop calls."""
+
     name = "startable"
     display_name = "Startable"
 
@@ -2009,6 +1918,7 @@ async def test_stop_all_cancels_dispatcher_and_stops_channels():
 @pytest.mark.asyncio
 async def test_start_channel_logs_error_on_failure():
     """_start_channel should log error when channel start fails."""
+
     class _FailingChannel(BaseChannel):
         name = "failing"
         display_name = "Failing"
@@ -2044,6 +1954,7 @@ async def test_start_channel_logs_error_on_failure():
 @pytest.mark.asyncio
 async def test_stop_all_handles_channel_exception():
     """stop_all should handle exceptions when stopping channels gracefully."""
+
     class _StopFailingChannel(BaseChannel):
         name = "stopfailing"
         display_name = "Stop Failing"

@@ -529,7 +529,6 @@ export interface SettingsPayload {
     };
     ssrf_whitelist_count: number;
     webui_allow_local_service_access: boolean;
-    allow_local_preview_access?: boolean;
     webui_default_access_mode: WebuiDefaultAccessMode;
     private_service_protection_enabled: boolean;
     mcp_server_count: number;

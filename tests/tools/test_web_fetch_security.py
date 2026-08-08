@@ -11,8 +11,7 @@ import httpx
 import pytest
 
 from nanobot.agent.tools import web as web_module
-from nanobot.agent.tools.web import WebFetchTool, _get_with_safe_redirects
-from nanobot.config.schema import WebFetchConfig
+from nanobot.agent.tools.web import WebFetchConfig, WebFetchTool, _get_with_safe_redirects
 from nanobot.security.network import PinnedDNSAsyncTransport
 from nanobot.security.workspace_access import (
     bind_workspace_scope,

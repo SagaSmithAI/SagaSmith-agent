@@ -30,11 +30,10 @@ ISOLATED_EVALUATION_KINDS = frozenset(
         "faction_turn",
         "source_interpretation",
         "bounded_ruling",
+        "npc_turn",
     }
 )
-_CLAIM_POSTURES = frozenset(
-    {"supported", "inference", "uncertain", "opinion", "nonfactual"}
-)
+_CLAIM_POSTURES = frozenset({"supported", "inference", "uncertain", "opinion", "nonfactual"})
 _RESOLUTION_KINDS = frozenset(
     {"ability_check", "contest", "saving_throw", "attack", "rules_engine", "dm_adjudication"}
 )
@@ -172,9 +171,7 @@ def validate_bounded_evaluation_bundle(
     if type(bundle.get("schema_version")) is not int or bundle["schema_version"] != 1:
         raise IsolatedEvaluationError(f"{expected_kind}.bundle.schema_version must be 1")
     if bundle.get("purpose") != expected_kind:
-        raise IsolatedEvaluationError(
-            f"{expected_kind}.bundle.purpose must be {expected_kind!r}"
-        )
+        raise IsolatedEvaluationError(f"{expected_kind}.bundle.purpose must be {expected_kind!r}")
     bundle_id = _text(
         bundle.get("bundle_id"), f"{expected_kind}.bundle.bundle_id", required=True, maximum=100
     )
@@ -186,9 +183,7 @@ def validate_bounded_evaluation_bundle(
         "host_context_binding",
     ):
         if field not in authority:
-            raise IsolatedEvaluationError(
-                f"{expected_kind}.bundle.authority.{field} is required"
-            )
+            raise IsolatedEvaluationError(f"{expected_kind}.bundle.authority.{field} is required")
     _text(
         authority.get("campaign_id"),
         "authority.campaign_id",
@@ -233,8 +228,7 @@ def validate_bounded_evaluation_bundle(
     )
     if unknown_claim_refs := sorted(set(allowed_claim_basis_refs) - set(allowed_basis_refs)):
         raise IsolatedEvaluationError(
-            "claim basis refs must be a subset of allowed basis refs: "
-            f"{unknown_claim_refs}"
+            f"claim basis refs must be a subset of allowed basis refs: {unknown_claim_refs}"
         )
     _string_list(
         constraints.get("decision_only_basis_refs"),
@@ -253,15 +247,9 @@ def validate_bounded_evaluation_bundle(
             f"{expected_kind} receipt does not match its authenticated principal"
         )
     if set(receipt.get("allowed_basis_refs") or []) != set(allowed_basis_refs):
-        raise IsolatedEvaluationError(
-            f"{expected_kind} receipt basis refs do not match its bundle"
-        )
-    if set(receipt.get("allowed_claim_basis_refs") or []) != set(
-        allowed_claim_basis_refs
-    ):
-        raise IsolatedEvaluationError(
-            f"{expected_kind} receipt claim refs do not match its bundle"
-        )
+        raise IsolatedEvaluationError(f"{expected_kind} receipt basis refs do not match its bundle")
+    if set(receipt.get("allowed_claim_basis_refs") or []) != set(allowed_claim_basis_refs):
+        raise IsolatedEvaluationError(f"{expected_kind} receipt claim refs do not match its bundle")
     if set(receipt.get("allowed_target_refs") or []) != set(allowed_target_refs):
         raise IsolatedEvaluationError(
             f"{expected_kind} receipt target refs do not match its bundle"
@@ -277,9 +265,7 @@ def validate_bounded_evaluation_bundle(
     _text(receipt.get("signature"), "bundle_receipt.signature", required=True, maximum=500)
     unsigned = {key: item for key, item in bundle.items() if key != "bundle_receipt"}
     if receipt.get("bundle_digest") != _canonical_digest(unsigned):
-        raise IsolatedEvaluationError(
-            f"{expected_kind} bundle digest does not match its receipt"
-        )
+        raise IsolatedEvaluationError(f"{expected_kind} bundle digest does not match its receipt")
     if len(json.dumps(bundle, ensure_ascii=False, separators=(",", ":"))) > 100_000:
         raise IsolatedEvaluationError(f"{expected_kind} bundle exceeds 100000 characters")
     return deepcopy(bundle)
@@ -303,7 +289,10 @@ def _normalize_claims(value: Any, field: str) -> list[dict[str, Any]]:
         result.append(
             {
                 "statement": _text(
-                    item.get("statement"), f"{field}[{index}].statement", required=True, maximum=2_000
+                    item.get("statement"),
+                    f"{field}[{index}].statement",
+                    required=True,
+                    maximum=2_000,
                 ),
                 "basis_refs": basis_refs,
                 "posture": posture,
@@ -385,9 +374,7 @@ def _normalize_actor_turn(value: Any) -> dict[str, Any]:
             "target_ref": _text(
                 action.get("target_ref"), "proposed_action.target_ref", maximum=300
             ),
-            "summary": _text(
-                action.get("summary"), "proposed_action.summary", maximum=1_000
-            ),
+            "summary": _text(action.get("summary"), "proposed_action.summary", maximum=1_000),
         },
         "claims": _normalize_claims(data.get("claims"), "claims"),
         "resolution_requests": requests,
@@ -439,10 +426,21 @@ def _normalize_faction_turn(value: Any) -> dict[str, Any]:
         _strict(item, f"proposed_actions[{index}]", {"kind", "target_ref", "summary", "basis_refs"})
         normalized_actions.append(
             {
-                "kind": _text(item.get("kind"), f"proposed_actions[{index}].kind", required=True, maximum=100),
-                "target_ref": _text(item.get("target_ref"), f"proposed_actions[{index}].target_ref", maximum=300),
-                "summary": _text(item.get("summary"), f"proposed_actions[{index}].summary", required=True, maximum=1_000),
-                "basis_refs": _string_list(item.get("basis_refs"), f"proposed_actions[{index}].basis_refs"),
+                "kind": _text(
+                    item.get("kind"), f"proposed_actions[{index}].kind", required=True, maximum=100
+                ),
+                "target_ref": _text(
+                    item.get("target_ref"), f"proposed_actions[{index}].target_ref", maximum=300
+                ),
+                "summary": _text(
+                    item.get("summary"),
+                    f"proposed_actions[{index}].summary",
+                    required=True,
+                    maximum=1_000,
+                ),
+                "basis_refs": _string_list(
+                    item.get("basis_refs"), f"proposed_actions[{index}].basis_refs"
+                ),
             }
         )
     return {
@@ -453,7 +451,9 @@ def _normalize_faction_turn(value: Any) -> dict[str, Any]:
         "intent": _text(data.get("intent"), "intent", required=True, maximum=1_000),
         "proposed_actions": normalized_actions,
         "claims": _normalize_claims(data.get("claims"), "claims"),
-        "resolution_requests": _normalize_resolution_requests(data.get("resolution_requests"), "resolution_requests"),
+        "resolution_requests": _normalize_resolution_requests(
+            data.get("resolution_requests"), "resolution_requests"
+        ),
         "decision_summary": _text(data.get("decision_summary"), "decision_summary", maximum=500),
     }
 
@@ -485,7 +485,9 @@ def _normalize_source_interpretation(value: Any) -> dict[str, Any]:
         "bundle_id": _text(data.get("bundle_id"), "bundle_id", required=True, maximum=100),
         "purpose": kind,
         "question": _text(data.get("question"), "question", required=True, maximum=2_000),
-        "interpretation": _text(data.get("interpretation"), "interpretation", required=True, maximum=6_000),
+        "interpretation": _text(
+            data.get("interpretation"), "interpretation", required=True, maximum=6_000
+        ),
         "claims": claims,
         "ambiguities": ambiguities,
         "requires_dm_review": requires_dm_review,
@@ -511,7 +513,9 @@ def _normalize_bounded_ruling(value: Any) -> dict[str, Any]:
         "purpose": kind,
         "ruling": _text(data.get("ruling"), "ruling", required=True, maximum=4_000),
         "claims": _normalize_claims(data.get("claims"), "claims"),
-        "engine_requests": _normalize_resolution_requests(data.get("engine_requests"), "engine_requests"),
+        "engine_requests": _normalize_resolution_requests(
+            data.get("engine_requests"), "engine_requests"
+        ),
         "unresolved": _string_list(data.get("unresolved"), "unresolved", maximum=1_000),
         "decision_summary": _text(data.get("decision_summary"), "decision_summary", maximum=500),
     }
@@ -526,13 +530,10 @@ def _cross_validate_common(proposal: dict[str, Any], bundle: dict[str, Any]) -> 
     for claim in proposal.get("claims") or []:
         claim_basis.update(str(ref) for ref in claim.get("basis_refs") or [])
     allowed_claim_basis = {
-        str(item)
-        for item in constraints.get("allowed_claim_basis_refs", allowed_basis) or []
+        str(item) for item in constraints.get("allowed_claim_basis_refs", allowed_basis) or []
     }
     if unknown := sorted(claim_basis - allowed_claim_basis):
-        raise IsolatedEvaluationError(
-            f"proposal cites decision-only refs as claims: {unknown}"
-        )
+        raise IsolatedEvaluationError(f"proposal cites decision-only refs as claims: {unknown}")
     cited_basis = set(claim_basis)
     for action in proposal.get("proposed_actions") or []:
         cited_basis.update(str(ref) for ref in action.get("basis_refs") or [])
@@ -748,7 +749,12 @@ class IsolatedEvaluationRunner:
         timeout_s: float = 120.0,
         max_tokens: int = 4_096,
     ) -> None:
-        self.contracts = dict(contracts or DEFAULT_ISOLATED_CONTRACTS)
+        if contracts is None:
+            from nanobot.agent.npc_turn import npc_turn_contract
+
+            self.contracts = {**DEFAULT_ISOLATED_CONTRACTS, "npc_turn": npc_turn_contract()}
+        else:
+            self.contracts = dict(contracts)
         self.timeout_s = timeout_s
         self.max_tokens = max_tokens
 
@@ -843,7 +849,9 @@ class IsolatedEvaluationRunner:
         _strict(verdict, "isolated_evaluation.guardian", {"approved", "issues"})
         if not isinstance(verdict.get("approved"), bool):
             raise IsolatedEvaluationError("isolated_evaluation.guardian.approved must be boolean")
-        issues = _string_list(verdict.get("issues"), "isolated_evaluation.guardian.issues", maximum=500)
+        issues = _string_list(
+            verdict.get("issues"), "isolated_evaluation.guardian.issues", maximum=500
+        )
         return [] if verdict["approved"] else issues or ["guardian rejected the proposal"]
 
     async def run(

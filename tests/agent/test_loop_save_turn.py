@@ -17,7 +17,7 @@ from nanobot.bus.outbound_events import (
     TurnEndEvent,
 )
 from nanobot.bus.queue import MessageBus
-from nanobot.cron.session_turns import CRON_HISTORY_META, CRON_TRIGGER_META
+from nanobot.cron.session_turns import CRON_TRIGGER_META
 from nanobot.providers.base import LLMResponse
 from nanobot.providers.factory import ProviderSnapshot
 from nanobot.runtime_context import (
@@ -138,7 +138,6 @@ def test_persist_cron_turn_uses_distinct_history_marker(tmp_path: Path) -> None:
         "cron_run_id": "job-1:1",
         "cron_prompt_ref": prompt_ref,
     }
-    assert message[CRON_HISTORY_META] is True
     assert CRON_TRIGGER_META not in message
     assert message["cron_job_id"] == "job-1"
     assert message["cron_job_name"] == "Daily check"
@@ -292,7 +291,7 @@ async def test_generate_webui_title_ignores_cron_internal_turns(tmp_path: Path) 
     session.add_message(
         "user",
         "Scheduled cron job triggered: 30s-test\n\nInternal reminder prompt",
-        **{CRON_HISTORY_META: True},
+        **{AUTOMATION_HISTORY_META: {"kind": "cron"}},
     )
     session.add_message("assistant", "提醒已经到期。")
     loop.sessions.save(session)

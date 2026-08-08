@@ -17,7 +17,6 @@ from nanobot.runtime_context import RuntimeContextBlock, wrap_runtime_context_li
 from nanobot.session.goal_state import (
     GOAL_STATE_KEY,
     MAX_GOAL_OBJECTIVE_CHARS,
-    discard_legacy_goal_state_key,
     explicit_goal_requested,
     goal_state_raw,
     goal_state_runtime_lines,
@@ -79,7 +78,6 @@ class _GoalToolsMixin:
     ) -> None:
         previous_metadata = deepcopy(sess.metadata)
         sess.metadata[GOAL_STATE_KEY] = blob
-        discard_legacy_goal_state_key(sess.metadata)
         if reset_continuation:
             reset_goal_continuation_rounds(sess.metadata)
         try:

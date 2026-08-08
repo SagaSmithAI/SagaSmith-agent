@@ -109,6 +109,7 @@ def _decode_api_key(raw_key: str) -> str | None:
 def _default_model_name_from_config() -> str | None:
     try:
         from nanobot.config.loader import load_config
+
         model = load_config().resolve_preset().model.strip()
         return model or None
     except Exception as e:
@@ -329,9 +330,7 @@ class GatewayHTTPHandler:
             )
         token = self.tokens.issue_token(self.config.token_ttl_s)
         api_token = (
-            self.tokens.issue_api_token(self.config.token_ttl_s)
-            if api_token_allowed
-            else None
+            self.tokens.issue_api_token(self.config.token_ttl_s) if api_token_allowed else None
         )
 
         ws_url = self._bootstrap_ws_url(request)
@@ -445,12 +444,6 @@ class GatewayHTTPHandler:
         if not _is_websocket_channel_session_key(decoded_key):
             return _http_error(404, "session not found")
         scope = self.workspaces.scope_for_session_key(decoded_key)
-        session_messages: list[dict[str, Any]] | None = None
-        if self.session_manager is not None:
-            session_data = self.session_manager.read_session_file(decoded_key)
-            raw_messages = session_data.get("messages") if isinstance(session_data, dict) else None
-            if isinstance(raw_messages, list):
-                session_messages = [m for m in raw_messages if isinstance(m, dict)]
         query = _parse_query(request.path)
         raw_limit = _query_first(query, "limit")
         limit: int | None = None
@@ -471,7 +464,6 @@ class GatewayHTTPHandler:
                 text,
                 workspace_path=scope.project_path,
             ),
-            session_messages=session_messages,
             limit=limit,
             direction=direction,
             before=before,
@@ -981,9 +973,9 @@ def _schedule_matches_job(schedule: CronSchedule, job: CronJob) -> bool:
     if schedule.kind == "every":
         return schedule.every_ms == current.every_ms
     if schedule.kind == "cron":
-        return (schedule.expr or "") == (current.expr or "") and (
-            schedule.tz or None
-        ) == (current.tz or None)
+        return (schedule.expr or "") == (current.expr or "") and (schedule.tz or None) == (
+            current.tz or None
+        )
     return False
 
 

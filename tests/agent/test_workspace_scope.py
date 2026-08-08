@@ -10,12 +10,16 @@ import pytest
 from nanobot.agent.tools.cli_apps import CliAppsTool
 from nanobot.agent.tools.context import RequestContext, request_context
 from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool
-from nanobot.agent.tools.image_generation import ImageGenerationError, ImageGenerationTool
+from nanobot.agent.tools.image_generation import (
+    ImageGenerationError,
+    ImageGenerationTool,
+    ImageGenerationToolConfig,
+)
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.apps.cli.service import CliAppManager, CliAppsRuntimeConfig
-from nanobot.config.schema import ImageGenerationToolConfig, ProviderConfig
+from nanobot.config.schema import ProviderConfig
 from nanobot.security.workspace_access import (
     WORKSPACE_SCOPE_METADATA_KEY,
     WorkspaceScopeError,
@@ -34,7 +38,7 @@ PNG_BYTES = (
 )
 
 
-def test_workspace_scope_defaults_match_legacy_config(tmp_path: Path) -> None:
+def test_workspace_scope_defaults_follow_restrict_to_workspace_setting(tmp_path: Path) -> None:
     unrestricted = default_workspace_scope(tmp_path, restrict_to_workspace=False)
     restricted = default_workspace_scope(tmp_path, restrict_to_workspace=True)
 
@@ -375,11 +379,13 @@ async def test_spawn_tool_forwards_current_workspace_scope(tmp_path: Path) -> No
     tool = SpawnTool(manager)  # type: ignore[arg-type]
     token = bind_workspace_scope(scope)
     try:
-        with request_context(RequestContext(
+        with request_context(
+            RequestContext(
             channel="test",
             chat_id="chat",
             runtime=MagicMock(),
-        )):
+            )
+        ):
             result = await tool.execute(task="inspect")
     finally:
         reset_workspace_scope(token)

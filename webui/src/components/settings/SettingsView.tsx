@@ -476,10 +476,7 @@ function transcriptionFormFromPayload(payload: SettingsPayload): TranscriptionSe
 
 function networkSafetyFormFromPayload(payload: SettingsPayload): NetworkSafetySettingsUpdate {
   return {
-    webuiAllowLocalServiceAccess:
-      payload.advanced.webui_allow_local_service_access ??
-      payload.advanced.allow_local_preview_access ??
-      true,
+    webuiAllowLocalServiceAccess: payload.advanced.webui_allow_local_service_access,
     webuiDefaultAccessMode: visibleWebuiDefaultAccessMode(
       payload.advanced.webui_default_access_mode,
     ),
@@ -883,8 +880,7 @@ export function SettingsView({
 
   const networkSafetyDirty = useMemo(() => {
     if (!settings) return false;
-    const currentLocalServiceAccess =
-      settings.advanced.webui_allow_local_service_access ?? settings.advanced.allow_local_preview_access ?? true;
+    const currentLocalServiceAccess = settings.advanced.webui_allow_local_service_access;
     const currentDefaultAccess = visibleWebuiDefaultAccessMode(settings.advanced.webui_default_access_mode);
     return (
       networkSafetyForm.webuiAllowLocalServiceAccess !== currentLocalServiceAccess ||

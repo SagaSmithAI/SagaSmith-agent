@@ -16,7 +16,6 @@ class AutomationTurnSpec:
 
     kind: str
     trigger_meta_key: str
-    legacy_history_meta_key: str | None = None
     history_fields: Mapping[str, str] = field(default_factory=dict)
     text_builder: Callable[[Mapping[str, Any]], str | None] | None = None
 
@@ -41,8 +40,6 @@ def automation_history_overrides_for_spec(
 
     details: dict[str, Any] = {"kind": spec.kind}
     extra: dict[str, Any] = {AUTOMATION_HISTORY_META: details}
-    if spec.legacy_history_meta_key:
-        extra[spec.legacy_history_meta_key] = True
     for history_key, trigger_key in spec.history_fields.items():
         value = trigger.get(trigger_key)
         extra[history_key] = value
@@ -79,11 +76,7 @@ def is_automation_history_message(message: Mapping[str, Any] | None) -> bool:
     marker = message.get(AUTOMATION_HISTORY_META)
     if marker is True or isinstance(marker, Mapping):
         return True
-    return any(
-        spec.legacy_history_meta_key
-        and message.get(spec.legacy_history_meta_key) is True
-        for spec in _automation_specs()
-    )
+    return False
 
 
 def is_automation_kind(value: Any) -> bool:

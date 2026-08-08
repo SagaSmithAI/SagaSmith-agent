@@ -9,7 +9,6 @@ def test_opencode_config_fields_exist() -> None:
     config = ProvidersConfig()
 
     assert hasattr(config, "opencode")
-    assert hasattr(config, "opencode_zen")
     assert hasattr(config, "opencode_go")
 
 
@@ -24,10 +23,6 @@ def test_opencode_specs_use_openai_compatible_gateways() -> None:
     assert zen.detect_by_base_keyword == "opencode.ai/zen"
     assert zen.default_api_base == "https://opencode.ai/zen/v1"
     assert "opencode" in zen.strip_model_prefixes
-
-    zen_compat = specs["opencode_zen"]
-    assert zen_compat.env_key == "OPENCODE_API_KEY"
-    assert zen_compat.default_api_base == zen.default_api_base
 
     go = specs["opencode_go"]
     assert go.backend == "openai_compat"
@@ -44,9 +39,7 @@ def test_find_by_name_opencode_providers() -> None:
     assert canonical is not None
     assert canonical.name == "opencode"
 
-    zen = find_by_name("opencode_zen")
-    assert zen is not None
-    assert zen.name == "opencode_zen"
+    assert find_by_name("opencode_zen") is None
 
     go = find_by_name("opencode-go")
     assert go is not None
@@ -64,17 +57,6 @@ def test_opencode_forced_providers_use_default_api_base() -> None:
     assert zen_config.get_provider_name() == "opencode"
     assert zen_config.get_api_key() == "opencode-key"
     assert zen_config.get_api_base() == "https://opencode.ai/zen/v1"
-
-    legacy_zen_config = Config.model_validate(
-        {
-            "providers": {"opencodeZen": {"apiKey": "opencode-key"}},
-            "agents": {"defaults": {"provider": "opencode_zen", "model": "opencode/o3"}},
-        }
-    )
-
-    assert legacy_zen_config.get_provider_name() == "opencode_zen"
-    assert legacy_zen_config.get_api_key() == "opencode-key"
-    assert legacy_zen_config.get_api_base() == "https://opencode.ai/zen/v1"
 
     go_config = Config.model_validate(
         {

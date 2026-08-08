@@ -478,10 +478,6 @@ def write_text_atomic(path: Path, content: str) -> None:
             tmp.unlink(missing_ok=True)
 
 
-# Compatibility alias for callers that imported the former private helper.
-_write_text_atomic = write_text_atomic
-
-
 def maybe_persist_tool_result(
     workspace: Path | None,
     session_key: str | None,
@@ -575,9 +571,7 @@ def build_assistant_message(
         msg["tool_calls"] = tool_calls
     if reasoning_content is not None or thinking_blocks:
         msg["reasoning_content"] = (
-            strip_reasoning_tags(reasoning_content)
-            if reasoning_content is not None
-            else ""
+            strip_reasoning_tags(reasoning_content) if reasoning_content is not None else ""
         )
     if thinking_blocks:
         msg["thinking_blocks"] = thinking_blocks

@@ -42,9 +42,7 @@ def test_saves_data_url_with_mime_parameters(tmp_path) -> None:
         ("audio/mpga", ".mpga"),
     ],
 )
-def test_saves_common_audio_with_api_friendly_extension(
-    tmp_path, mime: str, suffix: str
-) -> None:
+def test_saves_common_audio_with_api_friendly_extension(tmp_path, mime: str, suffix: str) -> None:
     result = save_base64_data_url(_data_url(b"voice", mime=mime), tmp_path)
     assert result is not None
     assert result.endswith(suffix)
@@ -88,13 +86,3 @@ def test_saved_file_lives_under_media_dir(tmp_path) -> None:
     result = save_base64_data_url(_data_url(b"ok"), tmp_path)
     assert result is not None
     assert result.startswith(str(tmp_path))
-
-
-def test_legacy_symbols_reexported_from_api_server() -> None:
-    """Existing tests import ``_save_base64_data_url`` / ``_FileSizeExceeded``
-    from ``nanobot.api.server`` — keep the aliases working."""
-    from nanobot.api import server
-
-    assert server._save_base64_data_url is save_base64_data_url
-    assert server._FileSizeExceeded is FileSizeExceeded
-    assert server.MAX_FILE_SIZE == MAX_FILE_SIZE

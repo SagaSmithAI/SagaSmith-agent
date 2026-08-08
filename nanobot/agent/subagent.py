@@ -4,7 +4,6 @@ import asyncio
 import json
 import time
 import uuid
-import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -24,8 +23,7 @@ from nanobot.agent.tools.loader import ToolLoader
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.config.schema import AgentDefaults, ToolsConfig
-from nanobot.providers.base import LLMProvider
+from nanobot.config.schema import AgentDefaults, Config, ToolsConfig
 from nanobot.security.workspace_access import (
     WorkspaceScope,
     bind_workspace_scope,
@@ -65,7 +63,9 @@ class _SubagentHook(AgentHook):
             args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
             logger.debug(
                 "Subagent [{}] executing: {} with arguments: {}",
-                self._task_id, tool_call.name, args_str,
+                self._task_id,
+                tool_call.name,
+                args_str,
             )
 
     async def after_iteration(self, context: AgentHookContext) -> None:
@@ -83,11 +83,10 @@ class SubagentManager:
 
     def __init__(
         self,
-        provider: LLMProvider | None = None,
-        workspace: Path | None = None,
-        bus: MessageBus | None = None,
-        max_tool_result_chars: int | None = None,
-        model: str | None = None,
+        *,
+        workspace: Path,
+        bus: MessageBus,
+        max_tool_result_chars: int,
         tools_config: ToolsConfig | None = None,
         restrict_to_workspace: bool = False,
         disabled_skills: list[str] | None = None,
@@ -97,42 +96,16 @@ class SubagentManager:
         fail_on_tool_error: bool | None = None,
         llm_wall_timeout_for_session: Callable[[str | None], float | None] | None = None,
     ):
-        if workspace is None:
-            raise TypeError("SubagentManager.__init__() missing required argument: 'workspace'")
-        if bus is None:
-            raise TypeError("SubagentManager.__init__() missing required argument: 'bus'")
-        if max_tool_result_chars is None:
-            raise TypeError(
-                "SubagentManager.__init__() missing required argument: 'max_tool_result_chars'"
-            )
-        if model is not None and provider is None:
-            raise TypeError("SubagentManager model compatibility argument requires provider")
-
         defaults = AgentDefaults()
-        self._compat_runtime: LLMRuntime | None = None
-        if provider is not None:
-            warnings.warn(
-                "SubagentManager provider/model constructor arguments are deprecated; "
-                "pass runtime=... to spawn() instead",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            self._compat_runtime = LLMRuntime.capture(
-                provider,
-                model or provider.get_default_model(),
-                context_window_tokens=defaults.context_window_tokens,
-            )
         self.workspace = workspace
         self.bus = bus
-        self.tools_config = tools_config or ToolsConfig()
+        self.tools_config = tools_config or Config().tools
         self.max_tool_result_chars = max_tool_result_chars
         self.restrict_to_workspace = restrict_to_workspace
         self.disabled_skills = set(disabled_skills or [])
         self.external_skills_dirs = list(external_skills_dirs or [])
         self.max_iterations = (
-            max_iterations
-            if max_iterations is not None
-            else defaults.max_tool_iterations
+            max_iterations if max_iterations is not None else defaults.max_tool_iterations
         )
         self.max_concurrent_subagents = (
             max_concurrent_subagents
@@ -140,50 +113,13 @@ class SubagentManager:
             else defaults.max_concurrent_subagents
         )
         self.fail_on_tool_error = (
-            fail_on_tool_error
-            if fail_on_tool_error is not None
-            else defaults.fail_on_tool_error
+            fail_on_tool_error if fail_on_tool_error is not None else defaults.fail_on_tool_error
         )
         self.runner = AgentRunner()
         self._llm_wall_timeout_for_session = llm_wall_timeout_for_session
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
         self._task_statuses: dict[str, SubagentStatus] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
-
-    def set_provider(self, provider: LLMProvider, model: str) -> None:
-        """Update the deprecated runtime source used by legacy ``spawn`` calls."""
-        warnings.warn(
-            "SubagentManager.set_provider() is deprecated; pass runtime=... to spawn() instead",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        context_window_tokens = (
-            self._compat_runtime.context_window_tokens
-            if self._compat_runtime is not None
-            else AgentDefaults().context_window_tokens
-        )
-        self._compat_runtime = LLMRuntime.capture(
-            provider,
-            model,
-            context_window_tokens=context_window_tokens,
-        )
-
-    def _compat_spawn_runtime(self) -> LLMRuntime:
-        runtime = self._compat_runtime
-        if runtime is None:
-            raise TypeError(
-                "SubagentManager.spawn() missing required keyword-only argument: 'runtime'"
-            )
-        warnings.warn(
-            "SubagentManager.spawn() without runtime is deprecated; pass runtime=... explicitly",
-            DeprecationWarning,
-            stacklevel=3,
-        )
-        return LLMRuntime.capture(
-            runtime.provider,
-            runtime.model,
-            context_window_tokens=runtime.context_window_tokens,
-        )
 
     def _subagent_tools_config(self) -> ToolsConfig:
         """Build a ToolsConfig scoped for subagent use."""
@@ -226,11 +162,9 @@ class SubagentManager:
         temperature: float | None = None,
         workspace_scope: WorkspaceScope | None = None,
         *,
-        runtime: LLMRuntime | None = None,
+        runtime: LLMRuntime,
     ) -> str:
         """Spawn a subagent to execute a task in the background."""
-        if runtime is None:
-            runtime = self._compat_spawn_runtime()
         if temperature is not None:
             runtime = runtime.with_generation_overrides(temperature=temperature)
         task_id = str(uuid.uuid4())[:8]
@@ -311,16 +245,19 @@ class SubagentManager:
                 if self._llm_wall_timeout_for_session
                 else None
             )
-            request_token = bind_request_context(RequestContext(
+            request_token = bind_request_context(
+                RequestContext(
                 channel=origin["channel"],
                 chat_id=origin["chat_id"],
                 message_id=origin_message_id,
                 session_key=sess_key,
                 runtime=runtime,
-            ))
+                )
+            )
             token = bind_workspace_scope(workspace_scope) if workspace_scope is not None else None
             try:
-                result = await self.runner.run(AgentRunSpec(
+                result = await self.runner.run(
+                    AgentRunSpec(
                     initial_messages=messages,
                     tools=tools,
                     runtime=runtime,
@@ -335,7 +272,8 @@ class SubagentManager:
                     session_key=sess_key,
                     workspace=root,
                     llm_timeout_s=llm_timeout,
-                ))
+                    )
+                )
             finally:
                 if token is not None:
                     reset_workspace_scope(token)
@@ -346,26 +284,40 @@ class SubagentManager:
             if result.stop_reason == "tool_error":
                 status.tool_events = list(result.tool_events)
                 await self._announce_result(
-                    task_id, label, task,
+                    task_id,
+                    label,
+                    task,
                     self._format_partial_progress(result),
-                    origin, "error", origin_message_id,
+                    origin,
+                    "error",
+                    origin_message_id,
                 )
             elif result.stop_reason == "error":
                 await self._announce_result(
-                    task_id, label, task,
+                    task_id,
+                    label,
+                    task,
                     result.error or "Error: subagent execution failed.",
-                    origin, "error", origin_message_id,
+                    origin,
+                    "error",
+                    origin_message_id,
                 )
             else:
-                final_result = result.final_content or "Task completed but no final response was generated."
+                final_result = (
+                    result.final_content or "Task completed but no final response was generated."
+                )
                 logger.info("Subagent [{}] completed successfully", task_id)
-                await self._announce_result(task_id, label, task, final_result, origin, "ok", origin_message_id)
+                await self._announce_result(
+                    task_id, label, task, final_result, origin, "ok", origin_message_id
+                )
 
         except Exception as e:
             status.phase = "error"
             status.error = str(e)
             logger.exception("Subagent [{}] failed", task_id)
-            await self._announce_result(task_id, label, task, f"Error: {e}", origin, "error", origin_message_id)
+            await self._announce_result(
+                task_id, label, task, f"Error: {e}", origin, "error", origin_message_id
+            )
 
     async def _announce_result(
         self,
@@ -410,7 +362,9 @@ class SubagentManager:
         )
 
         await self.bus.publish_inbound(msg)
-        logger.debug("Subagent [{}] announced result to {}:{}", task_id, origin['channel'], origin['chat_id'])
+        logger.debug(
+            "Subagent [{}] announced result to {}:{}", task_id, origin["channel"], origin["chat_id"]
+        )
 
     @staticmethod
     def _format_partial_progress(result) -> str:
@@ -451,8 +405,11 @@ class SubagentManager:
 
     async def cancel_by_session(self, session_key: str) -> int:
         """Cancel all subagents for the given session. Returns count cancelled."""
-        tasks = [self._running_tasks[tid] for tid in self._session_tasks.get(session_key, [])
-                 if tid in self._running_tasks and not self._running_tasks[tid].done()]
+        tasks = [
+            self._running_tasks[tid]
+            for tid in self._session_tasks.get(session_key, [])
+            if tid in self._running_tasks and not self._running_tasks[tid].done()
+        ]
         for t in tasks:
             t.cancel()
         if tasks:
@@ -467,6 +424,5 @@ class SubagentManager:
         """Return the number of currently running subagents for a session."""
         tids = self._session_tasks.get(session_key, set())
         return sum(
-            1 for tid in tids
-            if tid in self._running_tasks and not self._running_tasks[tid].done()
+            1 for tid in tids if tid in self._running_tasks and not self._running_tasks[tid].done()
         )

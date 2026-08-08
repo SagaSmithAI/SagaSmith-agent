@@ -12,7 +12,7 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any, Literal, NamedTuple
 
-from pydantic import Field
+from pydantic import ConfigDict, Field
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
@@ -23,6 +23,12 @@ from nanobot.config.schema import Base
 
 class WhatsAppConfig(Base):
     """WhatsApp channel configuration."""
+
+    model_config = ConfigDict(
+        alias_generator=Base.model_config["alias_generator"],
+        populate_by_name=True,
+        extra="forbid",
+    )
 
     enabled: bool = False
     allow_from: list[str] = Field(default_factory=list)
@@ -50,15 +56,10 @@ class _MediaInfo(NamedTuple):
 
 _NEONIZE_API: _NeonizeAPI | None = None
 _JID_RE = re.compile(r"^(?P<user>[^@]+)@(?P<server>[^@]+)$")
-_LEGACY_BRIDGE_CONFIG_FIELDS = ("bridgeUrl", "bridgeToken", "bridge_url", "bridge_token")
 
 
 def _default_database_path() -> Path:
     return get_runtime_subdir("whatsapp-auth") / "neonize.db"
-
-
-def _legacy_bridge_config_fields(config: dict[str, Any]) -> list[str]:
-    return [field for field in _LEGACY_BRIDGE_CONFIG_FIELDS if field in config]
 
 
 def _load_neonize() -> _NeonizeAPI:
@@ -248,9 +249,7 @@ def _media_message(message: Any) -> _MediaInfo | None:
             message=document,
             mimetype=str(_safe_attr(document, "mimetype", "") or "application/octet-stream"),
             filename=str(
-                _safe_attr(document, "fileName", "")
-                or _safe_attr(document, "title", "")
-                or ""
+                _safe_attr(document, "fileName", "") or _safe_attr(document, "title", "") or ""
             ),
         )
 
@@ -277,16 +276,9 @@ class WhatsAppChannel(BaseChannel):
         return WhatsAppConfig().model_dump(by_alias=True)
 
     def __init__(self, config: Any, bus: MessageBus):
-        legacy_bridge_fields = _legacy_bridge_config_fields(config) if isinstance(config, dict) else []
         if isinstance(config, dict):
             config = WhatsAppConfig.model_validate(config)
         super().__init__(config, bus)
-        if legacy_bridge_fields:
-            self.logger.warning(
-                "Ignoring deprecated WhatsApp bridge config fields: {}. "
-                "Run 'nanobot channels login whatsapp' to create a neonize session.",
-                ", ".join(legacy_bridge_fields),
-            )
         self._client: Any | None = None
         self._connected = False
         self._processed_message_ids: OrderedDict[str, None] = OrderedDict()
@@ -654,9 +646,7 @@ class WhatsAppChannel(BaseChannel):
             return False
         for context in _context_infos(message):
             participant = _normalize_jid(
-                _safe_attr(context, "participant")
-                or _safe_attr(context, "Participant")
-                or ""
+                _safe_attr(context, "participant") or _safe_attr(context, "Participant") or ""
             )
             if participant in self._self_jids or _bare_jid(participant) in self._self_jids:
                 return True

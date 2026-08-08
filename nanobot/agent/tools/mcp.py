@@ -2,7 +2,6 @@
 
 import asyncio
 import hashlib
-import inspect
 import json
 import os
 import re
@@ -670,9 +669,6 @@ class MCPToolWrapper(_MCPWrapperBase):
     def parameters(self) -> dict[str, Any]:
         return self._parameters
 
-    def set_context(self, ctx: RequestContext) -> None:
-        """Compatibility hook; identity is read from the task-local context at execution."""
-
     def is_available(self, ctx: RequestContext | None) -> bool:
         """Apply MCP-provided phase metadata independently for each chat session."""
         if not self._tool_profiles or not self._default_tool_profile:
@@ -694,9 +690,7 @@ class MCPToolWrapper(_MCPWrapperBase):
             # by a model parameter. The capability server owns the local identity;
             # the generic Agent adapter must not invent its own principal name.
             if self._local_principal_default is None:
-                raise RuntimeError(
-                    "MCP tool does not advertise a local principal default"
-                )
+                raise RuntimeError("MCP tool does not advertise a local principal default")
             return self._local_principal_default
         channel = re.sub(r"[^a-zA-Z0-9_.:-]", "_", ctx.channel or "unknown")
         sender = re.sub(r"[^a-zA-Z0-9_.:-]", "_", ctx.sender_id)
@@ -820,9 +814,7 @@ class MCPToolWrapper(_MCPWrapperBase):
             binding = DomainContextBinding.from_mapping(exact)
             if binding.domain != self._domain_context:
                 raise ValueError("MCP host_context_binding names another domain")
-            requested_campaign = _first_string_field(
-                arguments, frozenset({"campaign_id"})
-            )
+            requested_campaign = _first_string_field(arguments, frozenset({"campaign_id"}))
             if requested_campaign and binding.campaign_id != requested_campaign:
                 raise ValueError("MCP host_context_binding names another campaign")
             if not trusted_fingerprint:
@@ -1476,10 +1468,10 @@ async def connect_missing_servers(state: Any, registry: ToolRegistry) -> None:
             return
         state._mcp_connecting = True
         try:
-            connected = await _connect_mcp_servers_for_state(
+            connected = await connect_mcp_servers(
                 missing_servers,
                 registry,
-                state,
+                session_store=getattr(state, "sessions", None),
             )
             if getattr(state, "_mcp_closing", False):
                 for connection in connected.values():
@@ -1548,10 +1540,10 @@ async def reload_servers(state: Any, registry: ToolRegistry) -> dict[str, Any]:
         to_connect = {name: next_servers[name] for name in to_connect_names}
         connected: dict[str, MCPConnection] = {}
         if to_connect:
-            connected = await _connect_mcp_servers_for_state(
+            connected = await connect_mcp_servers(
                 to_connect,
                 registry,
-                state,
+                session_store=getattr(state, "sessions", None),
             )
             if getattr(state, "_mcp_closing", False):
                 for connection in connected.values():
@@ -1720,10 +1712,10 @@ async def _refresh_terminated_server(
         _unregister_server_tools(state, registry, server_name)
         await _close_server(state, server_name)
 
-        connected = await _connect_mcp_servers_for_state(
+        connected = await connect_mcp_servers(
             {server_name: cfg},
             registry,
-            state,
+            session_store=getattr(state, "sessions", None),
         )
         if getattr(state, "_mcp_closing", False):
             for connection in connected.values():
@@ -1743,36 +1735,6 @@ def _server_signature(cfg: Any) -> Any:
     if hasattr(cfg, "model_dump"):
         return cfg.model_dump(mode="json")
     return cfg
-
-
-async def _connect_mcp_servers_for_state(
-    servers: Mapping[str, Any],
-    registry: ToolRegistry,
-    state: Any,
-) -> dict[str, MCPConnection]:
-    """Connect with session context while retaining narrow test/host compatibility.
-
-    Older embedders may replace ``connect_mcp_servers`` with a two-argument
-    adapter.  Introspection lets those adapters keep working without falling
-    back after an arbitrary ``TypeError`` raised inside a real connector.
-    """
-    try:
-        parameters = inspect.signature(connect_mcp_servers).parameters.values()
-    except (TypeError, ValueError):
-        accepts_session_store = True
-    else:
-        accepts_session_store = any(
-            parameter.name == "session_store"
-            or parameter.kind is inspect.Parameter.VAR_KEYWORD
-            for parameter in parameters
-        )
-    if accepts_session_store:
-        return await connect_mcp_servers(
-            servers,
-            registry,
-            session_store=getattr(state, "sessions", None),
-        )
-    return await connect_mcp_servers(servers, registry)
 
 
 def _tool_prefix(server_name: str) -> str:

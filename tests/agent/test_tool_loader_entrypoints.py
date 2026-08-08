@@ -2,7 +2,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from nanobot.agent.tools.base import Tool
+from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tools.context import ToolContext
 from nanobot.agent.tools.loader import ToolLoader
 from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result
@@ -81,8 +81,7 @@ def test_loader_skips_abstract_entry_point_tools():
 
 
 @pytest.mark.asyncio
-async def test_loader_entry_point_error_wrapper_preserves_tool_api(tmp_path):
-    """Only adapt legacy plugin error strings; keep the wrapped tool API intact."""
+async def test_loader_entry_point_preserves_current_tool_api(tmp_path):
     mock_ep = MagicMock()
     mock_ep.name = "api_plugin"
 
@@ -119,7 +118,7 @@ async def test_loader_entry_point_error_wrapper_preserves_tool_api(tmp_path):
             return {"name": self.name, "custom": True}
 
         async def execute(self, **_):
-            return "Error: plugin failed"
+            return ToolResult.error("Error: plugin failed")
 
     mock_ep.load.return_value = _ApiPluginTool
 

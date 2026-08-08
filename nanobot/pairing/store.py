@@ -18,7 +18,7 @@ from typing import Any
 from loguru import logger
 
 from nanobot.config.paths import get_data_dir
-from nanobot.utils.helpers import _write_text_atomic
+from nanobot.utils.helpers import write_text_atomic
 
 # threading.Lock is used so store functions remain callable from both sync CLI
 # and async channel handlers.  At private-assistant scale (small JSON file,
@@ -58,7 +58,7 @@ def _save(data: dict[str, Any]) -> None:
         "approved": {ch: sorted(list(users)) for ch, users in data.get("approved", {}).items()},
         "pending": dict(data.get("pending", {})),
     }
-    _write_text_atomic(path, json.dumps(payload, indent=2, ensure_ascii=False))
+    write_text_atomic(path, json.dumps(payload, indent=2, ensure_ascii=False))
 
 
 def _gc_pending(data: dict[str, Any]) -> None:
@@ -147,10 +147,7 @@ def list_pending() -> list[dict[str, Any]]:
     with _LOCK:
         data = _load()
         _gc_pending(data)
-        return [
-            {"code": code, **info}
-            for code, info in data.get("pending", {}).items()
-        ]
+        return [{"code": code, **info} for code, info in data.get("pending", {}).items()]
 
 
 def revoke(channel: str, sender_id: str) -> bool:
@@ -213,9 +210,7 @@ def handle_pairing_command(channel: str, subcommand_text: str) -> str:
         lines = ["Pending pairing requests:"]
         for item in pending:
             expiry = format_expiry(item.get("expires_at", 0))
-            lines.append(
-                f"- `{item['code']}` | {item['channel']} | {item['sender_id']} | {expiry}"
-            )
+            lines.append(f"- `{item['code']}` | {item['channel']} | {item['sender_id']} | {expiry}")
         return "\n".join(lines)
 
     elif sub == "approve":

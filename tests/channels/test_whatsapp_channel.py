@@ -10,7 +10,7 @@ import pytest
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.channels import whatsapp as whatsapp_module
-from nanobot.channels.whatsapp import WhatsAppChannel, _legacy_bridge_config_fields, _NeonizeAPI
+from nanobot.channels.whatsapp import WhatsAppChannel, WhatsAppConfig, _NeonizeAPI
 
 
 class _Proto:
@@ -142,9 +142,9 @@ def test_default_config_has_no_bridge_fields() -> None:
     assert config["databasePath"] == ""
 
 
-def test_legacy_bridge_config_fields_are_detected() -> None:
-    assert _legacy_bridge_config_fields({"bridgeUrl": "ws://localhost:3001"}) == ["bridgeUrl"]
-    assert _legacy_bridge_config_fields({"bridgeToken": "secret"}) == ["bridgeToken"]
+def test_retired_bridge_config_fields_are_rejected() -> None:
+    with pytest.raises(ValueError, match="bridgeUrl"):
+        WhatsAppConfig.model_validate({"bridgeUrl": "ws://localhost:3001"})
 
 
 @pytest.mark.asyncio

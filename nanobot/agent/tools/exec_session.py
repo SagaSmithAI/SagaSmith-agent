@@ -150,6 +150,7 @@ class _ExecSession:
                 )
             # Safety-net reap after normal exit.
             from nanobot.agent.tools.shell import _reap_pid
+
             _reap_pid(self.process.pid)
         elif yield_time_ms > 0:
             await self._wait_for_buffered_output()
@@ -181,6 +182,7 @@ class _ExecSession:
             # Safety-net waitpid — prevent zombie if asyncio's child watcher
             # did not reap the process (common in containers).
             from nanobot.agent.tools.shell import _reap_pid
+
             _reap_pid(self.process.pid)
 
     async def _wait_for_buffered_output(self) -> None:
@@ -323,7 +325,11 @@ class ExecSessionManager:
         from nanobot.agent.tools.shell import ExecTool
 
         return await ExecTool._spawn(
-            command, cwd, env, shell_program, login,
+            command,
+            cwd,
+            env,
+            shell_program,
+            login,
             stdin=asyncio.subprocess.PIPE,
         )
 
@@ -343,9 +349,7 @@ def _truncate_output(output: str, max_output_chars: int) -> tuple[str, int]:
     half = max_output_chars // 2
     omitted = len(output) - max_output_chars
     return (
-        output[:half]
-        + f"\n\n... ({omitted:,} chars truncated) ...\n\n"
-        + output[-half:],
+        output[:half] + f"\n\n... ({omitted:,} chars truncated) ...\n\n" + output[-half:],
         omitted,
     )
 
@@ -384,7 +388,6 @@ def format_session_poll(session_id: str, poll: _SessionPoll) -> str:
             default=False,
         ),
         yield_time_ms=IntegerSchema(
-            DEFAULT_YIELD_MS,
             description="Milliseconds to wait before returning recent output (default 1000, max 30000).",
             minimum=0,
             maximum=MAX_YIELD_MS,
@@ -395,24 +398,15 @@ def format_session_poll(session_id: str, poll: _SessionPoll) -> str:
             nullable=True,
         ),
         wait_timeout_ms=IntegerSchema(
-            DEFAULT_WAIT_FOR_MS,
             description="Maximum milliseconds to wait for wait_for text (default 10000, max 120000).",
             minimum=0,
             maximum=MAX_WAIT_FOR_MS,
             nullable=True,
         ),
         max_output_chars=IntegerSchema(
-            DEFAULT_MAX_OUTPUT_CHARS,
             description="Maximum output characters to return from this poll (default 10000, max 50000).",
             minimum=1000,
             maximum=MAX_OUTPUT_CHARS,
-        ),
-        max_output_tokens=IntegerSchema(
-            DEFAULT_MAX_OUTPUT_CHARS,
-            description="Compatibility alias for max_output_chars. The current runtime uses a character budget.",
-            minimum=1000,
-            maximum=MAX_OUTPUT_CHARS,
-            nullable=True,
         ),
         required=["session_id"],
     )
@@ -473,12 +467,9 @@ class WriteStdinTool(Tool):
         wait_for: str | None = None,
         wait_timeout_ms: int | None = None,
         max_output_chars: int | None = None,
-        max_output_tokens: int | None = None,
         **kwargs: Any,
     ) -> str:
         try:
-            if max_output_chars is None:
-                max_output_chars = max_output_tokens
             output_limit = clamp_session_int(
                 max_output_chars,
                 DEFAULT_MAX_OUTPUT_CHARS,

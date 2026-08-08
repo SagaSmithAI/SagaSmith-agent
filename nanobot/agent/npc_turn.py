@@ -6,17 +6,14 @@ import hashlib
 import json
 import re
 from copy import deepcopy
-from dataclasses import dataclass
 from typing import Any
 
 from nanobot.agent.domain_context import validate_authoritative_binding
 from nanobot.agent.isolated_evaluation import (
     IsolatedEvaluationContract,
     IsolatedEvaluationError,
-    IsolatedEvaluationRunner,
 )
 from nanobot.utils.helpers import strip_think
-from nanobot.utils.llm_runtime import LLMRuntime
 
 NPC_TURN_SCHEMA_VERSION = 1
 NPC_TRUTH_POSTURES = frozenset(
@@ -53,18 +50,6 @@ class NpcTurnError(IsolatedEvaluationError):
     def __init__(self, message: str, *, raw_output: str = "") -> None:
         super().__init__(message)
         self.raw_output = raw_output
-
-
-@dataclass(frozen=True, slots=True)
-class NpcTurnResult:
-    """A validated proposal plus auditable isolation metadata."""
-
-    proposal: dict[str, Any]
-    generation_attempts: int
-    guardian_checks: int
-    isolation_level: str = "isolated"
-    tools_exposed: int = 0
-    session_persisted: bool = False
 
 
 def _object(value: Any, field: str) -> dict[str, Any]:
@@ -249,9 +234,7 @@ def normalize_npc_turn_proposal(value: Any) -> dict[str, Any]:
     )
     schema_version = data.get("schema_version")
     if type(schema_version) is not int or schema_version != NPC_TURN_SCHEMA_VERSION:
-        raise NpcTurnError(
-            f"npc_turn.proposal.schema_version must be {NPC_TURN_SCHEMA_VERSION}"
-        )
+        raise NpcTurnError(f"npc_turn.proposal.schema_version must be {NPC_TURN_SCHEMA_VERSION}")
     intent = _object(data.get("intent") or {}, "npc_turn.proposal.intent")
     _strict(intent, "npc_turn.proposal.intent", {"kind", "summary"})
     utterance = _object(data.get("utterance") or {}, "npc_turn.proposal.utterance")
@@ -347,9 +330,7 @@ def normalize_npc_turn_proposal(value: Any) -> dict[str, Any]:
         )
 
     if action_kind not in NPC_NARRATIVE_ACTION_KINDS and not resolution_requests:
-        raise NpcTurnError(
-            f"NPC action {action_kind!r} requires an explicit resolution request"
-        )
+        raise NpcTurnError(f"NPC action {action_kind!r} requires an explicit resolution request")
 
     deltas = _object(data.get("proposed_deltas") or {}, "npc_turn.proposal.proposed_deltas")
     _strict(deltas, "npc_turn.proposal.proposed_deltas", {"facts", "actor_knowledge"})
@@ -430,9 +411,7 @@ def validate_proposal_against_bundle(
         target for speech_act in proposal["speech_acts"] for target in speech_act["targets"]
     }
     cited_targets.update(
-        actor_id
-        for request in proposal["resolution_requests"]
-        for actor_id in request["actor_ids"]
+        actor_id for request in proposal["resolution_requests"] for actor_id in request["actor_ids"]
     )
     if unknown := sorted(cited_targets - allowed_targets):
         raise NpcTurnError(f"NPC proposal cites target actors outside its bundle: {unknown}")
@@ -475,9 +454,7 @@ _NPC_OUTPUT_SHAPE = {
         {
             "kind": "assert|ask|promise|threaten|refuse|reveal|withhold|lie",
             "content": "string",
-            "truth_posture": (
-                "believes_true|uncertain|intentional_deception|opinion|nonfactual"
-            ),
+            "truth_posture": ("believes_true|uncertain|intentional_deception|opinion|nonfactual"),
             "basis_refs": ["constraints.allowed_basis_refs item"],
             "targets": ["constraints.allowed_target_actor_ids item"],
         }
@@ -504,15 +481,10 @@ _NPC_OUTPUT_SHAPE = {
 }
 
 
-class NpcTurnRunner:
-    """Compatibility adapter over the shared fixed-contract isolation runner."""
+def npc_turn_contract() -> IsolatedEvaluationContract:
+    """Return the fixed NPC portrayal contract used by the shared isolation runner."""
 
-    def __init__(self, *, timeout_s: float = 120.0, max_tokens: int = 4_096) -> None:
-        self.timeout_s = timeout_s
-        self.max_tokens = max_tokens
-        self._isolated = IsolatedEvaluationRunner(
-            contracts={
-                "npc_turn": IsolatedEvaluationContract(
+    return IsolatedEvaluationContract(
                     kind="npc_turn",
                     task="propose_npc_turn",
                     system_prompt=_SYSTEM_PROMPT,
@@ -525,31 +497,3 @@ class NpcTurnRunner:
                     normalize_proposal=normalize_npc_turn_proposal,
                     validate_proposal=validate_proposal_against_bundle,
                 )
-            },
-            timeout_s=timeout_s,
-            max_tokens=max_tokens,
-        )
-
-    async def run(
-        self,
-        bundle: dict[str, Any],
-        *,
-        runtime: LLMRuntime,
-        strict_guardian: bool = False,
-    ) -> NpcTurnResult:
-        """Generate and validate one proposal, with at most one repair generation."""
-
-        try:
-            result = await self._isolated.run(
-                "npc_turn",
-                bundle,
-                runtime=runtime,
-                strict_guardian=strict_guardian,
-            )
-        except IsolatedEvaluationError as exc:
-            raise NpcTurnError(str(exc), raw_output=exc.raw_output) from exc
-        return NpcTurnResult(
-            proposal=result.proposal,
-            generation_attempts=result.generation_attempts,
-            guardian_checks=result.guardian_checks,
-        )

@@ -47,7 +47,7 @@ class TestSaveFsync:
             assert mock_fsync.call_count == expected
 
     def test_save_default_no_fsync(self, manager: SessionManager):
-        """Default save() should not fsync (backward compat)."""
+        """Default save() avoids the durability cost unless explicitly requested."""
         session = manager.get_or_create("test:default")
         session.add_message("user", "hello")
 

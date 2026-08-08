@@ -451,7 +451,7 @@ class TelegramChannel(BaseChannel):
         self._rich_send_disabled: bool = False  # Latch off if Bot API < 10.1
 
     def is_allowed(self, sender_id: str) -> bool:
-        """Preserve Telegram's legacy id|username allowlist matching."""
+        """Match Telegram's canonical ``id|username`` sender identity by either part."""
         if super().is_allowed(sender_id):
             return True
 

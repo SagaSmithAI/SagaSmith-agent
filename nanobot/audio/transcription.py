@@ -1,8 +1,8 @@
 """Application-level audio transcription service.
 
-This module owns nanobot's transcription behavior: config resolution,
-legacy channel fallback, upload validation, temporary-file handling, and
-dispatch to provider adapters. It deliberately does not know provider-specific
+This module owns nanobot's transcription behavior: config resolution, upload
+validation, temporary-file handling, and dispatch to provider adapters. It
+deliberately does not know provider-specific
 HTTP details; those live in ``nanobot.providers.transcription``.
 """
 
@@ -28,7 +28,8 @@ TranscriptionProviderName = str
 
 _DEFAULT_PROVIDER: TranscriptionProviderName = "groq"
 _MAX_AUDIO_BYTES_FALLBACK = 25 * 1024 * 1024
-_AUDIO_MIME_ALLOWED: frozenset[str] = frozenset({
+_AUDIO_MIME_ALLOWED: frozenset[str] = frozenset(
+    {
     "audio/aac",
     "audio/flac",
     "audio/m4a",
@@ -39,7 +40,8 @@ _AUDIO_MIME_ALLOWED: frozenset[str] = frozenset({
     "audio/webm",
     "audio/x-m4a",
     "audio/x-wav",
-})
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -111,26 +113,22 @@ def _extract_data_url_mime(url: str) -> str | None:
 
 
 def resolve_transcription_config(config: Any) -> EffectiveTranscriptionConfig:
-    """Resolve top-level transcription settings with legacy channel fallback."""
+    """Resolve the cross-channel transcription settings."""
     top = getattr(config, "transcription", None)
-    channels = getattr(config, "channels", None)
-    provider = (
-        _as_provider(getattr(top, "provider", None))
-        or _as_provider(getattr(channels, "transcription_provider", None))
-        or _DEFAULT_PROVIDER
-    )
+    configured_provider = getattr(top, "provider", None)
+    provider = _as_provider(configured_provider)
+    if configured_provider and provider is None:
+        raise ValueError(f"Unknown transcription provider: {configured_provider}")
+    provider = provider or _DEFAULT_PROVIDER
     spec = get_transcription_provider(provider)
-    if spec is None:
-        logger.warning("Unknown transcription provider {}; falling back to {}", provider, _DEFAULT_PROVIDER)
-        provider = _DEFAULT_PROVIDER
-        spec = get_transcription_provider(provider)
-    default_model = spec.default_model if spec else ""
+    assert spec is not None
+    default_model = spec.default_model
     provider_cfg = _provider_config(config, provider)
     return EffectiveTranscriptionConfig(
         enabled=bool(getattr(top, "enabled", True)),
         provider=provider,
         model=(getattr(top, "model", None) or default_model).strip(),
-        language=getattr(top, "language", None) or getattr(channels, "transcription_language", None),
+        language=getattr(top, "language", None),
         api_key=_resolve_transcription_api_key(provider, provider_cfg),
         api_base=_resolve_transcription_api_base(provider, provider_cfg),
         max_duration_sec=int(getattr(top, "max_duration_sec", 120)),
@@ -151,9 +149,8 @@ async def transcribe_audio_data_url(
         raise TranscriptionIngressError("disabled")
     if not config.configured:
         raise TranscriptionIngressError("not_configured", provider=config.provider)
-    if (
-        isinstance(duration_ms, (int, float))
-        and duration_ms > (config.max_duration_sec * 1000 + 1000)
+    if isinstance(duration_ms, (int, float)) and duration_ms > (
+        config.max_duration_sec * 1000 + 1000
     ):
         raise TranscriptionIngressError("duration")
     if _extract_data_url_mime(data_url) not in _AUDIO_MIME_ALLOWED:

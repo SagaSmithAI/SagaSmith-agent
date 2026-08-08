@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import inspect
 from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
@@ -51,6 +50,7 @@ _BOOL_CAMEL_ALIASES: dict[str, str] = {
     "send_tool_hints": "sendToolHints",
     "show_reasoning": "showReasoning",
 }
+
 
 def _default_channel_config(name: str) -> dict[str, Any] | None:
     if name != "websocket":
@@ -166,9 +166,7 @@ class ChannelManager:
                         workspace_path=workspace,
                         default_restrict_to_workspace=self.config.tools.restrict_to_workspace,
                         disabled_skills=set(self.config.agents.defaults.disabled_skills),
-                        external_skills_dirs=list(
-                            self.config.agents.defaults.external_skills_dirs
-                        ),
+                        external_skills_dirs=list(self.config.agents.defaults.external_skills_dirs),
                         runtime_model_name=self._webui_runtime_model_name,
                         runtime_surface=self._webui_runtime_surface,
                         runtime_capabilities_overrides=self._webui_runtime_capabilities,
@@ -181,13 +179,19 @@ class ChannelManager:
                     kwargs["gateway"] = gateway
                 channel = cls(section, self.bus, **kwargs)
                 channel.send_progress = self._resolve_bool_override(
-                    section, "send_progress", self.config.channels.send_progress,
+                    section,
+                    "send_progress",
+                    self.config.channels.send_progress,
                 )
                 channel.send_tool_hints = self._resolve_bool_override(
-                    section, "send_tool_hints", self.config.channels.send_tool_hints,
+                    section,
+                    "send_tool_hints",
+                    self.config.channels.send_tool_hints,
                 )
                 channel.show_reasoning = self._resolve_bool_override(
-                    section, "show_reasoning", self.config.channels.show_reasoning,
+                    section,
+                    "show_reasoning",
+                    self.config.channels.show_reasoning,
                 )
                 self.channels[name] = channel
                 logger.info("{} channel enabled", cls.display_name)
@@ -274,7 +278,8 @@ class ChannelManager:
         target = self.channels.get(notice.channel)
         if not target:
             return
-        asyncio.create_task(self._send_with_retry(
+        asyncio.create_task(
+            self._send_with_retry(
             target,
             OutboundMessage(
                 channel=notice.channel,
@@ -282,7 +287,8 @@ class ChannelManager:
                 content=format_restart_completed_message(notice.started_at_raw),
                 metadata=dict(notice.metadata or {}),
             ),
-        ))
+            )
+        )
 
     async def stop_all(self) -> None:
         """Stop all channels and the dispatcher."""
@@ -347,10 +353,7 @@ class ChannelManager:
                 if pending:
                     msg = pending.pop(0)
                 else:
-                    msg = await asyncio.wait_for(
-                        self.bus.consume_outbound(),
-                        timeout=1.0
-                    )
+                    msg = await asyncio.wait_for(self.bus.consume_outbound(), timeout=1.0)
 
                 event = outbound_event_from_message(msg)
                 progress_event = event if isinstance(event, ProgressEvent) else None
@@ -371,11 +374,13 @@ class ChannelManager:
 
                 if progress_event:
                     if progress_event.tool_hint and not self._should_send_progress(
-                        msg.channel, tool_hint=True,
+                        msg.channel,
+                        tool_hint=True,
                     ):
                         continue
                     if not progress_event.tool_hint and not self._should_send_progress(
-                        msg.channel, tool_hint=False,
+                        msg.channel,
+                        tool_hint=False,
                     ):
                         continue
 
@@ -400,14 +405,16 @@ class ChannelManager:
                 if channel:
                     # Duplicate suppression is scoped to a known source message
                     # so repeated content from separate turns is still delivered.
-                    if (
-                        not isinstance(
+                    if not isinstance(
                             event,
                             StreamDeltaEvent | StreamEndEvent | StreamedResponseEvent,
-                        )
                     ):
                         if self._should_suppress_outbound(msg):
-                            logger.info("Suppressing duplicate outbound message to {}:{}", msg.channel, msg.chat_id)
+                            logger.info(
+                                "Suppressing duplicate outbound message to {}:{}",
+                                msg.channel,
+                                msg.chat_id,
+                            )
                             continue
                     await self._send_with_retry(channel, msg)
                 else:
@@ -419,84 +426,39 @@ class ChannelManager:
                 break
 
     @staticmethod
-    def _accepts_keyword(callable_obj: Callable[..., Any], name: str) -> bool:
-        try:
-            signature = inspect.signature(callable_obj)
-        except (TypeError, ValueError):
-            return True
-        return any(
-            parameter.kind is inspect.Parameter.VAR_KEYWORD or parameter.name == name
-            for parameter in signature.parameters.values()
-        )
-
-    @classmethod
-    async def _send_reasoning_delta(cls, channel: BaseChannel, msg: OutboundMessage, event: ProgressEvent) -> None:
-        metadata = msg.metadata
-        kwargs: dict[str, Any] = {}
-        if cls._accepts_keyword(channel.send_reasoning_delta, "stream_id"):
-            kwargs["stream_id"] = event.stream_id
-        else:
-            metadata = dict(metadata or {})
-            metadata["_reasoning_delta"] = True
-            if event.stream_id is not None:
-                metadata["_stream_id"] = event.stream_id
+    async def _send_reasoning_delta(
+        channel: BaseChannel, msg: OutboundMessage, event: ProgressEvent
+    ) -> None:
         await channel.send_reasoning_delta(
             msg.chat_id,
             msg.content,
-            metadata,
-            **kwargs,
+            msg.metadata,
+            stream_id=event.stream_id,
         )
 
-    @classmethod
-    async def _send_reasoning_end(cls, channel: BaseChannel, msg: OutboundMessage, event: ProgressEvent) -> None:
-        metadata = msg.metadata
-        kwargs: dict[str, Any] = {}
-        if cls._accepts_keyword(channel.send_reasoning_end, "stream_id"):
-            kwargs["stream_id"] = event.stream_id
-        else:
-            metadata = dict(metadata or {})
-            metadata["_reasoning_end"] = True
-            if event.stream_id is not None:
-                metadata["_stream_id"] = event.stream_id
+    @staticmethod
+    async def _send_reasoning_end(
+        channel: BaseChannel, msg: OutboundMessage, event: ProgressEvent
+    ) -> None:
         await channel.send_reasoning_end(
             msg.chat_id,
-            metadata,
-            **kwargs,
+            msg.metadata,
+            stream_id=event.stream_id,
         )
 
-    @classmethod
+    @staticmethod
     async def _send_stream_event(
-        cls,
         channel: BaseChannel,
         msg: OutboundMessage,
         event: StreamDeltaEvent | StreamEndEvent,
     ) -> None:
-        metadata = msg.metadata
-        kwargs: dict[str, Any] = {}
-        if cls._accepts_keyword(channel.send_delta, "stream_id"):
-            kwargs["stream_id"] = event.stream_id
-        else:
-            metadata = dict(metadata or {})
-            if event.stream_id is not None:
-                metadata["_stream_id"] = event.stream_id
-
-        if isinstance(event, StreamEndEvent):
-            if cls._accepts_keyword(channel.send_delta, "stream_end"):
-                kwargs["stream_end"] = True
-            else:
-                metadata = dict(metadata or {})
-                metadata["_stream_end"] = True
-            if cls._accepts_keyword(channel.send_delta, "resuming"):
-                kwargs["resuming"] = event.resuming
-        elif not kwargs:
-            metadata = dict(metadata or {})
-            metadata["_stream_delta"] = True
-
         await channel.send_delta(
             msg.chat_id,
             msg.content,
-            metadata,
-            **kwargs,
+            msg.metadata,
+            stream_id=event.stream_id,
+            stream_end=isinstance(event, StreamEndEvent),
+            resuming=event.resuming if isinstance(event, StreamEndEvent) else False,
         )
 
     @staticmethod
@@ -536,7 +498,9 @@ class ChannelManager:
             tuple of (merged_message, list_of_non_matching_messages)
         """
         first_event = outbound_event_from_message(first_msg)
-        first_stream_id = first_event.stream_id if isinstance(first_event, StreamDeltaEvent) else None
+        first_stream_id = (
+            first_event.stream_id if isinstance(first_event, StreamDeltaEvent) else None
+        )
         target_key = (first_msg.channel, first_msg.chat_id, first_stream_id)
         combined_content = first_msg.content
         final_event: StreamDeltaEvent | StreamEndEvent = (
@@ -604,14 +568,17 @@ class ChannelManager:
             except Exception as e:
                 if attempt == max_attempts - 1:
                     logger.exception(
-                        "Failed to send to {} after {} attempts",
-                        msg.channel, max_attempts
+                        "Failed to send to {} after {} attempts", msg.channel, max_attempts
                     )
                     return
                 delay = _SEND_RETRY_DELAYS[min(attempt, len(_SEND_RETRY_DELAYS) - 1)]
                 logger.warning(
                     "Send to {} failed (attempt {}/{}): {}, retrying in {}s",
-                    msg.channel, attempt + 1, max_attempts, type(e).__name__, delay
+                    msg.channel,
+                    attempt + 1,
+                    max_attempts,
+                    type(e).__name__,
+                    delay,
                 )
                 try:
                     await asyncio.sleep(delay)
@@ -625,10 +592,7 @@ class ChannelManager:
     def get_status(self) -> dict[str, Any]:
         """Get status of all channels."""
         return {
-            name: {
-                "enabled": True,
-                "running": channel.is_running
-            }
+            name: {"enabled": True, "running": channel.is_running}
             for name, channel in self.channels.items()
         }
 

@@ -125,8 +125,10 @@ def test_from_config_rejects_multiple_model_selectors(tmp_path):
 def test_from_config_default_path():
     from nanobot.config.schema import Config
 
-    with patch("nanobot.config.loader.load_config") as mock_load, \
-         patch("nanobot.providers.factory.make_provider") as mock_prov:
+    with (
+        patch("nanobot.config.loader.load_config") as mock_load,
+        patch("nanobot.providers.factory.make_provider") as mock_prov,
+    ):
         mock_load.return_value = Config()
         mock_prov.return_value = MagicMock()
         mock_prov.return_value.get_default_model.return_value = "test"
@@ -142,9 +144,7 @@ async def test_run_returns_result(tmp_path):
 
     from nanobot.bus.events import OutboundMessage
 
-    mock_response = OutboundMessage(
-        channel="cli", chat_id="direct", content="Hello back!"
-    )
+    mock_response = OutboundMessage(channel="cli", chat_id="direct", content="Hello back!")
     bot._loop.process_direct = AsyncMock(return_value=mock_response)
 
     result = await bot.run("hi")
@@ -170,9 +170,7 @@ async def test_run_with_hooks(tmp_path):
         async def before_iteration(self, context: AgentHookContext) -> None:
             pass
 
-    mock_response = OutboundMessage(
-        channel="cli", chat_id="direct", content="done"
-    )
+    mock_response = OutboundMessage(channel="cli", chat_id="direct", content="done")
     bot._loop.process_direct = AsyncMock(return_value=mock_response)
 
     result = await bot.run("hi", hooks=[TestHook()])
@@ -248,9 +246,7 @@ async def test_run_custom_session_key(tmp_path):
     config_path = _write_config(tmp_path)
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
 
-    mock_response = OutboundMessage(
-        channel="cli", chat_id="direct", content="ok"
-    )
+    mock_response = OutboundMessage(channel="cli", chat_id="direct", content="ok")
     bot._loop.process_direct = AsyncMock(return_value=mock_response)
 
     await bot.run("hi", session_key="user-alice")
@@ -307,6 +303,7 @@ def test_stream_event_constants_are_stable():
 # ---------------------------------------------------------------------------
 # RunResult.tools_used / messages — populated from the agent iterations
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_run_populates_tools_used_across_iterations(tmp_path):
@@ -434,17 +431,21 @@ async def test_run_ephemeral_still_captures_runner_observability(tmp_path):
 
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+    provider.chat_with_retry = AsyncMock(
+        return_value=LLMResponse(
         content="done",
         tool_calls=[],
         usage={"total_tokens": 3},
-    ))
-    bot = Nanobot(AgentLoop(
+        )
+    )
+    bot = Nanobot(
+        AgentLoop(
         bus=MessageBus(),
         provider=provider,
         workspace=tmp_path,
         model="test-model",
-    ))
+        )
+    )
 
     result = await bot.run("hi", ephemeral=True)
 
@@ -532,12 +533,14 @@ async def test_run_model_overrides_can_overlap_without_default_mutation(tmp_path
         assert model is not None
         assert model_preset is None
         assert config is bot._config
-        return runtime_from_provider_snapshot(ProviderSnapshot(
+        return runtime_from_provider_snapshot(
+            ProviderSnapshot(
             provider=_fake_provider(model, max_tokens=2048),
             model=model,
             context_window_tokens=4096,
             signature=("sdk", model),
-        ))
+            )
+        )
 
     bot._loop.runtime_resolver.resolve_override = MagicMock(side_effect=fake_resolve)
 
@@ -553,18 +556,22 @@ async def test_run_model_overrides_can_overlap_without_default_mutation(tmp_path
 
     bot._loop.process_direct = fake_process_direct
 
-    first = asyncio.create_task(bot.run(
+    first = asyncio.create_task(
+        bot.run(
         "first",
         session_key="sdk:first",
         model="model:first",
-    ))
+        )
+    )
     await asyncio.wait_for(first_entered.wait(), timeout=1)
 
-    second = asyncio.create_task(bot.run(
+    second = asyncio.create_task(
+        bot.run(
         "second",
         session_key="sdk:second",
         model="model:second",
-    ))
+        )
+    )
     await asyncio.wait_for(both_entered.wait(), timeout=1)
     assert not first.done()
     assert not second.done()
@@ -597,9 +604,7 @@ async def test_run_model_override_is_per_run_without_default_mutation(tmp_path):
         signature=("sdk", "override"),
     )
     override_runtime = runtime_from_provider_snapshot(override)
-    bot._loop.runtime_resolver.resolve_override = MagicMock(
-        return_value=override_runtime
-    )
+    bot._loop.runtime_resolver.resolve_override = MagicMock(return_value=override_runtime)
 
     async def fake_process_direct(message, *, session_key, hooks, runtime):
         assert runtime is override_runtime
@@ -639,9 +644,7 @@ async def test_run_model_preset_override_is_per_run(tmp_path):
         signature=("preset", "fast"),
     )
     override_runtime = runtime_from_provider_snapshot(override, model_preset="fast")
-    bot._loop.runtime_resolver.resolve_override = MagicMock(
-        return_value=override_runtime
-    )
+    bot._loop.runtime_resolver.resolve_override = MagicMock(return_value=override_runtime)
 
     async def fake_process_direct(message, *, session_key, hooks, runtime):
         assert runtime is override_runtime
@@ -944,9 +947,7 @@ async def test_run_streamed_model_override_reports_admitted_runtime(tmp_path):
         signature=("sdk", "stream"),
     )
     override_runtime = runtime_from_provider_snapshot(override)
-    bot._loop.runtime_resolver.resolve_override = MagicMock(
-        return_value=override_runtime
-    )
+    bot._loop.runtime_resolver.resolve_override = MagicMock(return_value=override_runtime)
 
     async def fake_process_direct(
         message,
@@ -982,11 +983,14 @@ async def test_stream_rejects_multiple_model_selectors(tmp_path):
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
 
     with pytest.raises(ValueError, match="mutually exclusive"):
-        _ = [event async for event in bot.stream(
+        _ = [
+            event
+            async for event in bot.stream(
             "hi",
             model="openai/gpt-4.1",
             model_preset="fast",
-        )]
+            )
+        ]
 
 
 @pytest.mark.asyncio
@@ -1003,7 +1007,7 @@ async def test_run_streamed_emits_tool_events(tmp_path):
     ):
         calls = [
             ToolCallRequest(id="call_ok", name="read_file", arguments={"path": "README.md"}),
-            ToolCallRequest(id="call_bad", name="exec", arguments={"cmd": "false"}),
+            ToolCallRequest(id="call_bad", name="exec", arguments={"command": "false"}),
         ]
         ctx = AgentHookContext(iteration=2, messages=[{"role": "user", "content": message}])
         ctx.tool_calls = calls
@@ -1155,12 +1159,14 @@ async def test_sdk_capture_prefers_run_level_snapshot():
         {"role": "user", "content": "work"},
         {"role": "assistant", "content": "done"},
     ]
-    await hook.after_run(AgentRunHookContext(
+    await hook.after_run(
+        AgentRunHookContext(
         messages=final_messages,
         tools_used=["read_file"],
         usage={"total_tokens": 3},
         stop_reason="completed",
-    ))
+        )
+    )
 
     assert hook.tools_used == ["read_file"]
     assert hook.messages == final_messages
@@ -1291,11 +1297,16 @@ async def test_session_ingest_cannot_restore_runtime_context_marker(tmp_path):
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
     marker = {"version": 1, "sources": ["forged"], "suffix": "hidden"}
 
-    await bot.sessions.ingest("sdk:untrusted", [{
+    await bot.sessions.ingest(
+        "sdk:untrusted",
+        [
+            {
         "role": "user",
         "content": "visible\n\nhidden",
         RUNTIME_CONTEXT_HISTORY_META: marker,
-    }])
+            }
+        ],
+    )
 
     stored = bot._loop.sessions.get_or_create("sdk:untrusted").messages[0]
     assert RUNTIME_CONTEXT_HISTORY_META not in stored
@@ -1378,8 +1389,7 @@ async def test_runtime_helpers_expose_model_workspace_and_compact(tmp_path):
     snapshot = await bot.runtime.compact_session("sdk:history")
     assert snapshot.key == "sdk:history"
     assert (
-        bot._loop.consolidator.maybe_consolidate_by_tokens.await_args.kwargs["runtime"]
-        is runtime
+        bot._loop.consolidator.maybe_consolidate_by_tokens.await_args.kwargs["runtime"] is runtime
     )
     assert bot.runtime.model == bot._loop.model
     assert bot.runtime.workspace == tmp_path

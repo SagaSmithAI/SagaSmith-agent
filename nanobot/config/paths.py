@@ -16,6 +16,7 @@ def get_config_path() -> Path:
     that importing this module never triggers a circular import during startup.
     """
     from nanobot.config.loader import get_config_path as _loader_get_config_path
+
     return _loader_get_config_path()
 
 
@@ -66,8 +67,3 @@ def is_default_workspace(workspace: str | Path | None) -> bool:
 def get_cli_history_path() -> Path:
     """Return the shared CLI history file path."""
     return Path.home() / ".nanobot" / "history" / "cli_history"
-
-
-def get_legacy_sessions_dir() -> Path:
-    """Return the legacy global session directory used for migration fallback."""
-    return Path.home() / ".nanobot" / "sessions"

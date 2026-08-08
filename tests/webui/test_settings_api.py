@@ -123,13 +123,15 @@ def test_create_model_configuration_rejects_dynamic_custom_provider_without_api_
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config_path = tmp_path / "config.json"
-    config = Config.model_validate({
+    config = Config.model_validate(
+        {
         "providers": {
             DYNAMIC_PROVIDER_NAME: {
                 "apiKey": "sk-test",
             }
         }
-    })
+        }
+    )
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 
@@ -353,13 +355,15 @@ def test_settings_payload_marks_dynamic_custom_provider_without_api_base_unconfi
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config_path = tmp_path / "config.json"
-    config = Config.model_validate({
+    config = Config.model_validate(
+        {
         "providers": {
             DYNAMIC_PROVIDER_NAME: {
                 "apiKey": "sk-test",
             }
         }
-    })
+        }
+    )
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 
@@ -386,7 +390,6 @@ def test_settings_payload_includes_network_safety_fields(
     payload = settings_payload()
 
     assert payload["advanced"]["webui_allow_local_service_access"] is False
-    assert payload["advanced"]["allow_local_preview_access"] is False
     assert payload["advanced"]["webui_default_access_mode"] == "default"
     assert payload["advanced"]["private_service_protection_enabled"] is True
     assert payload["advanced"]["ssrf_whitelist_count"] == 1
@@ -454,8 +457,8 @@ def test_settings_payload_includes_effective_transcription_config(
 ) -> None:
     config_path = tmp_path / "config.json"
     config = Config()
-    config.channels.transcription_provider = "openai"
-    config.channels.transcription_language = "en"
+    config.transcription.provider = "openai"
+    config.transcription.language = "en"
     config.providers.openai.api_key = "sk-test"
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
@@ -571,8 +574,8 @@ def test_update_transcription_settings_writes_top_level_only(
 ) -> None:
     config_path = tmp_path / "config.json"
     config = Config()
-    config.channels.transcription_provider = "openai"
-    config.channels.transcription_language = "en"
+    config.transcription.provider = "openai"
+    config.transcription.language = "en"
     config.providers.groq.api_key = "gsk-test"
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
@@ -589,8 +592,6 @@ def test_update_transcription_settings_writes_top_level_only(
     )
 
     saved = load_config(config_path)
-    assert saved.channels.transcription_provider == "openai"
-    assert saved.channels.transcription_language == "en"
     assert saved.transcription.enabled is True
     assert saved.transcription.provider == "groq"
     assert saved.transcription.model == "whisper-large-v3-turbo"
@@ -759,7 +760,7 @@ def test_update_network_safety_settings_writes_local_service_flag(
     assert payload["requires_restart"] is True
 
 
-def test_update_network_safety_settings_accepts_legacy_restricted_default_access(
+def test_update_network_safety_settings_rejects_restricted_default_access(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -768,9 +769,8 @@ def test_update_network_safety_settings_accepts_legacy_restricted_default_access
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
     monkeypatch.setattr("nanobot.webui.workspaces.get_webui_dir", lambda: tmp_path / "webui")
 
-    payload = update_network_safety_settings({"webui_default_access_mode": ["restricted"]})
-
-    assert payload["advanced"]["webui_default_access_mode"] == "default"
+    with pytest.raises(WebUISettingsError, match="default or full"):
+        update_network_safety_settings({"webui_default_access_mode": ["restricted"]})
 
 
 def test_update_network_safety_settings_default_access_is_webui_only(

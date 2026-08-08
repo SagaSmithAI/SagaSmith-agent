@@ -60,7 +60,6 @@ MSTEAMS_DEFAULT_TRUSTED_SERVICE_URL_HOSTS = [
     "smba.infra.dod.teams.microsoft.us",
     "*.botframework.com",
 ]
-MSTEAMS_REF_META_FILENAME = "msteams_conversations_meta.json"
 MSTEAMS_REF_LOCK_FILENAME = "msteams_conversations.lock"
 MSTEAMS_REF_TOUCH_INTERVAL_S = 300
 
@@ -131,7 +130,6 @@ class MSTeamsChannel(BaseChannel):
         self._botframework_jwks_expires_at: float = 0.0
         self._refs_path = get_workspace_path() / "state" / "msteams_conversations.json"
         self._refs_path.parent.mkdir(parents=True, exist_ok=True)
-        self._refs_meta_path = self._refs_path.parent / MSTEAMS_REF_META_FILENAME
         self._refs_lock_path = self._refs_path.parent / MSTEAMS_REF_LOCK_FILENAME
         self._refs_guard = threading.RLock()
         self._conversation_refs: dict[str, ConversationRef] = self._load_refs()
@@ -258,7 +256,9 @@ class MSTeamsChannel(BaseChannel):
             )
 
         token = await self._get_access_token()
-        base_url = f"{ref.service_url.rstrip('/')}/v3/conversations/{ref.conversation_id}/activities"
+        base_url = (
+            f"{ref.service_url.rstrip('/')}/v3/conversations/{ref.conversation_id}/activities"
+        )
         use_thread_reply = self.config.reply_in_thread and bool(ref.activity_id)
         headers = {
             "Authorization": f"Bearer {token}",
@@ -325,7 +325,8 @@ class MSTeamsChannel(BaseChannel):
             self.logger.warning(
                 "Access denied for sender {} on channel {}. "
                 "Add them to allowFrom list in config to grant access.",
-                sender_id, self.name,
+                sender_id,
+                self.name,
             )
             return
 
@@ -370,7 +371,9 @@ class MSTeamsChannel(BaseChannel):
         while preview_lines and not preview_lines[0]:
             preview_lines.pop(0)
         first_line = preview_lines[0] if preview_lines else ""
-        looks_like_quote_wrapper = first_line.lower().startswith("replying to ") or first_line.startswith("Reply wrapper")
+        looks_like_quote_wrapper = first_line.lower().startswith(
+            "replying to "
+        ) or first_line.startswith("Reply wrapper")
 
         if reply_to_id or channel_data.get("messageType") == "reply" or looks_like_quote_wrapper:
             text = self._normalize_teams_reply_quote(text)
@@ -545,7 +548,7 @@ class MSTeamsChannel(BaseChannel):
         return None
 
     def _normalize_ref_record(self, value: Any) -> ConversationRef | None:
-        """Normalize a stored ref record from legacy/current schema."""
+        """Validate one current stored conversation reference."""
         if not isinstance(value, dict):
             return None
         service_url = str(value.get("service_url") or "").strip()
@@ -562,11 +565,9 @@ class MSTeamsChannel(BaseChannel):
             updated_at=self._safe_float(value.get("updated_at")),
         )
 
-    def _load_refs_raw(self) -> tuple[dict[str, Any], dict[str, Any], bool]:
-        """Load raw refs/main+meta JSON payloads."""
+    def _load_refs_raw(self) -> dict[str, Any]:
+        """Load the canonical conversation-reference JSON object."""
         main_data: dict[str, Any] = {}
-        meta_data: dict[str, Any] = {}
-        meta_exists = self._refs_meta_path.exists()
 
         if self._refs_path.exists():
             try:
@@ -576,45 +577,19 @@ class MSTeamsChannel(BaseChannel):
             except Exception as e:
                 self.logger.warning("Failed to load conversation refs: {}", e)
 
-        if meta_exists:
-            try:
-                loaded_meta = json.loads(self._refs_meta_path.read_text(encoding="utf-8"))
-                if isinstance(loaded_meta, dict):
-                    meta_data = loaded_meta
-            except Exception as e:
-                self.logger.warning("Failed to load conversation refs metadata: {}", e)
-
-        return main_data, meta_data, meta_exists
+        return main_data
 
     def _load_refs_from_disk(self) -> dict[str, ConversationRef]:
-        """Load refs from disk with compatibility fallback for legacy layouts."""
-        main_data, meta_data, meta_exists = self._load_refs_raw()
+        """Load current conversation references from disk."""
+        main_data = self._load_refs_raw()
         if not main_data:
             return {}
 
         out: dict[str, ConversationRef] = {}
-        now = time.time()
         for key, value in main_data.items():
             ref = self._normalize_ref_record(value)
-            if not ref:
+            if not ref or ref.updated_at is None:
                 continue
-
-            meta_entry = meta_data.get(key) if isinstance(meta_data, dict) else None
-            meta_ts = None
-            if isinstance(meta_entry, dict):
-                meta_ts = self._safe_float(meta_entry.get("updated_at"))
-            elif meta_entry is not None:
-                meta_ts = self._safe_float(meta_entry)
-
-            if meta_ts is not None:
-                ref.updated_at = meta_ts
-            elif not meta_exists:
-                # First run after introducing meta sidecar: keep legacy refs alive
-                # by initializing timestamps to "now" instead of purging immediately.
-                ref.updated_at = now
-            elif ref.updated_at is None:
-                ref.updated_at = now
-
             out[key] = ref
         return out
 
@@ -777,17 +752,11 @@ class MSTeamsChannel(BaseChannel):
                         "activity_id": ref.activity_id,
                         "conversation_type": ref.conversation_type,
                         "tenant_id": ref.tenant_id,
-                    }
-                    for key, ref in self._conversation_refs.items()
-                }
-                refs_meta = {
-                    key: {
                         "updated_at": self._safe_float(ref.updated_at),
                     }
                     for key, ref in self._conversation_refs.items()
                 }
                 self._write_json_atomically(self._refs_path, refs_data)
-                self._write_json_atomically(self._refs_meta_path, refs_meta)
         except Exception as e:
             self.logger.warning("Failed to save conversation refs: {}", e)
 

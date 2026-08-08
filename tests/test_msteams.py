@@ -6,6 +6,7 @@ import pytest
 # Check optional msteams dependencies before running tests
 try:
     from nanobot.channels import msteams
+
     MSTEAMS_AVAILABLE = getattr(msteams, "MSTEAMS_AVAILABLE", False)
 except ImportError:
     MSTEAMS_AVAILABLE = False
@@ -117,13 +118,12 @@ async def test_handle_activity_personal_message_publishes_and_stores_ref(make_ch
     assert msg.metadata["msteams"]["conversation_id"] == "conv-123"
     assert "conv-123" in ch._conversation_refs
 
-    saved = json.loads((tmp_path / "state" / "msteams_conversations.json").read_text(encoding="utf-8"))
+    saved = json.loads(
+        (tmp_path / "state" / "msteams_conversations.json").read_text(encoding="utf-8")
+    )
     assert saved["conv-123"]["conversation_id"] == "conv-123"
     assert saved["conv-123"]["tenant_id"] == "tenant-id"
-    saved_meta = json.loads(
-        (tmp_path / "state" / msteams_module.MSTEAMS_REF_META_FILENAME).read_text(encoding="utf-8"),
-    )
-    assert float(saved_meta["conv-123"]["updated_at"]) > 0
+    assert float(saved["conv-123"]["updated_at"]) > 0
 
 
 def test_init_prunes_stale_and_unsupported_conversation_refs(make_channel, tmp_path, monkeypatch):
@@ -133,7 +133,6 @@ def test_init_prunes_stale_and_unsupported_conversation_refs(make_channel, tmp_p
     state_dir = tmp_path / "state"
     state_dir.mkdir(parents=True, exist_ok=True)
     refs_path = state_dir / "msteams_conversations.json"
-    refs_meta_path = state_dir / msteams_module.MSTEAMS_REF_META_FILENAME
     refs_path.write_text(
         json.dumps(
             {
@@ -141,21 +140,25 @@ def test_init_prunes_stale_and_unsupported_conversation_refs(make_channel, tmp_p
                     "service_url": "https://smba.trafficmanager.net/amer/",
                     "conversation_id": "conv-valid",
                     "conversation_type": "personal",
+                    "updated_at": now - 60,
                 },
                 "conv-webchat": {
                     "service_url": "https://webchat.botframework.com/",
                     "conversation_id": "conv-webchat",
                     "conversation_type": "personal",
+                    "updated_at": now - 60,
                 },
                 "conv-group": {
                     "service_url": "https://smba.trafficmanager.net/amer/",
                     "conversation_id": "conv-group",
                     "conversation_type": "channel",
+                    "updated_at": now - 60,
                 },
                 "conv-stale": {
                     "service_url": "https://smba.trafficmanager.net/amer/",
                     "conversation_id": "conv-stale",
                     "conversation_type": "personal",
+                    "updated_at": now - 30 * 24 * 60 * 60 - 1,
                 },
                 "conv-missing-ts": {
                     "service_url": "https://smba.trafficmanager.net/amer/",
@@ -167,27 +170,14 @@ def test_init_prunes_stale_and_unsupported_conversation_refs(make_channel, tmp_p
         ),
         encoding="utf-8",
     )
-    refs_meta_path.write_text(
-        json.dumps(
-            {
-                "conv-valid": {"updated_at": now - 60},
-                "conv-webchat": {"updated_at": now - 60},
-                "conv-group": {"updated_at": now - 60},
-                "conv-stale": {"updated_at": now - 30 * 24 * 60 * 60 - 1},
-            },
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
 
     ch = make_channel()
 
-    assert set(ch._conversation_refs.keys()) == {"conv-valid", "conv-missing-ts"}
+    assert set(ch._conversation_refs.keys()) == {"conv-valid"}
     assert ch._conversation_refs["conv-valid"].conversation_id == "conv-valid"
-    assert ch._conversation_refs["conv-missing-ts"].conversation_id == "conv-missing-ts"
 
     persisted = json.loads(refs_path.read_text(encoding="utf-8"))
-    assert set(persisted.keys()) == {"conv-valid", "conv-missing-ts"}
+    assert set(persisted.keys()) == {"conv-valid"}
 
 
 def test_default_trusted_service_urls_cover_official_teams_clouds(make_channel):
@@ -232,12 +222,11 @@ def test_save_prunes_unsupported_conversation_refs(make_channel, tmp_path, monke
 
     assert set(ch._conversation_refs.keys()) == {"conv-valid"}
 
-    saved = json.loads((tmp_path / "state" / "msteams_conversations.json").read_text(encoding="utf-8"))
-    assert set(saved.keys()) == {"conv-valid"}
-    saved_meta = json.loads(
-        (tmp_path / "state" / msteams_module.MSTEAMS_REF_META_FILENAME).read_text(encoding="utf-8"),
+    saved = json.loads(
+        (tmp_path / "state" / "msteams_conversations.json").read_text(encoding="utf-8")
     )
-    assert set(saved_meta.keys()) == {"conv-valid"}
+    assert set(saved.keys()) == {"conv-valid"}
+    assert saved["conv-valid"]["updated_at"] == now
 
 
 def test_init_respects_prune_toggle_flags(make_channel, tmp_path, monkeypatch):
@@ -282,7 +271,6 @@ def test_init_respects_custom_ref_ttl_days(make_channel, tmp_path, monkeypatch):
     state_dir = tmp_path / "state"
     state_dir.mkdir(parents=True, exist_ok=True)
     refs_path = state_dir / "msteams_conversations.json"
-    refs_meta_path = state_dir / msteams_module.MSTEAMS_REF_META_FILENAME
     refs_path.write_text(
         json.dumps(
             {
@@ -290,22 +278,14 @@ def test_init_respects_custom_ref_ttl_days(make_channel, tmp_path, monkeypatch):
                     "service_url": "https://smba.trafficmanager.net/amer/",
                     "conversation_id": "conv-fresh",
                     "conversation_type": "personal",
+                    "updated_at": now - 12 * 60 * 60,
                 },
                 "conv-old": {
                     "service_url": "https://smba.trafficmanager.net/amer/",
                     "conversation_id": "conv-old",
                     "conversation_type": "personal",
+                    "updated_at": now - 10 * 24 * 60 * 60,
                 },
-            },
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
-    refs_meta_path.write_text(
-        json.dumps(
-            {
-                "conv-fresh": {"updated_at": now - 12 * 60 * 60},
-                "conv-old": {"updated_at": now - 10 * 24 * 60 * 60},
             },
             indent=2,
         ),
@@ -319,7 +299,7 @@ def test_init_respects_custom_ref_ttl_days(make_channel, tmp_path, monkeypatch):
     assert set(persisted.keys()) == {"conv-fresh"}
 
 
-def test_init_without_meta_keeps_legacy_refs_alive(make_channel, tmp_path, monkeypatch):
+def test_init_rejects_ref_without_timestamp(make_channel, tmp_path, monkeypatch):
     now = 1_800_000_000.0
     monkeypatch.setattr(msteams_module.time, "time", lambda: now)
 
@@ -342,12 +322,12 @@ def test_init_without_meta_keeps_legacy_refs_alive(make_channel, tmp_path, monke
 
     ch = make_channel(refTtlDays=1)
 
-    assert set(ch._conversation_refs.keys()) == {"conv-legacy"}
-    assert ch._conversation_refs["conv-legacy"].updated_at == now
-    assert not (state_dir / msteams_module.MSTEAMS_REF_META_FILENAME).exists()
+    assert ch._conversation_refs == {}
 
 
-def test_save_uses_atomic_replace_and_keeps_existing_file_on_replace_error(make_channel, tmp_path, monkeypatch):
+def test_save_uses_atomic_replace_and_keeps_existing_file_on_replace_error(
+    make_channel, tmp_path, monkeypatch
+):
     ch = make_channel()
     refs_path = tmp_path / "state" / "msteams_conversations.json"
     refs_path.write_text(
@@ -581,8 +561,7 @@ def test_sanitize_inbound_text_normalizes_reply_wrapper_without_reply_metadata(m
     }
 
     assert ch._sanitize_inbound_text(activity) == (
-        "User is replying to: Quoted prior message\n"
-        "User reply: This is a reply with quote test"
+        "User is replying to: Quoted prior message\nUser reply: This is a reply with quote test"
     )
 
 
@@ -595,7 +574,10 @@ def test_sanitize_inbound_text_structures_reply_quote_prefix(make_channel):
         "channelData": {"messageType": "reply"},
     }
 
-    assert ch._sanitize_inbound_text(activity) == "User is replying to: Bob Smith\nUser reply: actual reply text"
+    assert (
+        ch._sanitize_inbound_text(activity)
+        == "User is replying to: Bob Smith\nUser reply: actual reply text"
+    )
 
 
 def test_sanitize_inbound_text_structures_live_reply_wrapper_shape(make_channel):
@@ -683,7 +665,9 @@ async def test_get_access_token_uses_configured_tenant(make_channel):
 
 
 @pytest.mark.asyncio
-async def test_send_posts_to_conversation_with_reply_to_id_when_reply_in_thread_enabled(make_channel):
+async def test_send_posts_to_conversation_with_reply_to_id_when_reply_in_thread_enabled(
+    make_channel,
+):
     ch = make_channel(replyInThread=True)
     fake_http = FakeHttpClient()
     ch._http = fake_http
@@ -706,7 +690,9 @@ async def test_send_posts_to_conversation_with_reply_to_id_when_reply_in_thread_
 
 
 @pytest.mark.asyncio
-async def test_send_success_refreshes_updated_at_and_persists_meta(make_channel, tmp_path, monkeypatch):
+async def test_send_success_refreshes_updated_at_and_persists_meta(
+    make_channel, tmp_path, monkeypatch
+):
     now = {"value": 1_800_000_000.0}
     monkeypatch.setattr(msteams_module.time, "time", lambda: now["value"])
 
@@ -726,10 +712,10 @@ async def test_send_success_refreshes_updated_at_and_persists_meta(make_channel,
     await ch.send(OutboundMessage(channel="msteams", chat_id="conv-123", content="Reply text"))
 
     assert ch._conversation_refs["conv-123"].updated_at == now["value"]
-    saved_meta = json.loads(
-        (tmp_path / "state" / msteams_module.MSTEAMS_REF_META_FILENAME).read_text(encoding="utf-8"),
+    saved = json.loads(
+        (tmp_path / "state" / "msteams_conversations.json").read_text(encoding="utf-8"),
     )
-    assert saved_meta["conv-123"]["updated_at"] == now["value"]
+    assert saved["conv-123"]["updated_at"] == now["value"]
 
 
 @pytest.mark.asyncio
@@ -756,7 +742,9 @@ async def test_send_posts_to_conversation_when_thread_reply_disabled(make_channe
 
 
 @pytest.mark.asyncio
-async def test_send_posts_to_conversation_when_thread_reply_enabled_but_no_activity_id(make_channel):
+async def test_send_posts_to_conversation_when_thread_reply_enabled_but_no_activity_id(
+    make_channel,
+):
     ch = make_channel(replyInThread=True)
     fake_http = FakeHttpClient()
     ch._http = fake_http
@@ -801,7 +789,9 @@ async def test_send_rejects_untrusted_service_url_before_bearer_post(make_channe
     )
 
     with pytest.raises(RuntimeError, match="untrusted service_url"):
-        await ch.send(OutboundMessage(channel="msteams", chat_id="conv-poison", content="Reply text"))
+        await ch.send(
+            OutboundMessage(channel="msteams", chat_id="conv-poison", content="Reply text")
+        )
 
     assert fake_http.calls == []
 
@@ -895,7 +885,9 @@ async def test_validate_inbound_auth_rejects_missing_bearer_token(make_channel):
     ch = make_channel(validateInboundAuth=True)
 
     with pytest.raises(ValueError, match="missing bearer token"):
-        await ch._validate_inbound_auth("", {"serviceUrl": "https://smba.trafficmanager.net/amer/tenant/"})
+        await ch._validate_inbound_auth(
+            "", {"serviceUrl": "https://smba.trafficmanager.net/amer/tenant/"}
+        )
 
 
 @pytest.mark.asyncio
@@ -903,7 +895,9 @@ async def test_start_logs_install_hint_when_pyjwt_missing(make_channel, monkeypa
     ch = make_channel()
     errors = []
     monkeypatch.setattr(msteams_module, "MSTEAMS_AVAILABLE", False)
-    monkeypatch.setattr(ch.logger, "error", lambda message, *args: errors.append(message.format(*args)))
+    monkeypatch.setattr(
+        ch.logger, "error", lambda message, *args: errors.append(message.format(*args))
+    )
 
     await ch.start()
 
@@ -939,8 +933,7 @@ def test_save_refs_prunes_webchat_and_stale_refs(make_channel):
     assert set(ch._conversation_refs) == {"teams-good"}
     saved = json.loads(ch._refs_path.read_text(encoding="utf-8"))
     assert set(saved) == {"teams-good"}
-    saved_meta = json.loads(ch._refs_meta_path.read_text(encoding="utf-8"))
-    assert saved_meta["teams-good"]["updated_at"] == pytest.approx(now)
+    assert saved["teams-good"]["updated_at"] == pytest.approx(now)
 
 
 def test_msteams_default_config_includes_restart_notify_fields():

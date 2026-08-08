@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Any
 
 import pydantic
-from loguru import logger
 from pydantic import BaseModel
 
 from nanobot.config.schema import Config, _resolve_tool_config_refs
@@ -52,7 +51,6 @@ def load_config(config_path: Path | None = None) -> Config:
         try:
             with open(path, encoding="utf-8") as f:
                 data = json.load(f)
-            data = _migrate_config(data)
             config = Config.model_validate(data)
         except (json.JSONDecodeError, ValueError, pydantic.ValidationError) as e:
             raise ValueError(f"Failed to load config from {path}: {e}") from e
@@ -149,49 +147,5 @@ def _env_replace(match: re.Match[str]) -> str:
     name = match.group(1)
     value = os.environ.get(name)
     if value is None:
-        raise ValueError(
-            f"Environment variable '{name}' referenced in config is not set"
-        )
+        raise ValueError(f"Environment variable '{name}' referenced in config is not set")
     return value
-
-
-def _migrate_config(data: dict) -> dict:
-    """Migrate old config formats to current."""
-    agents = data.get("agents", {})
-    defaults = agents.get("defaults", {}) if isinstance(agents, dict) else {}
-    if isinstance(defaults, dict):
-        had_legacy_max_messages = (
-            "maxMessages" in defaults or "max_messages" in defaults
-        )
-        defaults.pop("maxMessages", None)
-        defaults.pop("max_messages", None)
-        if had_legacy_max_messages:
-            # TODO(next version): Remove this legacy cleanup branch; the schema
-            # will silently ignore this field once the warning grace period ends.
-            logger.warning(
-                "agents.defaults.maxMessages/max_messages is legacy and ignored; "
-                "replay max messages is now an internal safety cap. Remove it from "
-                "config. This compatibility warning will be removed in the next version."
-            )
-
-    # Move tools.exec.restrictToWorkspace → tools.restrictToWorkspace
-    tools = data.get("tools", {})
-    exec_cfg = tools.get("exec", {})
-    if "restrictToWorkspace" in exec_cfg and "restrictToWorkspace" not in tools:
-        tools["restrictToWorkspace"] = exec_cfg.pop("restrictToWorkspace")
-
-    # Move tools.myEnabled / tools.mySet → tools.my.{enable, allowSet}.
-    # The old flat keys shipped in the initial MyTool landing; wrapping them in a
-    # sub-config keeps `web` / `exec` / `my` symmetric and gives room to grow.
-    if "myEnabled" in tools or "mySet" in tools:
-        my_cfg = tools.setdefault("my", {})
-        if "myEnabled" in tools and "enable" not in my_cfg:
-            my_cfg["enable"] = tools.pop("myEnabled")
-        else:
-            tools.pop("myEnabled", None)
-        if "mySet" in tools and "allowSet" not in my_cfg:
-            my_cfg["allowSet"] = tools.pop("mySet")
-        else:
-            tools.pop("mySet", None)
-
-    return data

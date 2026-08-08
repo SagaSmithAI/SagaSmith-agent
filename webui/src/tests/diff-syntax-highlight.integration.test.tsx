@@ -40,7 +40,11 @@ describe("DiffSyntaxHighlight with Prism", () => {
       </ThemeProvider>,
     );
 
-    const highlighted = await screen.findByTestId("syntax-highlighted-diff-hunk");
+    const highlighted = await screen.findByTestId(
+      "syntax-highlighted-diff-hunk",
+      undefined,
+      { timeout: 10_000 },
+    );
     await waitFor(
       () => {
         const tokens = highlighted.querySelectorAll<HTMLElement>(

@@ -1162,26 +1162,6 @@ describe("useNanobotStream", () => {
     expect(result.current.messages).toHaveLength(0);
   });
 
-  it("treats legacy kind=reasoning messages as a complete delta + end pair", () => {
-    const fake = fakeClient();
-    const { result } = renderHook(() => useNanobotStream("chat-r4", EMPTY_MESSAGES), {
-      wrapper: wrap(fake.client),
-    });
-
-    act(() => {
-      fake.emit("chat-r4", {
-        event: "message",
-        chat_id: "chat-r4",
-        text: "one-shot reasoning",
-        kind: "reasoning",
-      });
-    });
-
-    expect(result.current.messages).toHaveLength(1);
-    expect(result.current.messages[0].reasoning).toBe("one-shot reasoning");
-    expect(result.current.messages[0].reasoningStreaming).toBe(false);
-  });
-
   it("starts a new Thought block when reasoning arrives after visible output", () => {
     const fake = fakeClient();
     const { result } = renderHook(() => useNanobotStream("chat-r5", EMPTY_MESSAGES), {

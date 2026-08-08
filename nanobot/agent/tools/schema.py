@@ -52,19 +52,17 @@ class StringSchema(Schema):
 
 
 class IntegerSchema(Schema):
-    """Integer parameter: optional placeholder int (legacy ctor signature), description, and bounds."""
+    """Integer parameter description and bounds."""
 
     def __init__(
         self,
-        value: int = 0,
-        *,
         description: str = "",
+        *,
         minimum: int | None = None,
         maximum: int | None = None,
         enum: tuple[int, ...] | list[int] | None = None,
         nullable: bool = False,
     ) -> None:
-        self._value = value
         self._description = description
         self._minimum = minimum
         self._maximum = maximum

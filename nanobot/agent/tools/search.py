@@ -122,6 +122,7 @@ class _SearchTool(_FsTool):
 
 class FindFilesTool(_SearchTool):
     """Find files by path fragment, glob, or type."""
+
     _scopes = {"core", "subagent"}
 
     @property
@@ -229,7 +230,9 @@ class FindFilesTool(_SearchTool):
             limit = (
                 _DEFAULT_FILE_HEAD_LIMIT
                 if head_limit is None
-                else None if head_limit == 0 else head_limit
+                else None
+                if head_limit == 0
+                else head_limit
             )
             root = target if target.is_dir() else target.parent
             matches: list[tuple[str, float]] = []
@@ -279,6 +282,7 @@ class FindFilesTool(_SearchTool):
 
 class GrepTool(_SearchTool):
     """Search file contents using a regex-like pattern."""
+
     _scopes = {"core", "subagent"}
 
     _MAX_RESULT_CHARS = 128_000
@@ -354,22 +358,6 @@ class GrepTool(_SearchTool):
                     "minimum": 0,
                     "maximum": 20,
                 },
-                "max_matches": {
-                    "type": "integer",
-                    "description": (
-                        "Legacy alias for head_limit in content mode"
-                    ),
-                    "minimum": 1,
-                    "maximum": 1000,
-                },
-                "max_results": {
-                    "type": "integer",
-                    "description": (
-                        "Legacy alias for head_limit in files_with_matches or count mode"
-                    ),
-                    "minimum": 1,
-                    "maximum": 1000,
-                },
                 "head_limit": {
                     "type": "integer",
                     "description": (
@@ -417,8 +405,6 @@ class GrepTool(_SearchTool):
         output_mode: str = "files_with_matches",
         context_before: int = 0,
         context_after: int = 0,
-        max_matches: int | None = None,
-        max_results: int | None = None,
         head_limit: int | None = None,
         offset: int = 0,
         **kwargs: Any,
@@ -439,10 +425,6 @@ class GrepTool(_SearchTool):
 
             if head_limit is not None:
                 limit = None if head_limit == 0 else head_limit
-            elif output_mode == "content" and max_matches is not None:
-                limit = max_matches
-            elif output_mode != "content" and max_results is not None:
-                limit = max_results
             else:
                 limit = _DEFAULT_HEAD_LIMIT
             blocks: list[str] = []
@@ -555,15 +537,11 @@ class GrepTool(_SearchTool):
 
             notes: list[str] = []
             if output_mode == "content" and truncated:
-                notes.append(
-                    f"(pagination: limit={limit}, offset={offset})"
-                )
+                notes.append(f"(pagination: limit={limit}, offset={offset})")
             elif output_mode == "content" and size_truncated:
                 notes.append("(output truncated due to size)")
             elif truncated and output_mode in {"count", "files_with_matches"}:
-                notes.append(
-                    f"(pagination: limit={limit}, offset={offset})"
-                )
+                notes.append(f"(pagination: limit={limit}, offset={offset})")
             elif output_mode in {"count", "files_with_matches"} and offset > 0:
                 notes.append(f"(pagination: offset={offset})")
             elif output_mode == "content" and offset > 0 and blocks:
@@ -573,9 +551,7 @@ class GrepTool(_SearchTool):
             if skipped_large:
                 notes.append(f"(skipped {skipped_large} large files)")
             if output_mode == "count" and counts:
-                notes.append(
-                    f"(total matches: {sum(counts.values())} in {len(counts)} files)"
-                )
+                notes.append(f"(total matches: {sum(counts.values())} in {len(counts)} files)")
             if notes:
                 result += "\n\n" + "\n".join(notes)
             return result

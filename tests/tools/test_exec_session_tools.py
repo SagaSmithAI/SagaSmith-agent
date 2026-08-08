@@ -18,7 +18,9 @@ from nanobot.agent.tools.shell import ExecTool
 
 def _python_command(code: str) -> str:
     if sys.platform == "win32":
-        return f"{subprocess.list2cmdline([sys.executable])} -u -c {subprocess.list2cmdline([code])}"
+        return (
+            f"{subprocess.list2cmdline([sys.executable])} -u -c {subprocess.list2cmdline([code])}"
+        )
     return f"{shlex.quote(sys.executable)} -u -c {shlex.quote(code)}"
 
 
@@ -40,12 +42,12 @@ def test_exec_keeps_one_shot_behavior_without_yield_time_ms(tmp_path):
     assert "session_id:" not in result
 
 
-def test_exec_accepts_command_aliases(tmp_path):
+def test_exec_accepts_canonical_command_fields(tmp_path):
     async def run() -> str:
         tool = ExecTool(working_dir="/")
         return await tool.execute(
-            cmd=_python_command("import os; print(os.getcwd())"),
-            workdir=str(tmp_path),
+            command=_python_command("import os; print(os.getcwd())"),
+            working_dir=str(tmp_path),
         )
 
     result = asyncio.run(run())
@@ -94,7 +96,7 @@ def test_exec_session_yield_returns_when_process_finishes_early(tmp_path):
     assert elapsed < 1.0
 
 
-def test_exec_session_accepts_max_output_tokens_alias(tmp_path):
+def test_exec_session_accepts_max_output_chars(tmp_path):
     async def run() -> str:
         manager = ExecSessionManager()
         tool = ExecTool(working_dir=str(tmp_path), timeout=5, session_manager=manager)
@@ -102,7 +104,7 @@ def test_exec_session_accepts_max_output_tokens_alias(tmp_path):
         return await tool.execute(
             command=command,
             yield_time_ms=1000,
-            max_output_tokens=1000,
+            max_output_chars=1000,
         )
 
     result = asyncio.run(run())
@@ -111,11 +113,11 @@ def test_exec_session_accepts_max_output_tokens_alias(tmp_path):
     assert "Exit code: 0" in result
 
 
-def test_exec_one_shot_accepts_max_output_tokens_alias(tmp_path):
+def test_exec_one_shot_accepts_max_output_chars(tmp_path):
     async def run() -> str:
         tool = ExecTool(working_dir=str(tmp_path), timeout=5)
         command = _python_command("print('A' * 2000)")
-        return await tool.execute(command=command, max_output_tokens=1000)
+        return await tool.execute(command=command, max_output_chars=1000)
 
     result = asyncio.run(run())
 
@@ -204,9 +206,7 @@ def test_write_stdin_can_terminate_session(tmp_path):
         manager = ExecSessionManager()
         exec_tool = ExecTool(working_dir=str(tmp_path), timeout=30, session_manager=manager)
         stdin_tool = WriteStdinTool(manager=manager)
-        command = _python_command(
-            "import time; print('ready', flush=True); time.sleep(30)"
-        )
+        command = _python_command("import time; print('ready', flush=True); time.sleep(30)")
 
         initial = await exec_tool.execute(command=command, yield_time_ms=100)
         sid = _session_id(initial)
@@ -229,21 +229,19 @@ def test_write_stdin_can_terminate_session(tmp_path):
     assert "Exit code:" in result
 
 
-def test_write_stdin_accepts_max_output_tokens_alias(tmp_path):
+def test_write_stdin_accepts_max_output_chars(tmp_path):
     async def run() -> tuple[str, str, str]:
         manager = ExecSessionManager()
         exec_tool = ExecTool(working_dir=str(tmp_path), timeout=5, session_manager=manager)
         stdin_tool = WriteStdinTool(manager=manager)
-        command = _python_command(
-            "import time; print('A' * 2000, flush=True); time.sleep(5)"
-        )
+        command = _python_command("import time; print('A' * 2000, flush=True); time.sleep(5)")
 
         initial = await exec_tool.execute(command=command, yield_time_ms=0)
         sid = _session_id(initial)
         poll = await stdin_tool.execute(
             session_id=sid,
             yield_time_ms=500,
-            max_output_tokens=1000,
+            max_output_chars=1000,
         )
         cleanup = await stdin_tool.execute(session_id=sid, terminate=True, yield_time_ms=0)
         return initial, poll, cleanup
@@ -260,8 +258,7 @@ def test_write_stdin_preserves_completed_session_output_until_polled(tmp_path):
         exec_tool = ExecTool(working_dir=str(tmp_path), timeout=5, session_manager=manager)
         stdin_tool = WriteStdinTool(manager=manager)
         command = _python_command(
-            "import time; print('ready', flush=True); "
-            "time.sleep(1.0); print('done', flush=True)"
+            "import time; print('ready', flush=True); time.sleep(1.0); print('done', flush=True)"
         )
 
         initial = await exec_tool.execute(command=command, yield_time_ms=300)
@@ -312,9 +309,7 @@ def test_write_stdin_wait_for_reports_timeout_without_killing_session(tmp_path):
         manager = ExecSessionManager()
         exec_tool = ExecTool(working_dir=str(tmp_path), timeout=5, session_manager=manager)
         stdin_tool = WriteStdinTool(manager=manager)
-        command = _python_command(
-            "import time; print('booting', flush=True); time.sleep(5)"
-        )
+        command = _python_command("import time; print('booting', flush=True); time.sleep(5)")
 
         initial = await exec_tool.execute(command=command, yield_time_ms=100)
         sid = _session_id(initial)
@@ -365,9 +360,7 @@ def test_list_exec_sessions_reports_running_commands(tmp_path):
         exec_tool = ExecTool(working_dir=str(tmp_path), timeout=5, session_manager=manager)
         list_tool = ListExecSessionsTool(manager=manager)
         stdin_tool = WriteStdinTool(manager=manager)
-        command = _python_command(
-            "import time; print('ready', flush=True); time.sleep(5)"
-        )
+        command = _python_command("import time; print('ready', flush=True); time.sleep(5)")
 
         initial = await exec_tool.execute(command=command, yield_time_ms=500)
         sid = _session_id(initial)

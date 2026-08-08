@@ -521,7 +521,7 @@ class TestIsAllowed:
         assert ch.is_allowed("+19995550001|1872ba20-uuid") is True
 
     def test_allows_composite_sender_against_composite_allowlist_entry(self):
-        """Backward compat: pipe-joined composite allowlist entries still match."""
+        """The canonical composite sender identity can be allowlisted exactly."""
         composite = "+19995550001|1872ba20-uuid"
         ch = _make_channel(dm_policy="allowlist", dm_allow_from=[composite])
         assert ch.is_allowed(composite) is True

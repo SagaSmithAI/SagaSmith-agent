@@ -262,7 +262,7 @@ class OutboundMessage:
     event: object | None # typed runtime/UI event; usually inspect with isinstance()
 ```
 
-Runtime/UI semantics live on `msg.event`. Plugin-authored outbound messages should use typed events instead of legacy metadata flags such as `_progress`, `_stream_delta`, `_stream_end`, `_reasoning_delta`, `_turn_end`, or `_goal_status`. nanobot still accepts those old flags as a compatibility bridge for existing in-process extensions, but new plugin code should not add fresh dependencies on them.
+Runtime/UI semantics live on `msg.event`. Plugin-authored outbound messages must use typed events; metadata flags such as `_progress`, `_stream_delta`, `_stream_end`, `_reasoning_delta`, `_turn_end`, or `_goal_status` are not interpreted.
 
 ## Streaming Support
 

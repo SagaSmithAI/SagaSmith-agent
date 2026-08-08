@@ -38,7 +38,7 @@ describe("bootstrap helpers", () => {
     );
   });
 
-  it("falls back to the current window host for legacy bootstrap payloads", () => {
+  it("falls back to the current window host when no websocket URL is provided", () => {
     expect(deriveWsUrl("/", "tok")).toBe(
       "ws://localhost:3000/?token=tok",
     );

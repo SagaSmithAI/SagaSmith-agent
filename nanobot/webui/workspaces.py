@@ -23,7 +23,6 @@ from nanobot.security.workspace_access import (
 WEBUI_WORKSPACE_STATE_SCHEMA_VERSION = 1
 _MAX_STATE_FILE_BYTES = 128 * 1024
 _DEFAULT_ACCESS_MODES = {"default", "full"}
-_LEGACY_RESTRICTED_DEFAULT_ACCESS_MODE = "restricted"
 _WEBUI_SCOPE_CHANNEL = "websocket"
 
 
@@ -106,8 +105,6 @@ def read_webui_default_access_mode() -> str:
 
 
 def write_webui_default_access_mode(mode: str) -> bool:
-    if mode == _LEGACY_RESTRICTED_DEFAULT_ACCESS_MODE:
-        mode = "default"
     if mode not in _DEFAULT_ACCESS_MODES:
         raise ValueError("default access mode must be default or full")
     state = read_webui_workspace_state()
@@ -146,7 +143,9 @@ def workspaces_payload(
             source_channel=_WEBUI_SCOPE_CHANNEL,
         )
         if default_access_mode == "default"
-        else build_workspace_scope(default_workspace, default_access_mode, source_channel=_WEBUI_SCOPE_CHANNEL)
+        else build_workspace_scope(
+            default_workspace, default_access_mode, source_channel=_WEBUI_SCOPE_CHANNEL
+        )
     )
     return {
         "schema_version": WEBUI_WORKSPACE_STATE_SCHEMA_VERSION,

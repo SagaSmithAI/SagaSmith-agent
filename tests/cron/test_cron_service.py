@@ -125,144 +125,6 @@ def test_unbound_agent_jobs_are_disabled_on_load(tmp_path) -> None:
     assert "missing bound session delivery context" in (job.state.last_error or "")
 
 
-def test_add_job_migrates_legacy_delivery_context(tmp_path) -> None:
-    service = CronService(tmp_path / "cron" / "jobs.json")
-    meta = {"slack": {"thread_ts": "1234567890.123456", "channel_type": "channel"}}
-    job = service.add_job(
-        name="thread test",
-        schedule=CronSchedule(kind="every", every_ms=60_000),
-        message="hello",
-        deliver=True,
-        channel="slack",
-        to="C123",
-        channel_meta=meta,
-        session_key="slack:C123:1234567890.123456",
-    )
-    assert job.payload.deliver is False
-    assert job.payload.channel is None
-    assert job.payload.to is None
-    assert job.payload.channel_meta == {}
-    assert job.payload.session_key == "slack:C123:1234567890.123456"
-    assert job.payload.origin_channel == "slack"
-    assert job.payload.origin_chat_id == "C123"
-    assert job.payload.origin_metadata == meta
-
-    reloaded = service.get_job(job.id)
-    assert reloaded is not None
-    assert reloaded.payload.channel_meta == {}
-    assert reloaded.payload.session_key == "slack:C123:1234567890.123456"
-    assert reloaded.payload.origin_channel == "slack"
-    assert reloaded.payload.origin_chat_id == "C123"
-    assert reloaded.payload.origin_metadata == meta
-
-
-def test_load_store_migrates_legacy_delivery_context(tmp_path) -> None:
-    store_path = tmp_path / "cron" / "jobs.json"
-    store_path.parent.mkdir(parents=True)
-    store_path.write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "jobs": [
-                    {
-                        "id": "legacy-1",
-                        "name": "Legacy reminder",
-                        "enabled": True,
-                        "schedule": {"kind": "every", "everyMs": 60_000},
-                        "payload": {
-                            "kind": "agent_turn",
-                            "message": "check status",
-                            "deliver": True,
-                            "channel": "telegram",
-                            "to": "user-1",
-                            "channelMeta": {"message_thread_id": 42},
-                            "sessionKey": "telegram:user-1:topic:42",
-                        },
-                        "state": {},
-                        "createdAtMs": 1,
-                        "updatedAtMs": 1,
-                    }
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    job = CronService(store_path).get_job("legacy-1")
-
-    assert job is not None
-    assert job.payload.session_key == "telegram:user-1:topic:42"
-    assert job.payload.origin_channel == "telegram"
-    assert job.payload.origin_chat_id == "user-1"
-    assert job.payload.origin_metadata == {"message_thread_id": 42}
-    assert job.payload.deliver is False
-    assert job.payload.channel is None
-    assert job.payload.to is None
-    assert job.payload.channel_meta == {}
-
-
-def test_load_store_disables_malformed_legacy_payload(tmp_path) -> None:
-    store_path = tmp_path / "cron" / "jobs.json"
-    store_path.parent.mkdir(parents=True)
-    store_path.write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "jobs": [
-                    {
-                        "id": "legacy-bad",
-                        "name": "Broken legacy",
-                        "enabled": True,
-                        "schedule": {"kind": "every", "everyMs": 60_000},
-                        "payload": {
-                            "kind": "agent_turn",
-                            "message": "check status",
-                            "deliver": True,
-                        },
-                        "state": {"nextRunAtMs": 123},
-                        "createdAtMs": 1,
-                        "updatedAtMs": 1,
-                    }
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    job = CronService(store_path).get_job("legacy-bad")
-
-    assert job is not None
-    assert job.enabled is False
-    assert job.state.next_run_at_ms is None
-    assert job.state.last_status == "error"
-    assert "missing channel/to" in (job.state.last_error or "")
-    assert job.payload.deliver is False
-
-
-def test_list_bound_agent_jobs_includes_migrated_legacy_delivery_payloads(tmp_path) -> None:
-    service = CronService(tmp_path / "cron" / "jobs.json")
-    schedule = CronSchedule(kind="every", every_ms=60_000)
-    bound = service.add_job(
-        name="Bound",
-        schedule=schedule,
-        message="new bound job",
-        session_key="websocket:chat-1",
-        origin_channel="websocket",
-        origin_chat_id="chat-1",
-    )
-    migrated = service.add_job(
-        name="Legacy same session",
-        schedule=schedule,
-        message="legacy job",
-        deliver=True,
-        channel="websocket",
-        to="chat-1",
-        session_key="websocket:chat-1",
-    )
-
-    assert service.list_bound_cron_jobs_for_session("websocket:chat-1") == [bound, migrated]
-
-
 def test_add_job_preserves_origin_delivery_context(tmp_path) -> None:
     service = CronService(tmp_path / "cron" / "jobs.json")
     metadata = {"slack": {"thread_ts": "1234567890.123456", "channel_type": "channel"}}
@@ -295,7 +157,7 @@ def test_add_job_preserves_origin_delivery_context(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_channel_meta_and_session_key_survive_store_reload(tmp_path) -> None:
+async def test_origin_context_and_session_key_survive_store_reload(tmp_path) -> None:
     store_path = tmp_path / "cron" / "jobs.json"
     service = CronService(store_path)
     await service.start()
@@ -305,10 +167,6 @@ async def test_channel_meta_and_session_key_survive_store_reload(tmp_path) -> No
             name="thread test",
             schedule=CronSchedule(kind="every", every_ms=60_000),
             message="hello",
-            deliver=True,
-            channel="slack",
-            to="C123",
-            channel_meta=meta,
             session_key="slack:C123:1234567890.123456",
             origin_channel="slack",
             origin_chat_id="C123",
@@ -319,10 +177,10 @@ async def test_channel_meta_and_session_key_survive_store_reload(tmp_path) -> No
 
     raw = json.loads(store_path.read_text(encoding="utf-8"))
     payload = raw["jobs"][0]["payload"]
-    assert payload["deliver"] is False
-    assert payload["channel"] is None
-    assert payload["to"] is None
-    assert payload["channelMeta"] == {}
+    assert "deliver" not in payload
+    assert "channel" not in payload
+    assert "to" not in payload
+    assert "channelMeta" not in payload
     assert payload["sessionKey"] == "slack:C123:1234567890.123456"
     assert payload["originChannel"] == "slack"
     assert payload["originChatId"] == "C123"
@@ -330,7 +188,6 @@ async def test_channel_meta_and_session_key_survive_store_reload(tmp_path) -> No
 
     reloaded = CronService(store_path).get_job(job.id)
     assert reloaded is not None
-    assert reloaded.payload.channel_meta == {}
     assert reloaded.payload.session_key == "slack:C123:1234567890.123456"
     assert reloaded.payload.origin_channel == "slack"
     assert reloaded.payload.origin_chat_id == "C123"
@@ -544,12 +401,14 @@ async def test_running_service_honors_external_disable(tmp_path) -> None:
 
 def test_remove_job_refuses_system_jobs(tmp_path) -> None:
     service = CronService(tmp_path / "cron" / "jobs.json")
-    service.register_system_job(CronJob(
+    service.register_system_job(
+        CronJob(
         id="dream",
         name="dream",
         schedule=CronSchedule(kind="cron", expr="0 */2 * * *", tz="UTC"),
         payload=CronPayload(kind="system_event"),
-    ))
+        )
+    )
 
     result = service.remove_job("dream")
 
@@ -561,6 +420,7 @@ def test_remove_job_refuses_system_jobs(tmp_path) -> None:
 async def test_start_server_not_jobs(tmp_path):
     store_path = tmp_path / "cron" / "jobs.json"
     called = []
+
     async def on_job(job):
         called.append(job.name)
 
@@ -841,12 +701,14 @@ def test_update_job_not_found(tmp_path) -> None:
 
 def test_update_job_rejects_system_job(tmp_path) -> None:
     service = CronService(tmp_path / "cron" / "jobs.json")
-    service.register_system_job(CronJob(
+    service.register_system_job(
+        CronJob(
         id="dream",
         name="dream",
         schedule=CronSchedule(kind="cron", expr="0 */2 * * *", tz="UTC"),
         payload=CronPayload(kind="system_event"),
-    ))
+        )
+    )
     result = service.update_job("dream", name="hacked")
     assert result == "protected"
     assert service.get_job("dream").name == "dream"
@@ -870,6 +732,7 @@ def test_update_job_validates_schedule(tmp_path) -> None:
 @pytest.mark.asyncio
 async def test_update_job_preserves_run_history(tmp_path) -> None:
     import asyncio
+
     store_path = tmp_path / "cron" / "jobs.json"
     service = CronService(store_path, on_job=lambda _: asyncio.sleep(0))
     job = service.add_job(
@@ -902,24 +765,6 @@ def test_update_job_offline_writes_action(tmp_path) -> None:
     last = json.loads(lines[-1])
     assert last["action"] == "update"
     assert last["params"]["name"] == "updated-offline"
-
-
-def test_update_job_migrates_legacy_delivery_target(tmp_path) -> None:
-    service = CronService(tmp_path / "cron" / "jobs.json")
-    job = service.add_job(
-        name="sentinel",
-        schedule=CronSchedule(kind="every", every_ms=60_000),
-        message="hello",
-    )
-
-    result = service.update_job(job.id, channel="telegram", to="user123")
-    assert isinstance(result, CronJob)
-    assert result.payload.session_key == "telegram:user123"
-    assert result.payload.origin_channel == "telegram"
-    assert result.payload.origin_chat_id == "user123"
-    assert result.payload.channel is None
-    assert result.payload.to is None
-    assert result.payload.channel_meta == {}
 
 
 @pytest.mark.asyncio

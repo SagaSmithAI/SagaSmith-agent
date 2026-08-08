@@ -277,15 +277,6 @@ async def test_session_automations_route_filters_by_webui_session(
         )
         if name == "Morning check":
             pending_job_id = job.id
-    cron.add_job(
-        name="Legacy same target",
-        schedule=hourly,
-        message="Legacy job should be migrated",
-        deliver=True,
-        channel="websocket",
-        to="abc",
-        session_key="websocket:abc",
-    )
     cron.register_system_job(
         CronJob(
             id="heartbeat",
@@ -318,13 +309,12 @@ async def test_session_automations_route_filters_by_webui_session(
 
         assert resp.status_code == 200
         body = resp.json()
-        assert [job["name"] for job in body["jobs"]] == ["Morning check", "Legacy same target"]
+        assert [job["name"] for job in body["jobs"]] == ["Morning check"]
         job = body["jobs"][0]
         assert job["schedule"]["kind"] == "every"
         assert job["schedule"]["every_ms"] == 3_600_000
         assert job["payload"]["message"] == "Check the project status"
         assert job["state"]["pending"] is True
-        assert body["jobs"][1]["state"]["pending"] is False
     finally:
         await channel.stop()
         await server_task
@@ -1633,13 +1623,6 @@ async def test_session_delete_can_cascade_bound_automations(
         session_key="websocket:doomed",
         origin_channel="websocket",
         origin_chat_id="doomed",
-    )
-    cron.add_job(
-        name="Legacy same target",
-        schedule=CronSchedule(kind="every", every_ms=86_400_000),
-        message="Legacy job remains",
-        channel="websocket",
-        to="doomed",
     )
     channel = _ch(bus, session_manager=sm, cron_service=cron, port=29916)
     server_task = asyncio.create_task(channel.start())

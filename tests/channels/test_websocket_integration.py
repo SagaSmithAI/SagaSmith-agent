@@ -122,14 +122,16 @@ async def test_plain_text(bus: MagicMock) -> None:
 
 
 @pytest.mark.asyncio
-async def test_json_content_field(bus: MagicMock) -> None:
+async def test_typed_message_envelope(bus: MagicMock) -> None:
     ch = _ch(bus, 29905)
     t = asyncio.create_task(ch.start())
     await asyncio.sleep(0.3)
     try:
         async with WsTestClient("ws://127.0.0.1:29905/", client_id="j") as c:
-            await c.recv_ready()
-            await c.send_json({"content": "structured"})
+            ready = await c.recv_ready()
+            await c.send_json(
+                {"type": "message", "chat_id": ready.chat_id, "content": "structured"}
+            )
             await asyncio.sleep(0.1)
             assert bus.publish_inbound.call_args[0][0].content == "structured"
     finally:
@@ -138,7 +140,7 @@ async def test_json_content_field(bus: MagicMock) -> None:
 
 
 @pytest.mark.asyncio
-async def test_json_text_and_message_fields(bus: MagicMock) -> None:
+async def test_untyped_message_aliases_are_rejected(bus: MagicMock) -> None:
     ch = _ch(bus, 29906)
     t = asyncio.create_task(ch.start())
     await asyncio.sleep(0.3)
@@ -146,11 +148,9 @@ async def test_json_text_and_message_fields(bus: MagicMock) -> None:
         async with WsTestClient("ws://127.0.0.1:29906/", client_id="x") as c:
             await c.recv_ready()
             await c.send_json({"text": "via text"})
-            await asyncio.sleep(0.1)
-            assert bus.publish_inbound.call_args[0][0].content == "via text"
             await c.send_json({"message": "via message"})
             await asyncio.sleep(0.1)
-            assert bus.publish_inbound.call_args[0][0].content == "via message"
+            bus.publish_inbound.assert_not_awaited()
     finally:
         await ch.stop()
         await t
@@ -541,7 +541,7 @@ async def test_rapid_fire(bus: MagicMock) -> None:
 
 
 @pytest.mark.asyncio
-async def test_invalid_json_as_plain_text(bus: MagicMock) -> None:
+async def test_json_like_content_roundtrip(bus: MagicMock) -> None:
     ch = _ch(bus, 29924)
     t = asyncio.create_task(ch.start())
     await asyncio.sleep(0.3)

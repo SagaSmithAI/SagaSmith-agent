@@ -19,21 +19,11 @@ from loguru import logger
 
 from nanobot.config.paths import get_media_dir
 from nanobot.utils.helpers import safe_filename
-from nanobot.utils.media_decode import (
-    MAX_FILE_SIZE,
-)
-from nanobot.utils.media_decode import (
-    FileSizeExceeded as _FileSizeExceeded,
-)
-from nanobot.utils.media_decode import (
-    save_base64_data_url as _save_base64_data_url,
-)
+from nanobot.utils.media_decode import MAX_FILE_SIZE, FileSizeExceeded, save_base64_data_url
 from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
 
 __all__ = (
     "MAX_FILE_SIZE",
-    "_FileSizeExceeded",
-    "_save_base64_data_url",
     "create_app",
     "handle_chat_completions",
 )
@@ -91,6 +81,7 @@ def _response_text(value: Any) -> str:
         return str(getattr(value, "content") or "")
     return str(value)
 
+
 # ---------------------------------------------------------------------------
 # SSE helpers
 # ---------------------------------------------------------------------------
@@ -144,7 +135,7 @@ def _parse_json_content(body: dict) -> tuple[str, list[str]]:
             elif part.get("type") == "image_url":
                 url = part.get("image_url", {}).get("url", "")
                 if url.startswith("data:"):
-                    saved = _save_base64_data_url(url, media_dir)
+                    saved = save_base64_data_url(url, media_dir)
                     if saved:
                         media_paths.append(saved)
                 elif url:
@@ -183,7 +174,7 @@ async def _parse_multipart(request: web.Request) -> tuple[str, list[str], str | 
         elif part.name == "files":
             raw = await part.read()
             if len(raw) > MAX_FILE_SIZE:
-                raise _FileSizeExceeded(
+                raise FileSizeExceeded(
                     f"File '{part.filename}' exceeds {MAX_FILE_SIZE // (1024 * 1024)}MB limit"
                 )
             base = safe_filename(part.filename or "upload.bin")
@@ -228,7 +219,7 @@ async def handle_chat_completions(request: web.Request) -> web.Response:
             session_id = body.get("session_id")
     except ValueError as e:
         return _error_json(400, str(e))
-    except _FileSizeExceeded as e:
+    except FileSizeExceeded as e:
         return _error_json(413, str(e), err_type="invalid_request_error")
     except Exception:
         logger.exception("Error parsing upload")
@@ -243,7 +234,10 @@ async def handle_chat_completions(request: web.Request) -> web.Response:
 
     logger.info(
         "API request session_key={} media={} text={} stream={}",
-        session_key, len(media_paths), text[:80], stream,
+        session_key,
+        len(media_paths),
+        text[:80],
+        stream,
     )
     # -- streaming path --
     if stream:
@@ -360,7 +354,9 @@ async def handle_chat_completions(request: web.Request) -> web.Response:
         return _error_json(500, "Internal server error", err_type="server_error")
 
     return web.json_response(
-        _chat_completion_response(response_text, model_name, getattr(agent_loop, "_last_usage", None))
+        _chat_completion_response(
+            response_text, model_name, getattr(agent_loop, "_last_usage", None)
+        )
     )
 
 

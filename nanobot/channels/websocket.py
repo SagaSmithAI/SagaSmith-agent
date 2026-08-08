@@ -170,26 +170,6 @@ def publish_runtime_model_update(
     )
 
 
-def _parse_inbound_payload(raw: str) -> str | None:
-    """Parse a client frame into text; return None for empty or unrecognized content."""
-    text = raw.strip()
-    if not text:
-        return None
-    if text.startswith("{"):
-        try:
-            data = json.loads(text)
-        except json.JSONDecodeError:
-            return text
-        if isinstance(data, dict):
-            for key in ("content", "text", "message"):
-                value = data.get(key)
-                if isinstance(value, str) and value.strip():
-                    return value
-            return None
-        return None
-    return text
-
-
 # Accept UUIDs and short scoped keys like "unified:default". Keeps the capability
 # namespace small enough to rule out path traversal / quote injection tricks.
 _CHAT_ID_RE = re.compile(r"^[A-Za-z0-9_:-]{1,64}$")
@@ -200,12 +180,7 @@ def _is_valid_chat_id(value: Any) -> bool:
 
 
 def _parse_envelope(raw: str) -> dict[str, Any] | None:
-    """Return a typed envelope dict if the frame is a new-style JSON envelope, else None.
-
-    A frame qualifies when it parses as a JSON object with a string ``type`` field.
-    Legacy frames (plain text, or ``{"content": ...}`` without ``type``) return None;
-    callers should fall back to :func:`_parse_inbound_payload` for those.
-    """
+    """Return a typed JSON envelope, or ``None`` for an invalid frame."""
     text = raw.strip()
     if not text.startswith("{"):
         return None
@@ -232,18 +207,22 @@ _MAX_VIDEO_BYTES = 20 * 1024 * 1024
 
 # Image MIME whitelist — matches the Composer's ``accept`` list. SVG is
 # explicitly excluded to avoid the XSS surface inside embedded scripts.
-_IMAGE_MIME_ALLOWED: frozenset[str] = frozenset({
+_IMAGE_MIME_ALLOWED: frozenset[str] = frozenset(
+    {
     "image/png",
     "image/jpeg",
     "image/webp",
     "image/gif",
-})
+    }
+)
 
-_VIDEO_MIME_ALLOWED: frozenset[str] = frozenset({
+_VIDEO_MIME_ALLOWED: frozenset[str] = frozenset(
+    {
     "video/mp4",
     "video/webm",
     "video/quicktime",
-})
+    }
+)
 
 _UPLOAD_MIME_ALLOWED: frozenset[str] = _IMAGE_MIME_ALLOWED | _VIDEO_MIME_ALLOWED
 
@@ -292,8 +271,6 @@ class WebSocketChannel(BaseChannel):
         self._subs: dict[str, set[Any]] = {}
         # connection -> chat_ids it is subscribed to (O(1) cleanup on disconnect).
         self._conn_chats: dict[Any, set[str]] = {}
-        # connection -> default chat_id for legacy frames that omit routing.
-        self._conn_default: dict[Any, str] = {}
         self._stop_event: asyncio.Event | None = None
         self._server_task: asyncio.Task[None] | None = None
 
@@ -326,7 +303,6 @@ class WebSocketChannel(BaseChannel):
             subs.discard(connection)
             if not subs:
                 self._subs.pop(cid, None)
-        self._conn_default.pop(connection, None)
 
     async def _maybe_push_active_goal_state(self, chat_id: str) -> None:
         """Replay an active sustained goal from session metadata after *chat_id* is subscribed.
@@ -545,7 +521,6 @@ class WebSocketChannel(BaseChannel):
                 )
             )
             # Register only after ready is successfully sent to avoid out-of-order sends
-            self._conn_default[connection] = default_chat_id
             self._attach(connection, default_chat_id)
             await self._hydrate_after_subscribe(default_chat_id)
 
@@ -558,23 +533,14 @@ class WebSocketChannel(BaseChannel):
                         continue
 
                 envelope = _parse_envelope(raw)
-                if envelope is not None:
-                    await self._dispatch_envelope(connection, client_id, envelope)
-                    continue
-
-                content = _parse_inbound_payload(raw)
-                if content is None:
-                    continue
-                # WebSocket already authenticates at handshake time (token),
-                # so pairing is not applicable. Treat as non-DM to avoid
-                # sending pairing codes to an already-authenticated client.
-                await self._handle_message(
-                    sender_id=client_id,
-                    chat_id=default_chat_id,
-                    content=content,
-                    metadata={"remote": getattr(connection, "remote_address", None)},
-                    is_dm=False,
+                if envelope is None:
+                    await self._send_event(
+                        connection,
+                        "error",
+                        detail="WebSocket frames must be typed JSON envelopes",
                 )
+                    continue
+                await self._dispatch_envelope(connection, client_id, envelope)
         except Exception as e:
             self.logger.debug("connection ended: {}", e)
         finally:
@@ -600,7 +566,9 @@ class WebSocketChannel(BaseChannel):
         image_count = 0
         video_count = 0
         for item in media:
-            mime = _extract_data_url_mime(item.get("data_url", "")) if isinstance(item, dict) else None
+            mime = (
+                _extract_data_url_mime(item.get("data_url", "")) if isinstance(item, dict) else None
+            )
             if mime in _VIDEO_MIME_ALLOWED:
                 video_count += 1
             elif mime in _IMAGE_MIME_ALLOWED:
@@ -618,9 +586,7 @@ class WebSocketChannel(BaseChannel):
                 try:
                     Path(p).unlink(missing_ok=True)
                 except OSError as exc:
-                    self.logger.warning(
-                        "failed to unlink partial media {}: {}", p, exc
-                    )
+                    self.logger.warning("failed to unlink partial media {}: {}", p, exc)
             return [], reason
 
         for item in media:
@@ -638,7 +604,9 @@ class WebSocketChannel(BaseChannel):
             max_bytes = _MAX_VIDEO_BYTES if is_video else _MAX_IMAGE_BYTES
             try:
                 saved = save_base64_data_url(
-                    data_url, media_dir, max_bytes=max_bytes,
+                    data_url,
+                    media_dir,
+                    max_bytes=max_bytes,
                 )
             except FileSizeExceeded:
                 return _abort("size")
@@ -738,15 +706,19 @@ class WebSocketChannel(BaseChannel):
             if raw_media is not None:
                 if not isinstance(raw_media, list):
                     await self._send_event(
-                        connection, "error",
-                        detail="image_rejected", reason="malformed",
+                        connection,
+                        "error",
+                        detail="image_rejected",
+                        reason="malformed",
                     )
                     return
                 media_paths, reason = self._save_envelope_media(raw_media)
                 if reason is not None:
                     await self._send_event(
-                        connection, "error",
-                        detail="image_rejected", reason=reason,
+                        connection,
+                        "error",
+                        detail="image_rejected",
+                        reason=reason,
                     )
                     return
 
@@ -841,7 +813,6 @@ class WebSocketChannel(BaseChannel):
             self._server_task = None
         self._subs.clear()
         self._conn_chats.clear()
-        self._conn_default.clear()
         self._tokens.clear()
 
     async def _safe_send_to(self, connection: Any, raw: str, *, label: str = "") -> None:

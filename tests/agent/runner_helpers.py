@@ -1,4 +1,4 @@
-"""Compatibility helpers while runner tests migrate to immutable runtimes."""
+"""Concise builders for immutable runner test runtimes."""
 
 from __future__ import annotations
 
@@ -11,13 +11,7 @@ from nanobot.utils.llm_runtime import LLMRuntime
 
 
 def make_run_spec(provider: LLMProvider, **kwargs: Any) -> AgentRunSpec:
-    """Build a run spec from the pre-runtime test arguments.
-
-    Keeping this translation in test support makes production's execution
-    contract strict while avoiding irrelevant setup noise in runner behavior
-    tests.  New tests should pass ``runtime`` to ``AgentRunSpec`` directly when
-    runtime identity is itself under test.
-    """
+    """Build a strict run spec without repeating runtime setup in behavior tests."""
     model = kwargs.pop("model")
     context_window_tokens = kwargs.pop(
         "context_window_tokens",

@@ -6,7 +6,7 @@ import asyncio
 import json
 from typing import Any
 
-from nanobot.agent.npc_turn import NpcTurnError, NpcTurnRunner
+from nanobot.agent.isolated_evaluation import IsolatedEvaluationError, IsolatedEvaluationRunner
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
 from nanobot.agent.tools.context import current_request_context
 from nanobot.agent.tools.schema import BooleanSchema, ObjectSchema, tool_parameters_schema
@@ -30,12 +30,12 @@ class PortrayNpcTool(Tool):
 
     _scopes = {"core"}
 
-    def __init__(self, runner: NpcTurnRunner | None) -> None:
+    def __init__(self, runner: IsolatedEvaluationRunner | None) -> None:
         self._runner = runner
 
     @classmethod
     def create(cls, ctx: Any) -> Tool:
-        return cls(runner=ctx.npc_turn_runner)
+        return cls(runner=ctx.isolated_evaluation_runner)
 
     @property
     def name(self) -> str:
@@ -62,11 +62,12 @@ class PortrayNpcTool(Tool):
             return ToolResult.error("Error: portray_npc requires an active model runtime")
         try:
             result = await self._runner.run(
+                "npc_turn",
                 bundle,
                 runtime=request.runtime,
                 strict_guardian=bool(strict_guardian),
             )
-        except (NpcTurnError, asyncio.TimeoutError) as exc:
+        except (IsolatedEvaluationError, asyncio.TimeoutError) as exc:
             return ToolResult.error(f"Error: isolated NPC portrayal rejected: {exc}")
         return json.dumps(
             {

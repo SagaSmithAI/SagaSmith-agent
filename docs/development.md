@@ -46,7 +46,7 @@ Useful `ProviderSpec` options:
 
 Transcription is intentionally split into two layers:
 
-- `nanobot/audio/transcription_registry.py` owns provider names, aliases, default models, and adapter loading.
+- `nanobot/audio/transcription_registry.py` owns canonical provider names, default models, and adapter loading.
 - `nanobot/providers/transcription.py` owns provider-specific HTTP behavior.
 
 Credentials still live under `providers.<provider>` so chat channels and WebUI resolve API keys and API bases the same way.
@@ -103,7 +103,6 @@ TranscriptionProviderSpec(
     name="my_stt",
     default_model="my-default-stt-model",
     adapter="nanobot.providers.transcription:MySTTTranscriptionProvider",
-    aliases=("mystt",),
 )
 ```
 

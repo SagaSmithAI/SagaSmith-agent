@@ -9,7 +9,6 @@ from nanobot.providers.openai_responses.converters import (
 from nanobot.providers.openai_responses.parsing import (
     FINISH_REASON_MAP,
     consume_sdk_stream,
-    consume_sse,
     consume_sse_with_reasoning,
     iter_sse,
     map_finish_reason,
@@ -22,7 +21,6 @@ __all__ = [
     "convert_user_message",
     "split_tool_call_id",
     "iter_sse",
-    "consume_sse",
     "consume_sse_with_reasoning",
     "consume_sdk_stream",
     "map_finish_reason",

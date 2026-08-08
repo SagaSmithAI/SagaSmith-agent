@@ -928,23 +928,8 @@ export function useNanobotStream(
       if (ev.event === "message") {
         if (
           suppressStreamUntilTurnEndRef.current &&
-          (ev.kind === "tool_hint" || ev.kind === "progress" || ev.kind === "reasoning")
+          (ev.kind === "tool_hint" || ev.kind === "progress")
         ) {
-          return;
-        }
-        // Back-compat: a legacy ``kind: "reasoning"`` message (no streaming
-        // partner) is treated as one complete delta + immediate end so the
-        // bubble renders identically to the streaming path.
-        if (ev.kind === "reasoning") {
-          const line = ev.text;
-          if (!line) return;
-          if (fileEditSegmentRef.current) clearActivitySegment();
-          setMessages((prev) => closeReasoningStream(attachReasoningChunk(
-            prev,
-            line,
-            { ensure: ensureActivitySegmentId },
-            turnFieldsFromEvent(ev, "reasoning"),
-          )));
           return;
         }
         // Intermediate agent breadcrumbs (tool-call hints, raw progress).

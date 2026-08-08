@@ -56,6 +56,7 @@ SEARCH_PROVIDER_OPTIONS: tuple[dict[str, str], ...] = (
 
 class WebSearchConfig(Base):
     """Web search configuration."""
+
     provider: str = "duckduckgo"
     api_key: str = ""
     base_url: str = ""
@@ -65,11 +66,13 @@ class WebSearchConfig(Base):
 
 class WebFetchConfig(Base):
     """Web fetch tool configuration."""
+
     use_jina_reader: bool = True
 
 
 class WebToolsConfig(Base):
     """Web tools configuration."""
+
     enable: bool = True
     proxy: str | None = None
     user_agent: str | None = None
@@ -79,23 +82,23 @@ class WebToolsConfig(Base):
 
 def _strip_tags(text: str) -> str:
     """Remove HTML tags and decode entities."""
-    text = re.sub(r'<script[\s\S]*?</script>', '', text, flags=re.I)
-    text = re.sub(r'<style[\s\S]*?</style>', '', text, flags=re.I)
-    text = re.sub(r'<[^>]+>', '', text)
+    text = re.sub(r"<script[\s\S]*?</script>", "", text, flags=re.I)
+    text = re.sub(r"<style[\s\S]*?</style>", "", text, flags=re.I)
+    text = re.sub(r"<[^>]+>", "", text)
     return html.unescape(text).strip()
 
 
 def _normalize(text: str) -> str:
     """Normalize whitespace."""
-    text = re.sub(r'[ \t]+', ' ', text)
-    return re.sub(r'\n{3,}', '\n\n', text).strip()
+    text = re.sub(r"[ \t]+", " ", text)
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
 def _validate_url(url: str) -> tuple[bool, str]:
     """Validate URL scheme/domain. Does NOT check resolved IPs (use _validate_url_safe for that)."""
     try:
         p = urlparse(url)
-        if p.scheme not in ('http', 'https'):
+        if p.scheme not in ("http", "https"):
             return False, f"Only http/https allowed, got '{p.scheme or 'none'}'"
         if not p.netloc:
             return False, "Missing domain"
@@ -251,8 +254,7 @@ def _normalize_volcengine_time_range(value: Any) -> str | None:
     if time_range in _VOLCENGINE_TIME_RANGES or _VOLCENGINE_DATE_RANGE_RE.fullmatch(time_range):
         return time_range
     raise ValueError(
-        "timeRange must be OneDay, OneWeek, OneMonth, OneYear, "
-        "or YYYY-MM-DD..YYYY-MM-DD"
+        "timeRange must be OneDay, OneWeek, OneMonth, OneYear, or YYYY-MM-DD..YYYY-MM-DD"
     )
 
 
@@ -271,13 +273,12 @@ def _normalize_volcengine_auth_level(value: Any) -> int | None:
 @tool_parameters(
     tool_parameters_schema(
         query=StringSchema("Search query"),
-        count=IntegerSchema(1, description="Results (1-10)", minimum=1, maximum=10),
+        count=IntegerSchema(description="Results (1-10)", minimum=1, maximum=10),
         timeRange=StringSchema(
             "Optional time filter for providers that support it: "
             "OneDay, OneWeek, OneMonth, OneYear, or YYYY-MM-DD..YYYY-MM-DD",
         ),
         authLevel=IntegerSchema(
-            0,
             description="Optional authority filter for providers that support it: 0=all, 1=authoritative",
             minimum=0,
             maximum=1,
@@ -290,6 +291,7 @@ def _normalize_volcengine_auth_level(value: Any) -> int | None:
 )
 class WebSearchTool(Tool):
     """Search the web using configured provider."""
+
     _scopes = {"core", "subagent"}
 
     name = "web_search"
@@ -314,9 +316,12 @@ class WebSearchTool(Tool):
     def create(cls, ctx: Any) -> Tool:
         config_loader = None
         if ctx.provider_snapshot_loader is not None:
+
             def config_loader():
                 from nanobot.config.loader import load_config, resolve_config_env_vars
+
                 return resolve_config_env_vars(load_config()).tools.web.search
+
         return cls(
             config=ctx.config.web.search,
             proxy=ctx.config.web.proxy,
@@ -418,7 +423,9 @@ class WebSearchTool(Tool):
                 n,
                 time_range=kwargs.get("timeRange", kwargs.get("time_range", time_range)),
                 auth_level=kwargs.get("authLevel", kwargs.get("auth_level", auth_level)),
-                query_rewrite=kwargs.get("queryRewrite", kwargs.get("query_rewrite", query_rewrite)),
+                query_rewrite=kwargs.get(
+                    "queryRewrite", kwargs.get("query_rewrite", query_rewrite)
+                ),
             )
         if provider == "duckduckgo":
             return await self._search_duckduckgo(query, n)
@@ -451,7 +458,9 @@ class WebSearchTool(Tool):
         try:
             from olostep import AsyncOlostep, Olostep_BaseError
         except ImportError:
-            return ToolResult.error("Error: olostep package not installed. Run: pip install olostep")
+            return ToolResult.error(
+                "Error: olostep package not installed. Run: pip install olostep"
+            )
         api_key = self.config.api_key or os.environ.get("OLOSTEP_API_KEY", "")
         if not api_key:
             logger.warning("OLOSTEP_API_KEY not set, falling back to DuckDuckGo")
@@ -492,7 +501,13 @@ class WebSearchTool(Tool):
                     source_lines.append(f"{i}. {title}")
 
             answer_text = getattr(result, "answer", "") or ""
-            items = [{"title": answer_text or "Olostep answer", "url": "", "content": "\n".join(source_lines)}]
+            items = [
+                {
+                    "title": answer_text or "Olostep answer",
+                    "url": "",
+                    "content": "\n".join(source_lines),
+                }
+            ]
             return _format_results(query, items, n)
         except Olostep_BaseError as e:
             return ToolResult.error(f"Error: Olostep search error: {type(e).__name__}: {e}")
@@ -525,7 +540,11 @@ class WebSearchTool(Tool):
                         await asyncio.sleep(1.0)
                 r.raise_for_status()
             items = [
-                {"title": x.get("title", ""), "url": x.get("url", ""), "content": x.get("description", "")}
+                {
+                    "title": x.get("title", ""),
+                    "url": x.get("url", ""),
+                    "content": x.get("description", ""),
+                }
                 for x in r.json().get("web", {}).get("results", [])
             ]
             return _format_results(query, items, n)
@@ -590,8 +609,12 @@ class WebSearchTool(Tool):
             return _format_results(query, items, n)
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 429:
-                return ToolResult.error("Error: Keenable search rate limited. Try again later or reduce search frequency.")
-            return ToolResult.error(f"Error: Keenable search failed ({e.response.status_code}): {e}")
+                return ToolResult.error(
+                    "Error: Keenable search rate limited. Try again later or reduce search frequency."
+                )
+            return ToolResult.error(
+                f"Error: Keenable search failed ({e.response.status_code}): {e}"
+            )
         except Exception as e:
             return ToolResult.error(f"Error: Keenable search failed: {e}")
 
@@ -638,7 +661,11 @@ class WebSearchTool(Tool):
                 r.raise_for_status()
             data = r.json().get("data", [])[:n]
             items = [
-                {"title": d.get("title", ""), "url": d.get("url", ""), "content": d.get("content", "")[:500]}
+                {
+                    "title": d.get("title", ""),
+                    "url": d.get("url", ""),
+                    "content": d.get("content", "")[:500],
+                }
                 for d in data
             ]
             return _format_results(query, items, n)
@@ -661,7 +688,11 @@ class WebSearchTool(Tool):
                 )
                 r.raise_for_status()
             items = [
-                {"title": d.get("title", ""), "url": d.get("url", ""), "content": d.get("snippet", "")}
+                {
+                    "title": d.get("title", ""),
+                    "url": d.get("url", ""),
+                    "content": d.get("snippet", ""),
+                }
                 for d in r.json().get("data", {}).get("search", [])
             ]
             return _format_results(query, items, n)
@@ -713,7 +744,9 @@ class WebSearchTool(Tool):
             return _format_results(query, items, n)
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 429:
-                return ToolResult.error("Error: Exa search rate limited. Try again later or reduce search frequency.")
+                return ToolResult.error(
+                    "Error: Exa search rate limited. Try again later or reduce search frequency."
+                )
             return ToolResult.error(f"Error: Exa search failed ({e.response.status_code}): {e}")
         except Exception as e:
             return ToolResult.error(f"Error: Exa search failed: {e}")
@@ -750,7 +783,9 @@ class WebSearchTool(Tool):
             return _format_results(query, items, n)
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 429:
-                return ToolResult.error("Error: Serper search rate limited. Try again later or reduce search frequency.")
+                return ToolResult.error(
+                    "Error: Serper search rate limited. Try again later or reduce search frequency."
+                )
             return ToolResult.error(f"Error: Serper search failed ({e.response.status_code}): {e}")
         except Exception as e:
             return ToolResult.error(f"Error: Serper search failed: {e}")
@@ -770,12 +805,18 @@ class WebSearchTool(Tool):
             or os.environ.get("WEB_SEARCH_API_KEY", "")
         )
         if not api_key:
-            logger.warning("VOLCENGINE_SEARCH_API_KEY/WEB_SEARCH_API_KEY not set, falling back to DuckDuckGo")
+            logger.warning(
+                "VOLCENGINE_SEARCH_API_KEY/WEB_SEARCH_API_KEY not set, falling back to DuckDuckGo"
+            )
             return await self._search_duckduckgo(query, n)
 
         try:
-            normalized_time_range = _normalize_volcengine_time_range(time_range) if time_range else None
-            normalized_auth_level = _normalize_volcengine_auth_level(auth_level) if auth_level is not None else None
+            normalized_time_range = (
+                _normalize_volcengine_time_range(time_range) if time_range else None
+            )
+            normalized_auth_level = (
+                _normalize_volcengine_auth_level(auth_level) if auth_level is not None else None
+            )
         except ValueError as e:
             return ToolResult.error(f"Error: {e}")
 
@@ -810,12 +851,20 @@ class WebSearchTool(Tool):
             data = r.json()
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 429:
-                return ToolResult.error("Error: Volcengine search rate limited. Try again later or reduce search frequency.")
-            return ToolResult.error(f"Error: Volcengine search failed ({e.response.status_code}): {e}")
+                return ToolResult.error(
+                    "Error: Volcengine search rate limited. Try again later or reduce search frequency."
+                )
+            return ToolResult.error(
+                f"Error: Volcengine search failed ({e.response.status_code}): {e}"
+            )
         except Exception as e:
             return ToolResult.error(f"Error: Volcengine search failed: {e}")
 
-        error = (data.get("ResponseMetadata") or {}).get("Error") or data.get("Error") or data.get("error")
+        error = (
+            (data.get("ResponseMetadata") or {}).get("Error")
+            or data.get("Error")
+            or data.get("error")
+        )
         if error:
             if isinstance(error, dict):
                 code = error.get("Code") or error.get("code") or "unknown"
@@ -824,7 +873,9 @@ class WebSearchTool(Tool):
             return ToolResult.error(f"Error: Volcengine search error: {error}")
 
         result = data.get("Result") or data
-        web_results = result.get("WebResults") or result.get("webResults") or result.get("results") or []
+        web_results = (
+            result.get("WebResults") or result.get("webResults") or result.get("results") or []
+        )
         items: list[dict[str, Any]] = []
         for item in web_results:
             if not isinstance(item, dict):
@@ -872,7 +923,11 @@ class WebSearchTool(Tool):
             if not raw:
                 return f"No results for: {query}"
             items = [
-                {"title": r.get("title", ""), "url": r.get("href", ""), "content": r.get("body", "")}
+                {
+                    "title": r.get("title", ""),
+                    "url": r.get("href", ""),
+                    "content": r.get("body", ""),
+                }
                 for r in raw
             ]
             return _format_results(query, items, n)
@@ -906,7 +961,9 @@ class WebSearchTool(Tool):
                     timeout=self.config.timeout,
                 )
                 if r.status_code == 429:
-                    return ToolResult.error("Error: Bocha search rate-limited (HTTP 429). Wait and retry.")
+                    return ToolResult.error(
+                        "Error: Bocha search rate-limited (HTTP 429). Wait and retry."
+                    )
                 r.raise_for_status()
             data = r.json()
             wrapped_data = data.get("data") if isinstance(data, dict) else None
@@ -926,7 +983,9 @@ class WebSearchTool(Tool):
             ]
             return _format_results(query, items, n)
         except httpx.HTTPStatusError as e:
-            return ToolResult.error(f"Error: Bocha search HTTP {e.response.status_code}: {e.response.text[:200]}")
+            return ToolResult.error(
+                f"Error: Bocha search HTTP {e.response.status_code}: {e.response.text[:200]}"
+            )
         except Exception as e:
             return ToolResult.error(f"Error: {e}")
 
@@ -939,12 +998,13 @@ class WebSearchTool(Tool):
             "enum": ["markdown", "text"],
             "default": "markdown",
         },
-        maxChars=IntegerSchema(0, minimum=100),
+        maxChars=IntegerSchema(minimum=100),
         required=["url"],
     )
 )
 class WebFetchTool(Tool):
     """Fetch and extract content from a URL."""
+
     _scopes = {"core", "subagent"}
 
     name = "web_fetch"
@@ -972,7 +1032,13 @@ class WebFetchTool(Tool):
             user_agent=ctx.config.web.user_agent,
         )
 
-    def __init__(self, config: WebFetchConfig | None = None, proxy: str | None = None, user_agent: str | None = None, max_chars: int = 50000):
+    def __init__(
+        self,
+        config: WebFetchConfig | None = None,
+        proxy: str | None = None,
+        user_agent: str | None = None,
+        max_chars: int = 50000,
+    ):
         self.config = config if config is not None else WebFetchConfig()
         self.proxy = proxy
         self.user_agent = user_agent or _DEFAULT_USER_AGENT
@@ -994,7 +1060,9 @@ class WebFetchTool(Tool):
         max_chars = kwargs.pop("maxChars", max_chars) or self.max_chars
         is_valid, error_msg = _validate_url_safe(url)
         if not is_valid:
-            return json.dumps({"error": f"URL validation failed: {error_msg}", "url": url}, ensure_ascii=False)
+            return json.dumps(
+                {"error": f"URL validation failed: {error_msg}", "url": url}, ensure_ascii=False
+            )
 
         # Detect and fetch images directly to avoid Jina's textual image captioning
         try:
@@ -1016,14 +1084,19 @@ class WebFetchTool(Tool):
                     if ctype.startswith("image/"):
                         r.raise_for_status()
                         raw = await r.aread()
-                        return build_image_content_blocks(raw, ctype, url, f"(Image fetched from: {url})")
+                        return build_image_content_blocks(
+                            raw, ctype, url, f"(Image fetched from: {url})"
+                        )
                 finally:
                     if stream is not None:
                         await stream.__aexit__(None, None, None)
         except Exception as e:
             unsafe_error = _unsafe_url_request_error(e)
             if unsafe_error is not None:
-                return json.dumps({"error": f"URL validation failed: {unsafe_error}", "url": url}, ensure_ascii=False)
+                return json.dumps(
+                    {"error": f"URL validation failed: {unsafe_error}", "url": url},
+                    ensure_ascii=False,
+                )
             logger.debug("Pre-fetch image detection failed for {}: {}", url, e)
 
         result = None
@@ -1060,11 +1133,19 @@ class WebFetchTool(Tool):
                 text = text[:max_chars]
             text = f"{_UNTRUSTED_BANNER}\n\n{text}"
 
-            return json.dumps({
-                "url": url, "finalUrl": data.get("url", url), "status": r.status_code,
-                "extractor": "jina", "truncated": truncated, "length": len(text),
-                "untrusted": True, "text": text,
-            }, ensure_ascii=False)
+            return json.dumps(
+                {
+                    "url": url,
+                    "finalUrl": data.get("url", url),
+                    "status": r.status_code,
+                    "extractor": "jina",
+                    "truncated": truncated,
+                    "length": len(text),
+                    "untrusted": True,
+                    "text": text,
+                },
+                ensure_ascii=False,
+            )
         except Exception as e:
             logger.debug("Jina Reader failed for {}, falling back to readability: {}", url, e)
             return None
@@ -1088,7 +1169,9 @@ class WebFetchTool(Tool):
 
             ctype = r.headers.get("content-type", "")
             if ctype.startswith("image/"):
-                return build_image_content_blocks(r.content, ctype, url, f"(Image fetched from: {url})")
+                return build_image_content_blocks(
+                    r.content, ctype, url, f"(Image fetched from: {url})"
+                )
 
             if "application/json" in ctype:
                 text, extractor = json.dumps(r.json(), indent=2, ensure_ascii=False), "json"
@@ -1107,11 +1190,19 @@ class WebFetchTool(Tool):
                 text = text[:max_chars]
             text = f"{_UNTRUSTED_BANNER}\n\n{text}"
 
-            return json.dumps({
-                "url": url, "finalUrl": str(r.url), "status": r.status_code,
-                "extractor": extractor, "truncated": truncated, "length": len(text),
-                "untrusted": True, "text": text,
-            }, ensure_ascii=False)
+            return json.dumps(
+                {
+                    "url": url,
+                    "finalUrl": str(r.url),
+                    "status": r.status_code,
+                    "extractor": extractor,
+                    "truncated": truncated,
+                    "length": len(text),
+                    "untrusted": True,
+                    "text": text,
+                },
+                ensure_ascii=False,
+            )
         except httpx.ProxyError as e:
             logger.exception("WebFetch proxy error for {}", url)
             return json.dumps({"error": f"Proxy error: {e}", "url": url}, ensure_ascii=False)
@@ -1129,11 +1220,21 @@ class WebFetchTool(Tool):
 
     def _to_markdown(self, html_content: str) -> str:
         """Convert HTML to markdown."""
-        text = re.sub(r'<a\s+[^>]*href=["\']([^"\']+)["\'][^>]*>([\s\S]*?)</a>',
-                      lambda m: f'[{_strip_tags(m[2])}]({m[1]})', html_content, flags=re.I)
-        text = re.sub(r'<h([1-6])[^>]*>([\s\S]*?)</h\1>',
-                      lambda m: f'\n{"#" * int(m[1])} {_strip_tags(m[2])}\n', text, flags=re.I)
-        text = re.sub(r'<li[^>]*>([\s\S]*?)</li>', lambda m: f'\n- {_strip_tags(m[1])}', text, flags=re.I)
-        text = re.sub(r'</(p|div|section|article)>', '\n\n', text, flags=re.I)
-        text = re.sub(r'<(br|hr)\s*/?>', '\n', text, flags=re.I)
+        text = re.sub(
+            r'<a\s+[^>]*href=["\']([^"\']+)["\'][^>]*>([\s\S]*?)</a>',
+            lambda m: f"[{_strip_tags(m[2])}]({m[1]})",
+            html_content,
+            flags=re.I,
+        )
+        text = re.sub(
+            r"<h([1-6])[^>]*>([\s\S]*?)</h\1>",
+            lambda m: f"\n{'#' * int(m[1])} {_strip_tags(m[2])}\n",
+            text,
+            flags=re.I,
+        )
+        text = re.sub(
+            r"<li[^>]*>([\s\S]*?)</li>", lambda m: f"\n- {_strip_tags(m[1])}", text, flags=re.I
+        )
+        text = re.sub(r"</(p|div|section|article)>", "\n\n", text, flags=re.I)
+        text = re.sub(r"<(br|hr)\s*/?>", "\n", text, flags=re.I)
         return _normalize(_strip_tags(text))

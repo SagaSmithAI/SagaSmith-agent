@@ -6,7 +6,7 @@ import json
 from typing import TYPE_CHECKING, Any
 
 from nanobot.agent.tools.base import Tool, ToolResult
-from nanobot.agent.tools.context import ContextAware, current_request_context
+from nanobot.agent.tools.context import current_request_context
 
 if TYPE_CHECKING:
     from nanobot.runtime_context import RuntimeContextProvider
@@ -168,12 +168,6 @@ class ToolRegistry:
                     f"Error: Tool '{name}' is unavailable in the current tool profile."
                 ),
             )
-
-        # Compatibility for external tools that still implement the legacy
-        # setter protocol. Built-ins read the authoritative ContextVar
-        # directly and never copy routing state.
-        if isinstance(tool, ContextAware) and (ctx := current_request_context()) is not None:
-            tool.set_context(ctx)
 
         params = self._coerce_params(tool, params)
         if not isinstance(params, dict):

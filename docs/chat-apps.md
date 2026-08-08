@@ -303,7 +303,7 @@ nanobot plugins enable matrix
   - `userId` (example: `@nanobot:matrix.org`)
   - `password`
 
-(Note: `accessToken` and `deviceId` are still supported for legacy reasons, but for reliable encryption, password login is recommended instead. If the `password` is provided, `accessToken` and `deviceId` will be ignored.)
+(Note: token login through `accessToken` and `deviceId` is supported, but password login is recommended for reliable encryption setup. If `password` is provided, `accessToken` and `deviceId` are ignored.)
 
 **3. Configure**
 

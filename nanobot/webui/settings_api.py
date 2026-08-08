@@ -48,6 +48,7 @@ def _version_payload() -> dict[str, Any]:
         "current": __version__,
     }
 
+
 _RUNTIME_CAPABILITIES = {
     "can_restart_engine": False,
     "can_pick_folder": False,
@@ -100,6 +101,7 @@ _IMAGE_GENERATION_ASPECT_RATIOS = {
 _CONTEXT_WINDOW_TOKEN_OPTIONS = {65_536, 200_000, 262_144}
 _MODEL_CONFIGURATION_SLUG_RE = re.compile(r"[^a-z0-9_-]+")
 _ENV_REF_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
 
 class WebUISettingsError(ValueError):
     """User-facing settings validation failure."""
@@ -315,7 +317,13 @@ def _resolve_settings_provider(
     normalized = provider_name.replace("-", "_")
     for extra_name, provider_config in _dynamic_provider_items(config):
         if provider_name == extra_name or normalized == extra_name.replace("-", "_"):
-            return create_dynamic_spec(extra_name, thinking_style=(provider_config.thinking_style or "")), extra_name, provider_config
+            return (
+                create_dynamic_spec(
+                    extra_name, thinking_style=(provider_config.thinking_style or "")
+                ),
+                extra_name,
+                provider_config,
+            )
     return None
 
 
@@ -592,9 +600,7 @@ def _image_generation_provider_rows(config: Any) -> list[dict[str, Any]]:
                 "label": spec.label if spec is not None else name,
                 "configured": configured,
                 "auth_type": "oauth" if spec is not None and spec.is_oauth else "api_key",
-                "api_key_hint": _mask_secret_hint(
-                    getattr(provider_config, "api_key", None)
-                ),
+                "api_key_hint": _mask_secret_hint(getattr(provider_config, "api_key", None)),
                 "api_base": getattr(provider_config, "api_base", None),
                 "default_api_base": (
                     spec.default_api_base if spec and spec.default_api_base else None
@@ -643,14 +649,18 @@ def _transcription_provider_rows(config: Any) -> list[dict[str, Any]]:
     for name in transcription_provider_names():
         spec = find_by_name(name)
         provider_config = getattr(config.providers, name, None)
-        rows.append({
+        rows.append(
+            {
             "name": name,
             "label": spec.label if spec is not None else name,
             "configured": bool(getattr(provider_config, "api_key", None)),
             "api_key_hint": _mask_secret_hint(getattr(provider_config, "api_key", None)),
             "api_base": getattr(provider_config, "api_base", None),
-            "default_api_base": spec.default_api_base if spec and spec.default_api_base else None,
-        })
+                "default_api_base": spec.default_api_base
+                if spec and spec.default_api_base
+                else None,
+            }
+        )
     return rows
 
 
@@ -691,7 +701,9 @@ def settings_payload(
         providers.append(
             _provider_settings_row(
                 provider_key,
-                create_dynamic_spec(provider_key, thinking_style=(provider_config.thinking_style or "")),
+                create_dynamic_spec(
+                    provider_key, thinking_style=(provider_config.thinking_style or "")
+                ),
                 provider_config,
             )
         )
@@ -706,11 +718,7 @@ def settings_payload(
     )
     image_providers = _image_generation_provider_rows(config)
     selected_image_provider = next(
-        (
-            provider
-            for provider in image_providers
-            if provider["name"] == image_config.provider
-        ),
+        (provider for provider in image_providers if provider["name"] == image_config.provider),
         None,
     )
     model_presets = [
@@ -835,7 +843,6 @@ def settings_payload(
             "restrict_to_workspace": config.tools.restrict_to_workspace,
             "workspace_sandbox": sandbox_status.as_dict(),
             "webui_allow_local_service_access": config.tools.webui_allow_local_service_access,
-            "allow_local_preview_access": config.tools.webui_allow_local_service_access,
             "webui_default_access_mode": read_webui_default_access_mode(),
             "private_service_protection_enabled": True,
             "ssrf_whitelist_count": len(config.tools.ssrf_whitelist),
@@ -1037,10 +1044,7 @@ def update_model_configuration(query: QueryParams) -> dict[str, Any]:
     context_window_tokens = _parse_context_window_tokens(
         _query_first_alias(query, "context_window_tokens", "contextWindowTokens")
     )
-    if (
-        context_window_tokens is not None
-        and preset.context_window_tokens != context_window_tokens
-    ):
+    if context_window_tokens is not None and preset.context_window_tokens != context_window_tokens:
         preset.context_window_tokens = context_window_tokens
         changed = True
 
@@ -1087,7 +1091,9 @@ def update_provider_settings(query: QueryParams) -> dict[str, Any]:
             try:
                 parsed_api_type = type(provider_config)(api_type=api_type).api_type
             except Exception:
-                raise WebUISettingsError("api_type must be auto, chat_completions, or responses") from None
+                raise WebUISettingsError(
+                    "api_type must be auto, chat_completions, or responses"
+                ) from None
             if provider_config.api_type != parsed_api_type:
                 provider_config.api_type = parsed_api_type
                 changed = True
@@ -1175,7 +1181,9 @@ def logout_oauth_provider(query: QueryParams) -> dict[str, Any]:
             raise WebUISettingsError(
                 "oauth_cli_kit not installed. Run: pip install oauth-cli-kit", status=500
             ) from None
-        token_path = FileTokenStorage(token_filename=OPENAI_CODEX_PROVIDER.token_filename).get_token_path()
+        token_path = FileTokenStorage(
+            token_filename=OPENAI_CODEX_PROVIDER.token_filename
+        ).get_token_path()
     elif spec.name == "github_copilot":
         try:
             from nanobot.providers.github_copilot_provider import get_storage
@@ -1194,18 +1202,23 @@ def logout_oauth_provider(query: QueryParams) -> dict[str, Any]:
 
 
 def update_network_safety_settings(query: QueryParams) -> dict[str, Any]:
-    raw_allow = (
-        _query_first_alias(query, "webui_allow_local_service_access", "webuiAllowLocalServiceAccess")
-        or _query_first_alias(query, "allow_local_preview_access", "allowLocalPreviewAccess")
+    raw_allow = _query_first_alias(
+        query, "webui_allow_local_service_access", "webuiAllowLocalServiceAccess"
     )
-    raw_default_access_mode = _query_first_alias(query, "webui_default_access_mode", "webuiDefaultAccessMode")
+    raw_default_access_mode = _query_first_alias(
+        query, "webui_default_access_mode", "webuiDefaultAccessMode"
+    )
     if raw_allow is None and raw_default_access_mode is None:
-        raise WebUISettingsError("webui_allow_local_service_access or webui_default_access_mode is required")
+        raise WebUISettingsError(
+            "webui_allow_local_service_access or webui_default_access_mode is required"
+        )
 
     config = load_config()
     changed = False
     if raw_allow is not None:
-        webui_allow_local_service_access = _parse_bool(raw_allow, "webui_allow_local_service_access")
+        webui_allow_local_service_access = _parse_bool(
+            raw_allow, "webui_allow_local_service_access"
+        )
         if config.tools.webui_allow_local_service_access != webui_allow_local_service_access:
             config.tools.webui_allow_local_service_access = webui_allow_local_service_access
             changed = True
@@ -1214,8 +1227,6 @@ def update_network_safety_settings(query: QueryParams) -> dict[str, Any]:
         save_config(config)
     if raw_default_access_mode is not None:
         default_access_mode = raw_default_access_mode.strip().lower()
-        if default_access_mode == "restricted":
-            default_access_mode = "default"
         if default_access_mode not in {"default", "full"}:
             raise WebUISettingsError("webui_default_access_mode must be default or full")
         try:

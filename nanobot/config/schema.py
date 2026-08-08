@@ -39,12 +39,6 @@ class ChannelsConfig(Base):
     send_max_retries: int = Field(
         default=3, ge=0, le=10
     )  # Max delivery attempts (initial send included)
-    transcription_provider: str = "groq"  # Deprecated: use top-level transcription.provider
-    transcription_language: str | None = Field(
-        default=None, pattern=r"^[a-z]{2,3}$"
-    )  # Deprecated: use top-level transcription.language
-
-
 class TranscriptionConfig(Base):
     """Cross-channel audio transcription configuration."""
 
@@ -63,28 +57,14 @@ class DreamConfig(Base):
 
     enabled: bool = True  # Register the periodic Dream consolidation job on startup
     interval_h: int = Field(default=2, ge=1)  # Every 2 hours by default
-    cron: str | None = Field(
-        default=None,
-        exclude_if=lambda value: value is None,
-    )  # Legacy cron expression override
-    model_override: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("modelOverride", "model", "model_override"),
-    )  # Override model for Dream sessions (pending implementation)
-    max_batch_size: int = Field(default=20, ge=1)  # Deprecated: no longer used
-    max_iterations: int = Field(default=15, ge=1)  # Deprecated: no longer used
-    annotate_line_ages: bool = True  # Deprecated: no longer used
+    model_override: str | None = None
 
     def build_schedule(self, timezone: str) -> CronSchedule:
-        """Build the runtime schedule, preferring the legacy cron override if present."""
-        if self.cron:
-            return CronSchedule(kind="cron", expr=self.cron, tz=timezone)
+        """Build the runtime schedule."""
         return CronSchedule(kind="every", every_ms=self.interval_h * self._HOUR_MS)
 
     def describe_schedule(self) -> str:
         """Return a human-readable summary for logs and startup output."""
-        if self.cron:
-            return f"cron {self.cron} (legacy)"
         hours = self.interval_h
         return f"every {hours}h"
 
@@ -170,8 +150,7 @@ class AgentDefaults(Base):
     session_ttl_minutes: int = Field(
         default=15,
         ge=0,
-        validation_alias=AliasChoices("idleCompactAfterMinutes", "sessionTtlMinutes"),
-        serialization_alias="idleCompactAfterMinutes",
+        alias="idleCompactAfterMinutes",
     )  # Auto-compact idle threshold in minutes (0 = disabled)
     consolidation_ratio: float = Field(
         default=0.5,
@@ -308,9 +287,6 @@ class ProvidersConfig(Base):
     opencode: ProviderConfig = Field(
         default_factory=ProviderConfig
     )  # OpenCode Zen (canonical provider id)
-    opencode_zen: ProviderConfig = Field(
-        default_factory=ProviderConfig
-    )  # OpenCode Zen (curated coding models)
     opencode_go: ProviderConfig = Field(
         default_factory=ProviderConfig
     )  # OpenCode Go (low-cost coding models)
@@ -448,10 +424,8 @@ class ToolsConfig(Base):
         validation_alias=AliasChoices(
             "webuiAllowLocalServiceAccess",
             "webui_allow_local_service_access",
-            "allowLocalPreviewAccess",
-            "allow_local_preview_access",
         ),
-    )  # allow WebUI Full Access shell checks against localhost services; legacy allowLocalPreviewAccess still reads
+    )  # allow WebUI Full Access shell checks against localhost services
     webui_allow_remote_package_install: bool = Field(
         default=False,
         validation_alias=AliasChoices(
@@ -463,6 +437,11 @@ class ToolsConfig(Base):
     ssrf_whitelist: list[str] = Field(
         default_factory=list
     )  # CIDR ranges to exempt from SSRF blocking (e.g. ["100.64.0.0/10"] for Tailscale)
+
+    def __init__(self, **values: Any) -> None:
+        if not type(self).__pydantic_complete__:
+            _resolve_tool_config_refs()
+        super().__init__(**values)
 
 
 class Config(BaseSettings):

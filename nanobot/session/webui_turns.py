@@ -10,7 +10,6 @@ from typing import Any
 
 from loguru import logger
 
-from nanobot.bus import progress as bus_progress
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.outbound_events import (
     GoalStateSyncEvent,
@@ -143,8 +142,7 @@ async def maybe_generate_webui_title(
                 {
                     "role": "system",
                     "content": (
-                        "You write short, neutral chat titles. "
-                        "Return only the title text."
+                        "You write short, neutral chat titles. Return only the title text."
                     ),
                 },
                 {"role": "user", "content": prompt},
@@ -197,14 +195,6 @@ def websocket_turn_wall_started_at(chat_id: str) -> float | None:
     return _WEBSOCKET_TURN_WALL_STARTED_AT.get(chat_id)
 
 
-def build_bus_progress_callback(
-    bus: MessageBus,
-    msg: InboundMessage,
-) -> Callable[..., Awaitable[None]]:
-    """Compatibility wrapper for the generic bus progress callback."""
-    return bus_progress.build_bus_progress_callback(bus, msg)
-
-
 async def publish_turn_run_status(
     bus: MessageBus,
     msg: InboundMessage,
@@ -234,6 +224,7 @@ async def publish_turn_run_status(
             metadata=msg.metadata,
         ),
     )
+
 
 @dataclass
 class WebuiTurnCoordinator:

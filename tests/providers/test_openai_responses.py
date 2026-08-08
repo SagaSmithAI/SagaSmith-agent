@@ -13,7 +13,6 @@ from nanobot.providers.openai_responses.converters import (
 )
 from nanobot.providers.openai_responses.parsing import (
     consume_sdk_stream,
-    consume_sse,
     consume_sse_with_reasoning,
     map_finish_reason,
     parse_response_output,
@@ -483,19 +482,6 @@ class _SseResponse:
 
 
 class TestConsumeSse:
-    @pytest.mark.asyncio
-    async def test_legacy_consume_sse_returns_three_tuple(self):
-        response = _SseResponse([
-            {"type": "response.output_text.delta", "delta": "hi"},
-            {"type": "response.completed", "response": {"status": "completed"}},
-        ])
-
-        content, tool_calls, finish_reason = await consume_sse(response)
-
-        assert content == "hi"
-        assert tool_calls == []
-        assert finish_reason == "stop"
-
     @pytest.mark.asyncio
     async def test_reasoning_summary_delta_extracted(self):
         response = _SseResponse([
