@@ -172,6 +172,29 @@ async def test_different_npcs_never_share_private_message_history() -> None:
     assert "private knowledge for tomas" in tomas_prompt
 
 
+@pytest.mark.asyncio
+async def test_worker_repair_preserves_role_order_and_rollback_restores_cursor() -> None:
+    capsule = _capsule(sequence=3)
+    provider = FakeProvider([{}, _proposal(capsule, "Repaired.")])
+    pool = NpcConversationWorkerPool()
+
+    proposal = await pool.activate(capsule, runtime=_runtime(provider))
+    assert proposal["utterance_segments"][0]["text"] == "Repaired."
+    assert [message["role"] for message in provider.calls[1]["messages"][-3:]] == [
+        "user",
+        "assistant",
+        "user",
+    ]
+    assert pool.checkout_options("conversation", "conversation:npc")["cursor"] == 3
+
+    pool.rollback_last_activation("conversation", "conversation:npc")
+    assert pool.checkout_options("conversation", "conversation:npc") == {
+        "cursor": 0,
+        "include_bootstrap": False,
+    }
+    assert pool.status("conversation")["workers"][0]["turn_count"] == 0
+
+
 def test_worker_rejects_free_utterance_and_uncited_factual_segment() -> None:
     capsule = _capsule()
     free = _proposal(capsule)

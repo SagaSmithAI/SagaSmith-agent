@@ -376,6 +376,7 @@ class NpcWorkerState:
     usage: dict[str, int] = field(default_factory=dict)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     last_activation_start: int | None = None
+    last_activation_cursor: int | None = None
 
 
 class NpcConversationWorkerPool:
@@ -454,6 +455,7 @@ class NpcConversationWorkerPool:
                 )
             activation_start = len(state.messages)
             state.last_activation_start = activation_start
+            state.last_activation_cursor = state.inbox_cursor
             prompt = {
                 "task": "propose_npc_conversation_turn",
                 "conversation_id": capsule["conversation_id"],
@@ -488,6 +490,7 @@ class NpcConversationWorkerPool:
                 if response.finish_reason == "error":
                     state.messages = state.messages[:activation_start]
                     state.last_activation_start = None
+                    state.last_activation_cursor = None
                     raise NpcConversationWorkerError(
                         response.content or "NPC conversation model failed"
                     )
@@ -523,6 +526,12 @@ class NpcConversationWorkerPool:
                 if attempt == 0:
                     state.messages.append(
                         {
+                            "role": "assistant",
+                            "content": response.content or "{\"invalid_proposal\":true}",
+                        }
+                    )
+                    state.messages.append(
+                        {
                             "role": "user",
                             "content": json.dumps(
                                 {
@@ -538,19 +547,24 @@ class NpcConversationWorkerPool:
                     )
             state.messages = state.messages[:activation_start]
             state.last_activation_start = None
+            state.last_activation_cursor = None
             raise NpcConversationWorkerError(last_error or "NPC proposal validation failed")
 
     def confirm_last_activation(self, conversation_id: str, actor_runtime_id: str) -> None:
         state = self._workers.get((conversation_id, actor_runtime_id))
         if state is not None:
             state.last_activation_start = None
+            state.last_activation_cursor = None
 
     def rollback_last_activation(self, conversation_id: str, actor_runtime_id: str) -> None:
         state = self._workers.get((conversation_id, actor_runtime_id))
         if state is None or state.last_activation_start is None:
             return
         state.messages = state.messages[: state.last_activation_start]
+        if state.last_activation_cursor is not None:
+            state.inbox_cursor = state.last_activation_cursor
         state.last_activation_start = None
+        state.last_activation_cursor = None
         state.turn_count = max(0, state.turn_count - 1)
 
     def release(self, conversation_id: str) -> dict[str, Any]:
