@@ -72,6 +72,7 @@ class ToolContext:
     bus: Any | None = None
     subagent_manager: Any | None = None
     isolated_evaluation_runner: Any | None = None
+    tool_registry: Any | None = None
     cron_service: Any | None = None
     sessions: Any | None = None
     file_state_store: Any = field(default=None)

@@ -566,6 +566,7 @@ class AgentLoop:
             bus=self.bus,
             subagent_manager=self.subagents,
             isolated_evaluation_runner=self.isolated_evaluations,
+            tool_registry=self.tools,
             cron_service=self.cron_service,
             sessions=self.sessions,
             provider_snapshot_loader=provider_snapshot_loader,
