@@ -127,7 +127,7 @@ nanobot gateway
 - `enabledTools` is the Host's outer allowlist. Domain phase, role, and exposure should narrow access again on the server.
 - `injectPrincipal` authenticates the caller field; grant targets remain model-visible and separate.
 - Domain MCPs own persistence and domain Skills. The Agent workspace owns persona, sessions, and cross-domain orchestration.
-- Portable actor/module/preset packages are domain content, not Host session memory or permission carriers.
+- Finalized unified Packs are domain content, not Host session memory or permission carriers.
 
 ## Memory layers
 

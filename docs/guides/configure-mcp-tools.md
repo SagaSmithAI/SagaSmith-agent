@@ -243,9 +243,9 @@ a direct exact-source Agent-ruling requirement on every mechanical entry. Draft
 finalization and Pack import recompute the semantic audit and reject missing,
 stale, or deferred entries. All current public actor-card write paths prefill
 unresolved custom prose with an exact-source direct Agent ruling before
-persistence. `content_solution(action="compile")` is available only in Lobby for
-explicit source-bound authoring. Play and Combat never call it. A
-`semantic_solution.status="content_authoring_required"` result identifies corrupt
+persistence. `content_solution(action="compile")` is available in Lobby, Play,
+or Combat for one exact runtime actor card; it is not a Pack-authoring facade.
+A `semantic_solution.status="content_authoring_required"` result identifies corrupt
 data that bypassed the invariant; it consumes no action, spell slot, charge, or
 revision. Return to Lobby and author a corrected Pack version. An existing plan
 may be settled through
