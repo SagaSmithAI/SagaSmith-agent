@@ -145,8 +145,8 @@ the dynamically refreshed native tool.
 `combat_start` and `combat_end` change the authoritative campaign phase and make
 incompatible loaded groups unavailable. `enabledTools` is therefore the outer
 allowlist for the core protocol, not a list of every D&D action.
-The D&D server's compact domain catalogue contains 83 public tools, with
-Lobby/Play/Combat ceilings of 62/48/46. The Agent allowlist remains exactly the
+The D&D server's compact domain catalogue contains 89 public tools, with
+Lobby/Play/Combat ceilings of 60/58/49. The Agent allowlist remains exactly the
 13 core tools shown above; do not add retired domain aliases to `enabledTools`.
 `skill_query` is intentionally core so a zero-knowledge Agent can obtain the
 phase/tool-group plan and read each bounded Skill fragment even though a narrow
@@ -170,25 +170,24 @@ play, or combat groups. With `injectPrincipal: true`, Nanobot binds the trusted
 chat principal to `exposure_open`; the MCP then injects that same principal into
 the nested target arguments used by `exposure_call`.
 
-Optional rules remain MCP-owned too. While in `lobby`, the agent loads
-`lobby.rules` and uses the public `rule_import` facade in this order:
-`discover` → `stage` → `inspect` → `ingest` → `extract_candidates` → `review` →
-`compile` → `install` → `activate`. The Agent acting as DM reviews inspection
-warnings from exact extracted text or rendered page evidence and sets
-`payload.acknowledge_warnings=true` only after that review. For a PDF warning or
-ambiguous candidate, call `rule_import(action="render_page")` with the staged
-job id and exact page before acknowledging it. Missing or conflicting source
-evidence, including a page that needs visual review when the active model cannot
-inspect images, remains an external review boundary. Search the imported evidence
-with the exact `source_ids` filter before expanding a chunk. The server binds
-accepted candidates to the imported checksum and page range; imported prose
-remains `catalog_only` unless reviewed mechanics pass compilation and the
-campaign owner explicitly approves activation of the installed version. Never
-generate Python, mutate the database, use
-retired raw import tools, or silently enable a pack. During play, use
-`campaign_rules(action="explain")` and `campaign_rules(action="receipts")` for
-the active fingerprint and immutable settlement evidence; rule configuration
-changes are unavailable during combat.
+Optional rules remain MCP-owned too. In `lobby`, the Agent loads `lobby.rules`
+and authors a rulebook only through `rulebook_draft`: `start` performs the
+Core+D&D mechanical first pass, `get` and `evidence` expose the resulting draft
+and exact source evidence, and repeated `edit` calls save the Agent's corrections
+and source-bound decisions. `finalize` requires explicit Agent confirmation and
+atomically freezes the reviewed draft as a unified v2 Pack. The same pattern uses
+`module_draft` for rulebook-sized adventures and other module sources.
+
+`content_pack` manages only immutable finalized Packs: list/get/import/export,
+explicit activation/deactivation, and removal. It does not build mutable content
+or expose legacy install/compile side doors. Missing or conflicting source
+evidence remains an external review boundary; ordinary semantic uncertainty is
+the Agent's review work and is saved with the draft and Pack. Never generate
+Python, mutate the database, call retired import facades, or silently activate a
+Pack. During play, use `campaign_rules(action="explain")` and
+`campaign_rules(action="receipts")` for the active fingerprint and immutable
+settlement evidence; authoring and rule configuration changes are unavailable
+outside Lobby.
 
 For the fixed 13-tool Agent path, an `exposure_call` response with live
 `status="pending_ruling"` carries `ruling_resolution` and refers to
@@ -265,20 +264,14 @@ failed action. The Agent supplies ordinary scene/rule facts and retries at the
 current revision. Missing ranges, unresolved hydration, and unsupported source
 contracts remain source-review boundaries and cannot be downgraded to generic
 Agent adjudication.
-Lobby review states use the same typed ownership before any live action.
-`rule_import(action="extract_candidates")` returns
-`job.review_resolution`, `job.review_requirements`, and per-candidate
-`ruling_requirement`; `module_query(view="candidates")` does the same for a
-`review_ready` statblock candidate. Exact-text review defaults to the Agent. If
-any nested requirement is `missing_or_conflicting_source_review`, preserve that
-external owner and repair/review the evidence instead of accepting the candidate.
-Reviewed rule-statblock parser warnings also carry
-`validation.ruling_requirements` and `validation.default_dm_resolver`.
-Scene readiness applies the same contract per item through
-`ruling_requirements`. Ordinary card, scene, spell, and module adjudications
-name the Agent; missing ranged/thrown ranges and incomplete source hydration
-name the source-review boundary and block combat rather than inviting invented
-mechanics.
+Lobby draft review uses the same typed ownership before any live action.
+`rulebook_draft(get/evidence)` and `module_draft(get/evidence)` expose mechanical
+findings, exact evidence identities, and unresolved review work. Exact-text and
+semantic review default to the Agent; missing or conflicting evidence preserves
+the external source-review owner. Readiness is intentionally narrow: it verifies
+the identities and minimum structural facts needed for the requested operation,
+not whether every possible future adjudication has already been automated.
+
 Declarative rule-pack `ruling.require` entries also default to Agent reasoning;
 `choice.require` remains a player-owned external input. Full-party,
 playthrough, and encounter regression drivers preserve stopped rulings as
@@ -291,40 +284,16 @@ before the Agent rolls healing, applies an effect, starts combat, or assumes a
 slot or charge was consumed. A paid generic-effect ruling is resumed without
 paying the resource again.
 
-For an already indexed 2014 statblock whose columns were split into sibling text
-chunks, the D&D workflow first retries `character_create_from(mode="statblock")`
-with source-established `chunk_ids` and the exact printed heading in
-`payload.source_statblock_name`. The MCP server reconstructs and source-scopes
-that card from text alone, so the parent Agent does not need image capability.
-Only missing or conflicting required facts proceed to the local
-`rule_import(action="recover_statblock")` OCR path.
-
-Whole-book preset/addon builds settle every reusable card before publication.
-Explicit `Actions for Type ...` sections produce separate cards; bounded OCR
-may recompute a damaged redundant ability modifier from its visible score or
-restore one missing label from an otherwise complete, uniquely ordered six-score
-row. It never invents a score. Only a 2014 Monster Manual source with one unique
-identity match may reuse a bundled SRD card, and the rebuilt private card records
-that source checksum. None of these paths asks the runtime Agent to author a
-resolution on first use.
-Unmatched dice procedures, numbered random-effect tables, and adjudication
-guidance remain mechanical review candidates. Whole-book regression binds each
-retained mechanical chunk to an exact-source Agent ruling; it does not treat a
-single descriptive probe as coverage for an otherwise unparsed publication.
-
-The equivalent module-card path is
-`module_review(action="recover_statblock")`. The parent Agent supplies the exact
-managed module, scene, printed heading, and PDF page; the MCP server verifies the
-asset checksum, performs layout OCR, and corroborates the complete critical
-fingerprint against embedded text or a second OCR scale before storing an
-immutable module review. This is the default for a blocked module candidate when
-the configured model has no image capability. If the recovered custom card needs
-Multiattack semantics, the first response has `requires_agent_fill=true`,
-`review=null`, the normalized OCR text, and exact fill requirements. The parent
-Agent reasons over those returned fields and retries with a fresh idempotency key
-and `payload.agent_fill`; only the retry stores the immutable review. Rendering and manual
-`submit_content` transcription remain an image-capable fallback, never a
-text-only inference step.
+Do not promote book-specific parsing repairs into Core or the D&D plugin. Core
+owns document invariants; D&D owns only cross-book grammar and vocabulary. When
+the first pass splits a layout incorrectly, binds the wrong owner, merges two
+features, or otherwise misreads one publication, the Agent inspects the exact
+draft evidence and saves the correction through `rulebook_draft(edit)` or
+`module_draft(edit)`. That source-bound decision travels in the unfinished draft
+and finalized Pack, so it can be audited and replayed without mutating the
+original source or teaching the engine a one-book heuristic. The Skills review
+loop, not a growing set of MCP recovery tools, tells the Agent how to find,
+correct, re-check, and finally confirm these cases.
 
 The first inspection of a scanned or corrupt-text book may perform selective OCR.
 Keep `toolTimeout` at 900 seconds for real rulebook corpora; normalized and raw page
@@ -340,11 +309,11 @@ separate multiple roots with `;`. Before staging a suspected character document,
 the Agent uses `character_query(view="document")`; it must not force that file
 through module import.
 
-Portable `.sagasmith.json` actor, preset, and module packages may be read only
-from those same rule/module roots, or by managed artifact name after the MCP
-exported them. Pass an allowlisted attachment path to the portable Lobby facade;
-the Agent must not deserialize it and write domain state itself. Imported cards
-receive fresh actor ids and never inherit Host/session memory or ActorKnowledge.
+Unified `.sagasmith-pack` archives may be read only from those same rule/module
+roots, or by managed artifact name after the MCP exported them. Pass an
+allowlisted attachment path to `content_pack(action="import")`; the Agent must
+not deserialize it and write domain state itself. Imported actor cards receive
+fresh actor ids and never inherit Host/session memory or ActorKnowledge.
 
 `externalSkillsDirs` belongs to `agents.defaults` because nanobot loads skills
 in the parent agent process. MCP server `env` values are visible only to the
