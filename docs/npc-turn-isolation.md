@@ -16,10 +16,23 @@ The tool accepts only the signed bundle returned by
 - permits one fresh repair generation for invalid JSON/contract output; and
 - can run an optional fresh zero-tool guardian audit.
 
+The v2 bundle contains an MCP-owned structured `conversation`, not a copy of
+the Agent channel transcript. It is campaign/branch/scene/scope-bound, has an
+event cursor and explicit participants, and contains only audience-observable
+speech/action/portrayal fields. The bundle's fixed
+`sagasmith.delegation.v1` object must prohibit inherited history, tools, and
+worker persistence.
+
+`isolated_evaluate(jobs=[...])` may evaluate up to 16 independent signed
+bundles concurrently. Parallelism stops at proposal generation: the parent must
+validate and commit proposals serially, then refresh every remaining bundle
+after a state-changing write.
+
 This is intentionally separate from `spawn`. General subagents can read files,
 search, execute commands, retain task context, and finish asynchronously; those
 properties are useful for work but unsafe for a receipt-bound NPC turn.
-`portray_npc` is available only in the main (`core`) tool scope, so an NPC call
+`portray_npc` and `isolated_evaluate` are available only in the main (`core`)
+tool scope, so an NPC call
 cannot recursively spawn another portrayal call.
 
 The result is a proposal, never authoritative campaign state. The parent Agent

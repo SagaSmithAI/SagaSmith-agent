@@ -50,10 +50,29 @@ _ACTOR_ACTION_KINDS = frozenset(
         "use_item",
         "exchange_item",
         "scene_transition",
+        "observe",
+        "interact",
+        "follow",
+        "wait",
         "other",
     }
 )
-_ACTOR_NARRATIVE_ACTION_KINDS = frozenset({"none", "gesture", "refuse"})
+_ACTOR_NARRATIVE_ACTION_KINDS = frozenset(
+    {
+        "none",
+        "gesture",
+        "offer",
+        "refuse",
+        "surrender",
+        "move",
+        "flee",
+        "scene_transition",
+        "observe",
+        "interact",
+        "follow",
+        "wait",
+    }
+)
 
 
 class IsolatedEvaluationError(ValueError):

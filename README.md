@@ -58,9 +58,10 @@ SagaSmith Agent 负责：
 战役、principal、role、audience、branch 或 restore 变化时，Agent 会停止同一
 模型回复中余下的工具调用，丢弃旧模型消息、摘要、workspace/Dream memory、
 缓存检索与旧 receipt，再从当前请求和可信 MCP 结果重建上下文。角色、受众、
-阵营、来源解释和 DM ruling 使用固定 schema 的 `isolated_evaluate`；丰富的命名
-NPC 对话继续使用 `portray_npc`。两者都不带工具、不持久化子会话，也不直接
-产生权威状态。
+阵营、来源解释和 DM ruling 使用固定 schema 的 `isolated_evaluate`，并可并发
+评估彼此独立的签名 bundle；丰富的命名 NPC 对话继续使用 `portray_npc`。两者都
+不带工具、不持久化子会话，也不直接产生权威状态。NPC bundle v2 携带 MCP
+拥有的结构化对话和固定委派契约，而不是 Agent 渠道聊天记录。
 
 ### 可分享内容仍由 MCP 拥有
 

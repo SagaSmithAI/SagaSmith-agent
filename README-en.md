@@ -46,9 +46,11 @@ When campaign, principal, role, audience, branch, or restore state changes, the
 Agent stops later calls from the same model response and rebuilds without old
 messages, summaries, workspace/Dream memory, cached retrieval, or receipts.
 `isolated_evaluate` uses fixed schemas for actor, audience, faction, source, and
-DM-ruling proposals; `portray_npc` retains the richer named-NPC dialogue
-contract. Both run without tools or child-session persistence and neither can
-author authoritative state.
+DM-ruling proposals and can evaluate independent signed bundles concurrently;
+`portray_npc` retains the richer named-NPC dialogue contract. Both run without
+tools or child-session persistence and neither can author authoritative state.
+NPC bundle v2 carries an MCP-owned structured conversation and a fixed
+host-neutral delegation contract, never the Agent channel transcript.
 
 ### Shareable content remains MCP-owned
 

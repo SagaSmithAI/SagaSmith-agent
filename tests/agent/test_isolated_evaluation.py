@@ -322,6 +322,52 @@ async def test_isolated_evaluate_tool_returns_proposal_without_authority() -> No
     assert "committed" not in result
 
 
+@pytest.mark.asyncio
+async def test_isolated_evaluate_tool_runs_independent_jobs_concurrently() -> None:
+    kind = "audience_render"
+    provider = QueueProvider(
+        [
+            LLMResponse(content=json.dumps(_proposal(kind)), finish_reason="stop"),
+            LLMResponse(content=json.dumps(_proposal(kind)), finish_reason="stop"),
+        ]
+    )
+    tool = IsolatedEvaluateTool(IsolatedEvaluationRunner())
+    with request_context(
+        RequestContext(channel="cli", chat_id="direct", runtime=_runtime(provider))
+    ):
+        result = json.loads(
+            await tool.execute(
+                jobs=[
+                    {"kind": kind, "bundle": _bundle(kind)},
+                    {"kind": kind, "bundle": _bundle(kind)},
+                ]
+            )
+        )
+
+    assert [item["index"] for item in result["results"]] == [0, 1]
+    assert all(item["proposal"] == _proposal(kind) for item in result["results"])
+    assert len(provider.calls) == 2
+    assert all(call["tools"] is None for call in provider.calls)
+
+
+@pytest.mark.asyncio
+async def test_isolated_evaluate_tool_requires_one_call_shape() -> None:
+    tool = IsolatedEvaluateTool(IsolatedEvaluationRunner())
+    provider = QueueProvider([])
+    with request_context(
+        RequestContext(channel="cli", chat_id="direct", runtime=_runtime(provider))
+    ):
+        missing = await tool.execute()
+        mixed = await tool.execute(
+            kind="audience_render",
+            bundle=_bundle("audience_render"),
+            jobs=[{"kind": "audience_render", "bundle": _bundle("audience_render")}],
+        )
+
+    assert "provide exactly one" in missing
+    assert "provide exactly one" in mixed
+
+
 def test_background_subagents_cannot_recursively_evaluate(tmp_path: Path) -> None:
     manager = SubagentManager(
         workspace=tmp_path,

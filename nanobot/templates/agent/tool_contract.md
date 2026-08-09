@@ -21,7 +21,9 @@ Tool signatures are provided automatically via function calling. This section do
   not call another tool from the same model response after it.
 - Use `isolated_evaluate` only with a signed fixed-purpose domain bundle. It
   returns an untrusted proposal; validate it through the domain MCP and execute
-  mechanics with ordinary public tools. Use `portray_npc` for its richer
+  mechanics with ordinary public tools. Independent jobs may run concurrently,
+  but validation and writes remain serial; refresh later bundles after a write.
+  Use `portray_npc` for its richer
   specialized NPC-dialogue bundle. Never substitute a generic subagent.
 
 ## Discovery and Reading

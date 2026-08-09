@@ -56,7 +56,7 @@ def _bundle() -> dict[str, Any]:
         branch_id="branch-1",
     ).to_dict()
     bundle = {
-        "schema_version": 1,
+        "schema_version": 2,
         "bundle_id": "bundle-1",
         "purpose": "npc_turn",
         "authority": {
@@ -93,7 +93,19 @@ def _bundle() -> dict[str, Any]:
         "common_context": [],
         "relationships": [],
         "goals": [],
-        "conversation_window": [],
+        "conversation": {
+            "schema_version": 1,
+            "campaign_id": "campaign-1",
+            "branch_id": "branch-1",
+            "scope_id": "party",
+            "scene_id": "",
+            "cursor": {"latest_event_sequence": 0, "event_count": 0},
+            "participants": [
+                {"actor_id": "npc-1", "name": "Zaltember", "role": "speaker"},
+                {"actor_id": "pc-1", "name": "Envoy", "role": "interlocutor"},
+            ],
+            "events": [],
+        },
         "scene": None,
         "portrayal_context": [
             {
@@ -110,6 +122,17 @@ def _bundle() -> dict[str, Any]:
             "may_roll_dice": False,
             "may_call_tools": False,
             "may_write_state": False,
+            "output_contract": "npc-turn-proposal.v1",
+        },
+        "delegation": {
+            "schema_version": 1,
+            "contract": "sagasmith.delegation.v1",
+            "task": "propose_npc_turn",
+            "execution": "awaited_fresh_context",
+            "inherit_agent_history": False,
+            "tools_exposed": False,
+            "persist_worker_session": False,
+            "authoritative_result": False,
             "output_contract": "npc-turn-proposal.v1",
         },
         "retrieval": {},
@@ -199,6 +222,14 @@ def test_npc_turn_bundle_requires_host_context_binding() -> None:
     del bundle["authority"]["host_context_binding"]
 
     with pytest.raises(NpcTurnError, match="host_context_binding.*required"):
+        validate_npc_turn_bundle(bundle)
+
+
+def test_npc_turn_bundle_rejects_relaxed_delegation() -> None:
+    bundle = _bundle()
+    bundle["delegation"]["tools_exposed"] = True
+
+    with pytest.raises(NpcTurnError, match="delegation contract is invalid"):
         validate_npc_turn_bundle(bundle)
 
 
@@ -329,3 +360,13 @@ def test_agent_contract_requires_engine_resolution_for_mechanical_actions() -> N
     normalized["proposed_action"]["target_ref"] = "actor:outsider"
     with pytest.raises(NpcTurnError, match="action target is outside its bundle"):
         validate_proposal_against_bundle(normalized, _bundle())
+
+    narrative = _proposal()
+    narrative["utterance"]["text"] = ""
+    narrative["speech_acts"] = []
+    narrative["proposed_action"] = {
+        "kind": "move",
+        "target_ref": "actor:pc-1",
+        "summary": "Steps away from the envoy.",
+    }
+    assert normalize_npc_turn_proposal(narrative)["proposed_action"]["kind"] == "move"

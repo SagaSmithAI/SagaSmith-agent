@@ -16,6 +16,7 @@ from nanobot.agent.isolated_evaluation import (
 from nanobot.utils.helpers import strip_think
 
 NPC_TURN_SCHEMA_VERSION = 1
+NPC_TURN_BUNDLE_SCHEMA_VERSION = 2
 NPC_TRUTH_POSTURES = frozenset(
     {"believes_true", "uncertain", "intentional_deception", "opinion", "nonfactual"}
 )
@@ -35,10 +36,29 @@ NPC_ACTION_KINDS = frozenset(
         "use_item",
         "exchange_item",
         "scene_transition",
+        "observe",
+        "interact",
+        "follow",
+        "wait",
         "other",
     }
 )
-NPC_NARRATIVE_ACTION_KINDS = frozenset({"none", "gesture", "refuse"})
+NPC_NARRATIVE_ACTION_KINDS = frozenset(
+    {
+        "none",
+        "gesture",
+        "offer",
+        "refuse",
+        "surrender",
+        "move",
+        "flee",
+        "scene_transition",
+        "observe",
+        "interact",
+        "follow",
+        "wait",
+    }
+)
 NPC_RESOLUTION_KINDS = frozenset(
     {"ability_check", "contest", "saving_throw", "attack", "dm_adjudication"}
 )
@@ -107,10 +127,11 @@ def validate_npc_turn_bundle(value: Any) -> dict[str, Any]:
         "common_context",
         "relationships",
         "goals",
-        "conversation_window",
+        "conversation",
         "scene",
         "portrayal_context",
         "constraints",
+        "delegation",
         "retrieval",
         "bundle_receipt",
     }
@@ -119,8 +140,10 @@ def validate_npc_turn_bundle(value: Any) -> dict[str, Any]:
         raise NpcTurnError(f"npc_turn.bundle is missing fields: {missing}")
     _strict(bundle, "npc_turn.bundle", required)
     schema_version = bundle.get("schema_version")
-    if type(schema_version) is not int or schema_version != NPC_TURN_SCHEMA_VERSION:
-        raise NpcTurnError(f"npc_turn.bundle.schema_version must be {NPC_TURN_SCHEMA_VERSION}")
+    if type(schema_version) is not int or schema_version != NPC_TURN_BUNDLE_SCHEMA_VERSION:
+        raise NpcTurnError(
+            f"npc_turn.bundle.schema_version must be {NPC_TURN_BUNDLE_SCHEMA_VERSION}"
+        )
     if bundle.get("purpose") != "npc_turn":
         raise NpcTurnError("npc_turn.bundle.purpose must be 'npc_turn'")
     _text(bundle.get("bundle_id"), "npc_turn.bundle.bundle_id", required=True, maximum=100)
@@ -178,11 +201,49 @@ def validate_npc_turn_bundle(value: Any) -> dict[str, Any]:
         "common_context",
         "relationships",
         "goals",
-        "conversation_window",
         "portrayal_context",
     ):
         if not isinstance(bundle.get(field), list):
             raise NpcTurnError(f"npc_turn.bundle.{field} must be a list")
+    conversation = _object(bundle.get("conversation"), "npc_turn.bundle.conversation")
+    _strict(
+        conversation,
+        "npc_turn.bundle.conversation",
+        {
+            "schema_version",
+            "campaign_id",
+            "branch_id",
+            "scope_id",
+            "scene_id",
+            "cursor",
+            "participants",
+            "events",
+        },
+    )
+    if conversation.get("schema_version") != 1:
+        raise NpcTurnError("npc_turn.bundle.conversation.schema_version must be 1")
+    if conversation.get("campaign_id") != authority.get("campaign_id"):
+        raise NpcTurnError("NPC conversation campaign does not match bundle authority")
+    if conversation.get("branch_id") != authority.get("branch_id"):
+        raise NpcTurnError("NPC conversation branch does not match bundle authority")
+    if not isinstance(conversation.get("participants"), list) or not isinstance(
+        conversation.get("events"), list
+    ):
+        raise NpcTurnError("NPC conversation participants and events must be lists")
+    delegation = _object(bundle.get("delegation"), "npc_turn.bundle.delegation")
+    expected_delegation = {
+        "schema_version": 1,
+        "contract": "sagasmith.delegation.v1",
+        "task": "propose_npc_turn",
+        "execution": "awaited_fresh_context",
+        "inherit_agent_history": False,
+        "tools_exposed": False,
+        "persist_worker_session": False,
+        "authoritative_result": False,
+        "output_contract": "npc-turn-proposal.v1",
+    }
+    if delegation != expected_delegation:
+        raise NpcTurnError("NPC turn delegation contract is invalid")
     receipt = _object(bundle.get("bundle_receipt"), "npc_turn.bundle.bundle_receipt")
     if receipt.get("bundle_id") != bundle.get("bundle_id"):
         raise NpcTurnError("NPC turn receipt does not match its bundle")
@@ -440,7 +501,7 @@ optional proposed action. Module portrayal context may guide characterization bu
 NPC's knowledge. Public common_context is DM world context, not proof that this NPC knows it.
 Never disclose a fact from either unless the same claim has an allowed basis_ref elsewhere.
 Every factual speech act must cite only constraints.allowed_basis_refs. If a mechanic, roll,
-contest, attack, movement, item transfer, or DM ruling is required, request resolution instead
+contest, attack, item transfer, or DM ruling is required, request resolution instead
 of declaring an outcome. Return exactly one JSON object matching npc-turn-proposal.v1, with no
 Markdown and no commentary. The sibling output_shape is the host-owned exact shape to fill."""
 
@@ -460,7 +521,7 @@ _NPC_OUTPUT_SHAPE = {
         }
     ],
     "proposed_action": {
-        "kind": "none|gesture|offer|refuse|surrender|move|flee|attack|use_item|exchange_item|scene_transition|other",
+        "kind": "none|gesture|offer|refuse|surrender|move|flee|attack|use_item|exchange_item|scene_transition|observe|interact|follow|wait|other",
         "target_ref": "empty or actor:<allowed target actor id>",
         "summary": "string",
     },

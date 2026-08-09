@@ -14,6 +14,7 @@ from nanobot.agent.isolated_evaluation import (
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
 from nanobot.agent.tools.context import current_request_context
 from nanobot.agent.tools.schema import (
+    ArraySchema,
     BooleanSchema,
     ObjectSchema,
     StringSchema,
@@ -26,20 +27,38 @@ from nanobot.agent.tools.schema import (
         kind=StringSchema(
             description="Fixed evaluation contract selected by the MCP bundle purpose",
             enum=tuple(sorted(ISOLATED_EVALUATION_KINDS)),
+            nullable=True,
         ),
         bundle=ObjectSchema(
             description="Signed purpose-specific bundle returned by a SagaSmith MCP",
             additional_properties=True,
+            nullable=True,
+        ),
+        jobs=ArraySchema(
+            ObjectSchema(
+                kind=StringSchema(
+                    description="Fixed evaluation contract",
+                    enum=tuple(sorted(ISOLATED_EVALUATION_KINDS)),
+                ),
+                bundle=ObjectSchema(additional_properties=True),
+                strict_guardian=BooleanSchema(default=False),
+                required=["kind", "bundle"],
+                additional_properties=False,
+            ),
+            description="Independent signed bundles to evaluate concurrently",
+            min_items=1,
+            max_items=16,
+            nullable=True,
         ),
         strict_guardian=BooleanSchema(
             description="Run a second fresh zero-tool audit before returning",
             default=False,
         ),
-        required=["kind", "bundle"],
+        required=[],
     )
 )
 class IsolatedEvaluateTool(Tool):
-    """Evaluate one signed bundle without inheriting host memory or tools."""
+    """Evaluate one or more signed bundles without inheriting host memory or tools."""
 
     _scopes = {"core"}
 
@@ -58,14 +77,16 @@ class IsolatedEvaluateTool(Tool):
     def description(self) -> str:
         return (
             "Evaluate one signed SagaSmith actor, audience, faction, source, or ruling "
-            "bundle in a fresh, tool-free, non-persistent model call. Returns a proposal "
-            "only; authoritative mechanics and writes remain MCP operations."
+            "bundle, or a bounded batch of independent bundles, in fresh tool-free "
+            "non-persistent model calls. Returns proposals only; authoritative mechanics "
+            "and writes remain serial MCP operations."
         )
 
     async def execute(
         self,
-        kind: str,
-        bundle: dict[str, Any],
+        kind: str | None = None,
+        bundle: dict[str, Any] | None = None,
+        jobs: list[dict[str, Any]] | None = None,
         strict_guardian: bool = False,
         **kwargs: Any,
     ) -> str:
@@ -74,17 +95,25 @@ class IsolatedEvaluateTool(Tool):
         request = current_request_context()
         if request is None or request.runtime is None:
             return ToolResult.error("Error: isolated_evaluate requires an active model runtime")
-        try:
+        single_selected = kind is not None or bundle is not None
+        batch_selected = jobs is not None
+        if single_selected == batch_selected:
+            return ToolResult.error("Error: provide exactly one of kind+bundle or jobs")
+        if single_selected and (kind is None or bundle is None):
+            return ToolResult.error("Error: kind and bundle must be provided together")
+
+        async def run_one(
+            job_kind: str,
+            job_bundle: dict[str, Any],
+            guardian: bool,
+        ) -> dict[str, Any]:
             result = await self._runner.run(
-                kind,
-                bundle,
+                job_kind,
+                job_bundle,
                 runtime=request.runtime,
-                strict_guardian=bool(strict_guardian),
+                strict_guardian=guardian,
             )
-        except (IsolatedEvaluationError, asyncio.TimeoutError) as exc:
-            return ToolResult.error(f"Error: isolated evaluation rejected: {exc}")
-        return json.dumps(
-            {
+            return {
                 "kind": result.kind,
                 "proposal": result.proposal,
                 "isolation": {
@@ -94,7 +123,38 @@ class IsolatedEvaluateTool(Tool):
                     "generation_attempts": result.generation_attempts,
                     "guardian_checks": result.guardian_checks,
                 },
-            },
-            ensure_ascii=False,
-            separators=(",", ":"),
-        )
+            }
+
+        if single_selected:
+            assert kind is not None and bundle is not None
+            try:
+                value = await run_one(kind, bundle, bool(strict_guardian))
+            except (IsolatedEvaluationError, asyncio.TimeoutError) as exc:
+                return ToolResult.error(f"Error: isolated evaluation rejected: {exc}")
+        else:
+            assert jobs is not None
+            outcomes = await asyncio.gather(
+                *(
+                    run_one(
+                        str(job["kind"]),
+                        dict(job["bundle"]),
+                        bool(job.get("strict_guardian", False)),
+                    )
+                    for job in jobs
+                ),
+                return_exceptions=True,
+            )
+            results: list[dict[str, Any]] = []
+            for index, outcome in enumerate(outcomes):
+                if isinstance(outcome, BaseException):
+                    results.append(
+                        {
+                            "index": index,
+                            "kind": str(jobs[index].get("kind") or ""),
+                            "error": str(outcome),
+                        }
+                    )
+                else:
+                    results.append({"index": index, **outcome})
+            value = {"results": results}
+        return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
