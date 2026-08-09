@@ -238,18 +238,17 @@ payment. A bundled spell, item, or creature-specific ability may instead carry
 a reviewed exact-source Agent-ruling clause; that clause applies only the card's
 content while action economy, accounting, attacks, damage, and transactions
 remain engine-owned. Imported or homebrew boundaries are likewise fixed before
-play: import, review, or portable export stores either a constrained schema-v2
-plan or a direct exact-source Agent-ruling requirement on every mechanical
-entry. Standalone rule-pack export/import/install and composed-addon
-export/import each recompute the stored `build_time_complete` audit and fail on
-any missing, stale, or deferred semantic entry. All current public actor-card
-write paths prefill unresolved custom prose with an exact-source direct Agent
-ruling before persistence. `content_solution(action="compile")` is available
-only in Lobby for explicit old-card migration or authoring. Play and Combat
-never call it. A `semantic_solution.status="content_authoring_required"` result
-therefore identifies legacy/corrupt data that bypassed the invariant; it consumes
-no action, spell slot, charge, or revision. Return to Lobby and migrate or
-reimport it. An existing plan may be settled through
+play: draft review and finalization store either a constrained schema-v2 plan or
+a direct exact-source Agent-ruling requirement on every mechanical entry. Draft
+finalization and Pack import recompute the semantic audit and reject missing,
+stale, or deferred entries. All current public actor-card write paths prefill
+unresolved custom prose with an exact-source direct Agent ruling before
+persistence. `content_solution(action="compile")` is available only in Lobby for
+explicit source-bound authoring. Play and Combat never call it. A
+`semantic_solution.status="content_authoring_required"` result identifies corrupt
+data that bypassed the invariant; it consumes no action, spell slot, charge, or
+revision. Return to Lobby and author a corrected Pack version. An existing plan
+may be settled through
 `combat_choice(action="execute_plan")`; an existing direct ruling is decided from
 current facts in its bounded DM window. Never invent a `dnd5e.core.*` id, attach
 arbitrary code, or use a paid event to change the card's execution contract.

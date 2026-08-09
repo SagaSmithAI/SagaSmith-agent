@@ -65,9 +65,10 @@ SagaSmith Agent 负责：
 
 ### 可分享内容仍由 MCP 拥有
 
-Agent 不解析或改写 portable card/package，也不缓存第二份怪物目录。PC、NPC、
-怪物的统一 actor card、SRD 默认 preset pack，以及包含 Scene Atlas、资产、审核
-内容和预设角色的 module pack 都通过 Lobby exposure 调用 D&D MCP 导入/导出。
+Agent 不解析或改写最终 `.sagasmith-pack`，也不缓存第二份怪物目录。规则书与模组书
+只通过 Lobby 的 `rulebook_draft` / `module_draft` 进行机械首轮、Agent 审稿与定稿；
+最终 Core Rules、Addon、Module、Preset Pack 只由 `content_pack` 管理。PC、NPC、
+怪物的统一 actor card 只随最终 Preset 或 Module Pack 迁移。
 导入返回新的 actor id；Agent 必须丢弃来源数据库 identity，且不得把旧会话、
 workspace memory 或 actor knowledge 填进新角色。分享文件可作为聊天附件或
 workspace artifact 传递，但只有 MCP 校验、白名单读取和公开写事务才能使其进入战役。
@@ -160,7 +161,7 @@ nanobot gateway
 - `enabledTools` 是 Host 外层允许列表；领域内的 phase/role/exposure 应由服务端继续收窄。
 - `injectPrincipal` 只隐藏/注入调用者字段，不隐藏授权目标字段。
 - MCP domains 拥有其持久化和 Skills；Agent workspace 只保留人格、会话和跨领域编排。
-- Portable actor/module/preset package 也是 domain content，不是 Host session memory 或权限载体。
+- 最终统一 Pack 是 domain content，不是 Host session memory 或权限载体。
 
 ## 记忆分层
 
