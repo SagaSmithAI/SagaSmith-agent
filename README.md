@@ -38,15 +38,16 @@ SagaSmith Agent 负责：
 
 ## D&D：MCP-first 主路径
 
-[SagaSmith D&D MCP](https://github.com/SagaSmithAI/SagaSmith-dnd-mcp) 管理战役、规则、模组、角色、知识、分支、Snapshot 与战斗。Agent 只常驻其 13 个 exposure/诊断/有界 Skill 读取工具；每个聊天会话在服务端单独打开 exposure，按任务加载 `lobby`、`play` 或 `combat` 能力组。
+[SagaSmith D&D MCP](https://github.com/SagaSmithAI/SagaSmith-dnd-mcp) 管理战役、规则、模组、角色、知识、分支、Snapshot 与战斗。每个聊天会话在服务端单独打开 exposure；服务端按当前 session、principal、campaign 与 phase 过滤原生工具列表，Agent 只选择当前任务所需的精确工具。
 
 ```text
 消息到达
 → Host 注入 principal
 → skill_query(read/search/section) 并读取 bounded Skill sections
-→ exposure(open)
-→ search / inspect / load，并读取 tools/list_changed
-→ native MCP tools（NanoBot 静态 schema fallback）
+→ exposure(action="open")
+→ exposure(action="search" / "set")
+→ tools/list_changed 后刷新原生 schema
+→ 直接调用列表中的原生 MCP 工具
 → MCP 校验 phase / campaign / role / actor / revision
 → 首次或变化的 host_context_binding 触发当前轮硬切换
 → isolated_evaluate / portray_npc 在全新零工具上下文中只生成提案

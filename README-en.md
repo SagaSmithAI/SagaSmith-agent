@@ -25,15 +25,16 @@ It does **not** write D&D/CoC databases directly, reimplement rules/combat/modul
 
 ## D&D: the MCP-first path
 
-[SagaSmith D&D MCP](https://github.com/SagaSmithAI/SagaSmith-dnd-mcp) owns campaigns, rules, modules, characters, knowledge, branches, snapshots, and combat. The Agent keeps only 13 exposure, diagnostic, and bounded Skill-read tools enabled. Every chat session opens its own server-side exposure and loads a narrow `lobby`, `play`, or `combat` group.
+[SagaSmith D&D MCP](https://github.com/SagaSmithAI/SagaSmith-dnd-mcp) owns campaigns, rules, modules, characters, knowledge, branches, snapshots, and combat. Every chat session opens its own server-side exposure. The server filters the native tool list by current session, principal, campaign, and phase; the Agent selects only the exact tools needed for the current task.
 
 ```text
 inbound message
 → Host injects principal
-→ skill_query(plan) and read required_now
-→ exposure_open
-→ search / inspect / load and read skill_plan_delta
-→ exposure_call (NanoBot static-schema fallback)
+→ skill_query(read/search/section) for bounded Skill sections
+→ exposure(action="open")
+→ exposure(action="search" / "set")
+→ refresh native schemas after tools/list_changed
+→ call the listed native MCP tool directly
 → MCP validates phase / campaign / role / actor / revision
 → a first or changed host_context_binding causes an in-turn hard barrier
 → isolated_evaluate / portray_npc returns a proposal from a fresh zero-tool context
