@@ -1303,6 +1303,7 @@ def test_agent_help_shows_workspace_and_config_options():
     assert "-w" in stripped_output
     assert "--config" in stripped_output
     assert "-c" in stripped_output
+    assert "--sender-id" in stripped_output
 
 
 def test_agent_uses_default_config_when_no_workspace_or_config_flags(mock_agent_runtime):
@@ -1316,10 +1317,24 @@ def test_agent_uses_default_config_when_no_workspace_or_config_flags(mock_agent_
     passed_config = mock_agent_runtime["from_config"].call_args.args[0]
     assert passed_config.workspace_path == mock_agent_runtime["config"].workspace_path
     mock_agent_runtime["agent_loop"].process_direct.assert_awaited_once()
+    assert mock_agent_runtime["agent_loop"].process_direct.await_args.kwargs["sender_id"] == "user"
     mock_agent_runtime["print_response"].assert_called_once_with(
         "mock-response",
         render_markdown=True,
         metadata={},
+    )
+
+
+def test_agent_passes_authenticated_sender_identity(mock_agent_runtime):
+    result = runner.invoke(
+        app,
+        ["agent", "-m", "hello", "--sender-id", "regression-dm"],
+    )
+
+    assert result.exit_code == 0
+    assert (
+        mock_agent_runtime["agent_loop"].process_direct.await_args.kwargs["sender_id"]
+        == "regression-dm"
     )
 
 

@@ -1915,6 +1915,11 @@ app.add_typer(
 def agent(
     message: str = typer.Option(None, "--message", "-m", help="Message to send to the agent"),
     session_id: str = typer.Option("cli:direct", "--session", "-s", help="Session ID"),
+    sender_id: str = typer.Option(
+        "user",
+        "--sender-id",
+        help="Authenticated CLI sender identity used for tool authorization",
+    ),
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
     markdown: bool = typer.Option(
@@ -2003,6 +2008,7 @@ def agent(
             response = await agent_loop.process_direct(
                 message,
                 session_id,
+                sender_id=sender_id,
                 on_progress=_make_progress(renderer),
                 on_stream=renderer.on_delta,
                 on_stream_end=renderer.on_end,
@@ -2148,7 +2154,7 @@ def agent(
                         await bus.publish_inbound(
                             InboundMessage(
                             channel=cli_channel,
-                            sender_id="user",
+                            sender_id=sender_id,
                             chat_id=cli_chat_id,
                             content=user_input,
                             metadata={"_wants_stream": True},
