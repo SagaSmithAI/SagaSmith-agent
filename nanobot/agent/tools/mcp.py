@@ -572,6 +572,7 @@ class MCPToolWrapper(_MCPWrapperBase):
         inject_principal: bool = False,
         session_store: Any | None = None,
         post_call_sync: _PostCallSyncCallback | None = None,
+        call_lock: asyncio.Lock | None = None,
     ):
         self._set_mcp_connection(session, server_name)
         self._original_name = tool_def.name
@@ -583,6 +584,7 @@ class MCPToolWrapper(_MCPWrapperBase):
         self._inject_principal = inject_principal
         self._session_store = session_store
         self._post_call_sync = post_call_sync
+        self._call_lock = call_lock
         meta = getattr(tool_def, "meta", None)
         if not isinstance(meta, dict):
             meta = {}
@@ -661,14 +663,29 @@ class MCPToolWrapper(_MCPWrapperBase):
         if self._inject_principal and self._principal_argument is not None:
             trusted_principal = self._trusted_principal()
             kwargs = {**kwargs, self._principal_argument: trusted_principal}
+        if self._call_lock is not None:
+            async with self._call_lock:
+                return await self._execute_call(kwargs, trusted_principal=trusted_principal)
+        return await self._execute_call(kwargs, trusted_principal=trusted_principal)
+
+    async def _execute_call(
+        self,
+        kwargs: dict[str, Any],
+        *,
+        trusted_principal: str | None,
+    ) -> str:
         retried_transient = False
         refreshed_session = False
         while True:
             try:
-                result = await asyncio.wait_for(
-                    self._session.call_tool(self._original_name, arguments=kwargs),
-                    timeout=self._tool_timeout,
-                )
+                # Keep MCP SDK requests in the wrapper's task. asyncio.wait_for
+                # creates a child task, which can break AnyIO session ownership
+                # across a tools/call -> tools/list_changed -> tools/list handoff.
+                async with asyncio.timeout(self._tool_timeout):
+                    result = await self._session.call_tool(
+                        self._original_name,
+                        arguments=kwargs,
+                    )
             except asyncio.TimeoutError:
                 logger.warning("MCP tool '{}' timed out after {}s", self._name, self._tool_timeout)
                 return ToolResult.error(f"(MCP tool call timed out after {self._tool_timeout}s)")
@@ -1163,6 +1180,7 @@ async def connect_mcp_servers(
         session: Any | None = None
         refresh_task: asyncio.Task[None] | None = None
         refresh_lock = asyncio.Lock()
+        call_lock = asyncio.Lock()
         refresh_generation = 0
         synced_generation = 0
 
@@ -1278,13 +1296,18 @@ async def connect_mcp_servers(
 
             async def wait_for_pending_tool_refresh() -> None:
                 # The receive loop dispatches list_changed independently of the
-                # tool-call task. Yield once for an ordered notification to
-                # publish its refresh task, then keep the next model request
-                # from observing stale native schemas.
+                # tool-call task. Run tools/list in its own task after tools/call
+                # has fully unwound; MCP SDK transports may reject a request made
+                # inline from the outer task during that response handoff.
                 await asyncio.sleep(0)
-                task = refresh_task
-                if task is not None and task is not asyncio.current_task():
-                    await asyncio.shield(task)
+                if synced_generation >= refresh_generation:
+                    return
+                task = asyncio.create_task(
+                    sync_pending_tool_refresh(),
+                    name=f"mcp-tools-post-call-refresh:{name}",
+                )
+                await asyncio.shield(task)
+                logger.info("MCP server '{}': refreshed tools after list_changed", name)
 
             async def sync_tools(*, warn_unmatched: bool = False) -> list[str]:
                 if session is None:
@@ -1328,7 +1351,8 @@ async def connect_mcp_servers(
                             getattr(registry.get(registered_name), "_reconnect", None)
                             for registered_name in registry.tool_names
                             if getattr(registry.get(registered_name), "_server_name", None) == name
-                            and getattr(registry.get(registered_name), "_reconnect", None) is not None
+                            and getattr(registry.get(registered_name), "_reconnect", None)
+                            is not None
                         ),
                         None,
                     )
@@ -1341,11 +1365,14 @@ async def connect_mcp_servers(
                             inject_principal=cfg.inject_principal,
                             session_store=session_store,
                             post_call_sync=wait_for_pending_tool_refresh,
+                            call_lock=call_lock,
                         )
                         if reconnect is not None:
                             wrapper.set_reconnect_handler(reconnect)
                         registry.register(wrapper)
-                        logger.debug("MCP: registered tool '{}' from server '{}'", wrapped_name, name)
+                        logger.debug(
+                            "MCP: registered tool '{}' from server '{}'", wrapped_name, name
+                        )
 
                     if warn_unmatched and enabled_tools and not allow_all_tools:
                         unmatched = sorted(enabled_tools - matched_enabled_tools)
@@ -1360,13 +1387,17 @@ async def connect_mcp_servers(
                             )
                     return available_raw_names
 
-            async def refresh_after_notification() -> None:
+            async def sync_pending_tool_refresh() -> None:
                 nonlocal synced_generation
+                while synced_generation < refresh_generation:
+                    target_generation = refresh_generation
+                    await sync_tools()
+                    synced_generation = target_generation
+
+            async def refresh_after_notification() -> None:
                 try:
-                    while synced_generation < refresh_generation:
-                        target_generation = refresh_generation
-                        await sync_tools()
-                        synced_generation = target_generation
+                    async with call_lock:
+                        await sync_pending_tool_refresh()
                     logger.info("MCP server '{}': refreshed tools after list_changed", name)
                 except asyncio.CancelledError:
                     raise
@@ -1379,6 +1410,11 @@ async def connect_mcp_servers(
                 if _payload_value(payload, "method") != "notifications/tools/list_changed":
                     return
                 refresh_generation += 1
+                # A model call holds this barrier through its post-call refresh.
+                # Let that path create and await the tools/list task; scheduling
+                # another refresher here would duplicate the request.
+                if call_lock.locked():
+                    return
                 if refresh_task is None or refresh_task.done():
                     refresh_task = asyncio.create_task(
                         refresh_after_notification(),

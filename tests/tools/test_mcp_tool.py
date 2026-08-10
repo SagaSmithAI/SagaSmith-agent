@@ -896,9 +896,7 @@ async def test_tool_call_waits_for_list_changed_registry_refresh(
     assert callable(handler)
 
     async def call_tool(_name: str, arguments: dict) -> SimpleNamespace:
-        session.list_tools = _make_fake_session(
-            ["exposure", "module_query"]
-        ).list_tools
+        session.list_tools = _make_fake_session(["exposure", "module_query"]).list_tools
         await handler(SimpleNamespace(method="notifications/tools/list_changed"))
         return SimpleNamespace(
             content=[_FakeTextContent("{}")],
@@ -913,6 +911,76 @@ async def test_tool_call_waits_for_list_changed_registry_refresh(
     await exposure.execute(action="set")
 
     assert "mcp_test_module_query" in registry.tool_names
+    for stack in stacks.values():
+        await stack.aclose()
+
+
+@pytest.mark.asyncio
+async def test_parallel_model_calls_do_not_cross_dynamic_tool_refresh(
+    fake_mcp_runtime: dict[str, object | None],
+) -> None:
+    session = _make_fake_session(["exposure", "server_capabilities"])
+    fake_mcp_runtime["session"] = session
+    registry = ToolRegistry()
+    stacks = await connect_mcp_servers(
+        {"test": MCPServerConfig(command="fake", enabled_tools=["*"])},
+        registry,
+    )
+    handler = fake_mcp_runtime["message_handler"]
+    assert callable(handler)
+    active_calls = 0
+    max_active_calls = 0
+    list_during_call = False
+    model_task: asyncio.Task | None = None
+    refresh_task_was_distinct = False
+
+    async def list_tools() -> SimpleNamespace:
+        nonlocal list_during_call, refresh_task_was_distinct
+        if active_calls:
+            list_during_call = True
+            raise RuntimeError("tools/list raced an active tools/call")
+        refresh_task_was_distinct = asyncio.current_task() is not model_task
+        return SimpleNamespace(
+            tools=[
+                _make_tool_def("exposure"),
+                _make_tool_def("server_capabilities"),
+                _make_tool_def("campaign_create"),
+            ]
+        )
+
+    async def call_tool(name: str, arguments: dict) -> SimpleNamespace:
+        nonlocal active_calls, max_active_calls
+        active_calls += 1
+        max_active_calls = max(max_active_calls, active_calls)
+        try:
+            if name == "exposure":
+                session.list_tools = list_tools
+                await handler(SimpleNamespace(method="notifications/tools/list_changed"))
+            await asyncio.sleep(0)
+            return SimpleNamespace(
+                content=[_FakeTextContent("{}")],
+                isError=False,
+                structuredContent={},
+            )
+        finally:
+            active_calls -= 1
+
+    session.call_tool = call_tool
+    exposure = registry.get("mcp_test_exposure")
+    capabilities = registry.get("mcp_test_server_capabilities")
+    assert exposure is not None
+    assert capabilities is not None
+
+    first = asyncio.create_task(exposure.execute(action="open"))
+    model_task = first
+    await asyncio.sleep(0)
+    second = asyncio.create_task(capabilities.execute())
+    await asyncio.gather(first, second)
+
+    assert max_active_calls == 1
+    assert list_during_call is False
+    assert refresh_task_was_distinct is True
+    assert "mcp_test_campaign_create" in registry.tool_names
     for stack in stacks.values():
         await stack.aclose()
 
