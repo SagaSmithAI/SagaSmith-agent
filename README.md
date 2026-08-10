@@ -43,10 +43,10 @@ SagaSmith Agent 负责：
 ```text
 消息到达
 → Host 注入 principal
-→ skill_query(plan) 并读取 required_now
-→ exposure_open
-→ search / inspect / load，并读取 skill_plan_delta
-→ exposure_call（NanoBot 静态 schema fallback）
+→ skill_query(read/search/section) 并读取 bounded Skill sections
+→ exposure(open)
+→ search / inspect / load，并读取 tools/list_changed
+→ native MCP tools（NanoBot 静态 schema fallback）
 → MCP 校验 phase / campaign / role / actor / revision
 → 首次或变化的 host_context_binding 触发当前轮硬切换
 → isolated_evaluate / portray_npc 在全新零工具上下文中只生成提案
