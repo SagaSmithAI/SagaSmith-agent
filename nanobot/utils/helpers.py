@@ -428,12 +428,41 @@ def _tool_result_json_summary(text: str) -> str | None:
 
     if isinstance(payload, dict):
         scalars: list[tuple[str, Any]] = []
-        containers: list[tuple[str, str]] = []
+        containers: list[tuple[str, Any]] = []
         for key, value in payload.items():
             if not isinstance(key, str):
                 continue
             if isinstance(value, dict):
-                containers.append((key, f"<object: {len(value)} fields>"))
+                description: Any = f"<object: {len(value)} fields>"
+                if key == "result":
+                    continuation = {
+                        nested_key: nested_value
+                        for nested_key, nested_value in value.items()
+                        if nested_key
+                        in {
+                            "action",
+                            "artifact",
+                            "branch_id",
+                            "campaign_id",
+                            "campaign_revision",
+                            "conversation_id",
+                            "conversation_revision",
+                            "id",
+                            "job_id",
+                            "module_id",
+                            "phase",
+                            "positioning_mode",
+                            "revision",
+                            "status",
+                        }
+                        and not isinstance(nested_value, (dict, list))
+                    }
+                    if continuation:
+                        description = {
+                            "<structure>": f"object with {len(value)} fields",
+                            **continuation,
+                        }
+                containers.append((key, description))
             elif isinstance(value, list):
                 containers.append((key, f"<array: {len(value)} items>"))
             elif isinstance(value, str) and len(value) > _TOOL_RESULT_SUMMARY_SCALAR_CHARS:

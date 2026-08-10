@@ -132,6 +132,38 @@ def test_persist_json_result_summarizes_root_scalars_after_large_nested_data(tmp
     assert saved.read_text(encoding="utf-8") == raw
 
 
+def test_persist_json_result_surfaces_bounded_result_continuation_ids(tmp_path):
+    from nanobot.utils.helpers import maybe_persist_tool_result
+
+    private_detail = "private capsule " * 1000
+    raw = json.dumps(
+        {
+            "status": "editing",
+            "action": "start",
+            "result": {
+                "job": {"private": private_detail},
+                "inspection": {"private": private_detail},
+                "module_id": "module-required-for-next-call",
+                "status": "editing",
+                "private_secret": private_detail,
+            },
+        }
+    )
+
+    persisted = maybe_persist_tool_result(
+        tmp_path,
+        "current:session",
+        "call_nested_json",
+        raw,
+        max_chars=64,
+    )
+
+    assert 'module-required-for-next-call' in persisted
+    assert '"status": "editing"' in persisted
+    assert "private capsule" not in persisted
+    assert "private_secret" not in persisted
+
+
 def test_persist_json_result_keeps_root_failure_fields_visible(tmp_path):
     from nanobot.utils.helpers import maybe_persist_tool_result
 
