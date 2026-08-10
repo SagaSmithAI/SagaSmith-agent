@@ -673,6 +673,28 @@ async def test_execute_preserves_success_text_that_starts_with_error() -> None:
     assert not is_tool_error_result(wrapper.name, result)
 
 
+@pytest.mark.asyncio
+async def test_execute_prefers_structured_content_over_multiple_text_documents() -> None:
+    structured = {
+        "result": [{"id": "first"}, {"id": "second"}],
+        "host_context_binding": {"domain": "example"},
+    }
+
+    async def call_tool(_name: str, arguments: dict) -> object:
+        return SimpleNamespace(
+            content=[
+                _FakeTextContent('{"id":"first"}'),
+                _FakeTextContent('{"id":"second"}'),
+            ],
+            isError=False,
+            structuredContent=structured,
+        )
+
+    wrapper = _make_wrapper(SimpleNamespace(call_tool=call_tool))
+
+    assert json.loads(await wrapper.execute()) == structured
+
+
 # Smallest valid 1x1 PNG, base64 without the data: prefix.
 _PNG_B64 = (
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="

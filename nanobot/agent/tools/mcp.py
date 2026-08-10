@@ -714,7 +714,15 @@ class MCPToolWrapper(_MCPWrapperBase):
             else:
                 # Success — extract text and persist any image content as artifacts.
                 try:
-                    rendered = self._render_call_result(result.content, kwargs)
+                    rendered = self._render_call_result(
+                        result.content,
+                        kwargs,
+                        structured_content=(
+                            None
+                            if getattr(result, "isError", False)
+                            else getattr(result, "structuredContent", None)
+                        ),
+                    )
                     if getattr(result, "isError", False):
                         return ToolResult.error(rendered)
                     context_changed = self._persist_domain_context(
@@ -815,21 +823,34 @@ class MCPToolWrapper(_MCPWrapperBase):
             )
         return changed
 
-    def _render_call_result(self, content: Any, arguments: Mapping[str, Any]) -> str:
+    def _render_call_result(
+        self,
+        content: Any,
+        arguments: Mapping[str, Any],
+        *,
+        structured_content: Any = None,
+    ) -> str:
         """Turn MCP content blocks into a tool result string.
 
-        Text is concatenated as before. Image blocks are decoded and saved as
+        Structured MCP output is authoritative when present, avoiding an invalid
+        newline-joined document when a server renders a list as several text
+        blocks. Image blocks are decoded and saved as
         local artifacts (mirroring the built-in image generation tool) so the
         model can deliver them via the message tool instead of trying to forward
         base64 — which would be truncated and bloat the context window.
         """
         from mcp import types
 
-        text_parts: list[str] = []
+        text_parts: list[str] = (
+            [json.dumps(structured_content, ensure_ascii=False, indent=2)]
+            if structured_content is not None
+            else []
+        )
         artifacts: list[dict[str, Any]] = []
         for block in content:
             if isinstance(block, types.TextContent):
-                text_parts.append(block.text)
+                if structured_content is None:
+                    text_parts.append(block.text)
                 continue
             data_url = _image_block_data_url(block, types)
             if data_url is not None:
