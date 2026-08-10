@@ -49,6 +49,10 @@ ContextBarrierCallback = Callable[
     [list[ToolCallRequest], list[Any]],
     list[dict[str, Any]] | Awaitable[list[dict[str, Any]]],
 ]
+ToolAuditCallback = Callable[
+    [dict[str, Any], list[dict[str, Any]]],
+    None | Awaitable[None],
+]
 
 _DEFAULT_ERROR_MESSAGE = "Sorry, I encountered an error calling the AI model."
 _ARREARAGE_ERROR_MESSAGE = (
@@ -90,6 +94,7 @@ class AgentRunSpec:
     goal_continue_message: GoalContinueMessage | None = None
     finalize_on_max_iterations: bool = True
     context_barrier_callback: ContextBarrierCallback | None = None
+    tool_audit_callback: ToolAuditCallback | None = None
 
 
 @dataclass(slots=True)
@@ -222,9 +227,9 @@ class AgentRunner:
         try:
             signature = inspect.signature(spec.injection_callback)
             accepts_limit = "limit" in signature.parameters or any(
-                    parameter.kind is inspect.Parameter.VAR_KEYWORD
-                    for parameter in signature.parameters.values()
-                )
+                parameter.kind is inspect.Parameter.VAR_KEYWORD
+                for parameter in signature.parameters.values()
+            )
             if accepts_limit:
                 items = await spec.injection_callback(limit=_MAX_INJECTIONS_PER_TURN)
             else:
@@ -465,6 +470,13 @@ class AgentRunner:
                     }
                     messages.append(tool_message)
                     completed_tool_results.append(tool_message)
+                if spec.tool_audit_callback is not None and completed_tool_results:
+                    audited = spec.tool_audit_callback(
+                        deepcopy(assistant_message),
+                        deepcopy(completed_tool_results),
+                    )
+                    if inspect.isawaitable(audited):
+                        await audited
                 context_barrier = any(
                     bool(getattr(result, "context_barrier", False)) for result in results
                 )
@@ -608,9 +620,9 @@ class AgentRunner:
                         await hook.on_stream_end(context, resuming=True)
                     messages.append(
                         build_assistant_message(
-                        clean,
-                        reasoning_content=response.reasoning_content,
-                        thinking_blocks=response.thinking_blocks,
+                            clean,
+                            reasoning_content=response.reasoning_content,
+                            thinking_blocks=response.thinking_blocks,
                         )
                     )
                     messages.append(build_length_recovery_message())
@@ -694,9 +706,9 @@ class AgentRunner:
             messages.append(
                 assistant_message
                 or build_assistant_message(
-                clean,
-                reasoning_content=response.reasoning_content,
-                thinking_blocks=response.thinking_blocks,
+                    clean,
+                    reasoning_content=response.reasoning_content,
+                    thinking_blocks=response.thinking_blocks,
                 )
             )
             await self._emit_checkpoint(
@@ -827,7 +839,7 @@ class AgentRunner:
                 prev_clean = strip_reasoning_tags(thinking_buf)
                 thinking_buf += delta
                 new_clean = strip_reasoning_tags(thinking_buf)
-                incremental = new_clean[len(prev_clean):]
+                incremental = new_clean[len(prev_clean) :]
                 if incremental:
                     context.streamed_reasoning = True
                     await hook.emit_reasoning(incremental)
@@ -853,7 +865,7 @@ class AgentRunner:
                 prev_clean = strip_think(stream_buf)
                 stream_buf += delta
                 new_clean = strip_think(stream_buf)
-                incremental = new_clean[len(prev_clean):]
+                incremental = new_clean[len(prev_clean) :]
 
                 if await think_extractor.feed(stream_buf, hook.emit_reasoning):
                     context.streamed_reasoning = True
@@ -1167,15 +1179,15 @@ class AgentRunner:
             if spec.concurrent_tools and len(batch) > 1:
                 batch_results = await asyncio.gather(
                     *(
-                    self._run_tool(
-                        spec,
-                        tool_call,
-                        external_lookup_counts,
-                        workspace_violation_counts,
-                        hook,
-                        context,
-                    )
-                    for tool_call in batch
+                        self._run_tool(
+                            spec,
+                            tool_call,
+                            external_lookup_counts,
+                            workspace_violation_counts,
+                            hook,
+                            context,
+                        )
+                        for tool_call in batch
                     )
                 )
                 tool_results.extend(batch_results)

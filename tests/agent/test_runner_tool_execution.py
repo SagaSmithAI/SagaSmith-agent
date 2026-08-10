@@ -102,21 +102,21 @@ async def _run_optional_tool_response(response: LLMResponse):
     shared_events: list[str] = []
     tools.register(
         _DelayTool(
-        "optional_tool",
-        delay=0,
-        read_only=True,
-        shared_events=shared_events,
+            "optional_tool",
+            delay=0,
+            read_only=True,
+            shared_events=shared_events,
         )
     )
 
     result = await AgentRunner().run(
         make_run_spec(
             provider,
-        initial_messages=[{"role": "user", "content": "try optional"}],
-        tools=tools,
-        model="test-model",
-        max_iterations=2,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+            initial_messages=[{"role": "user", "content": "try optional"}],
+            tools=tools,
+            model="test-model",
+            max_iterations=2,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
         )
     )
     return result, shared_events
@@ -166,6 +166,7 @@ async def test_context_barrier_rebuilds_before_next_model_call_and_skips_later_t
     )
     provider = MagicMock()
     calls: list[list[dict]] = []
+    audit_batches: list[tuple[dict, list[dict]]] = []
 
     async def chat_with_retry(*, messages, **kwargs):
         calls.append(messages)
@@ -194,6 +195,9 @@ async def test_context_barrier_rebuilds_before_next_model_call_and_skips_later_t
             {"role": "user", "content": f"trusted result: {results[0]}"},
         ]
 
+    async def audit(assistant_message, tool_results):
+        audit_batches.append((assistant_message, tool_results))
+
     result = await AgentRunner().run(
         make_run_spec(
             provider,
@@ -207,6 +211,7 @@ async def test_context_barrier_rebuilds_before_next_model_call_and_skips_later_t
             max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
             concurrent_tools=True,
             context_barrier_callback=rebuild,
+            tool_audit_callback=audit,
         )
     )
 
@@ -215,6 +220,9 @@ async def test_context_barrier_rebuilds_before_next_model_call_and_skips_later_t
     assert all("SECRET_MEMORY" not in str(message) for message in calls[1])
     assert result.final_content == "clean completion"
     assert result.rebuilt_initial_count == 2
+    assert audit_batches[0][0]["tool_calls"][0]["function"]["name"] == "domain_resume"
+    assert audit_batches[0][1][0]["tool_call_id"] == "resume"
+    assert audit_batches[0][1][0]["content"] == '{"campaign_id":"campaign-1"}'
 
 
 @pytest.mark.asyncio
@@ -328,10 +336,10 @@ async def test_runner_rejects_near_miss_tool_name_without_executing():
     shared_events: list[str] = []
     tools.register(
         _DelayTool(
-        "read_file",
-        delay=0,
-        read_only=True,
-        shared_events=shared_events,
+            "read_file",
+            delay=0,
+            read_only=True,
+            shared_events=shared_events,
         )
     )
 
@@ -339,11 +347,11 @@ async def test_runner_rejects_near_miss_tool_name_without_executing():
     result = await runner.run(
         make_run_spec(
             provider,
-        initial_messages=[{"role": "user", "content": "read notes"}],
-        tools=tools,
-        model="test-model",
-        max_iterations=2,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+            initial_messages=[{"role": "user", "content": "read notes"}],
+            tools=tools,
+            model="test-model",
+            max_iterations=2,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
         )
     )
 
@@ -378,22 +386,22 @@ async def test_runner_rejects_openai_compat_invalid_arguments_without_executing(
             {
                 "choices": [
                     {
-                "message": {
+                        "message": {
                             "tool_calls": [
                                 {
-                        "id": "call_1",
-                        "type": "function",
-                        "function": {
-                            "name": "optional_tool",
-                            "arguments": arguments,
-                        },
+                                    "id": "call_1",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "optional_tool",
+                                        "arguments": arguments,
+                                    },
                                 }
                             ],
-                },
-                "finish_reason": "tool_calls",
+                        },
+                        "finish_reason": "tool_calls",
                     }
                 ],
-            "usage": {},
+                "usage": {},
             }
         )
 
@@ -413,15 +421,15 @@ async def test_runner_rejects_openai_responses_malformed_arguments_without_execu
         {
             "output": [
                 {
-            "type": "function_call",
-            "call_id": "call_1",
-            "id": "fc_1",
-            "name": "optional_tool",
-            "arguments": "{bad",
+                    "type": "function_call",
+                    "call_id": "call_1",
+                    "id": "fc_1",
+                    "name": "optional_tool",
+                    "arguments": "{bad",
                 }
             ],
-        "status": "completed",
-        "usage": {},
+            "status": "completed",
+            "usage": {},
         }
     )
 
@@ -441,15 +449,15 @@ async def test_runner_rejects_openai_responses_array_arguments_without_executing
         {
             "output": [
                 {
-            "type": "function_call",
-            "call_id": "call_1",
-            "id": "fc_1",
-            "name": "optional_tool",
-            "arguments": [],
+                    "type": "function_call",
+                    "call_id": "call_1",
+                    "id": "fc_1",
+                    "name": "optional_tool",
+                    "arguments": [],
                 }
             ],
-        "status": "completed",
-        "usage": {},
+            "status": "completed",
+            "usage": {},
         }
     )
 
@@ -468,26 +476,26 @@ async def test_runner_preserves_structured_plugin_success_that_starts_with_error
     provider = MagicMock()
     provider.chat_with_retry = AsyncMock(
         side_effect=[
-        LLMResponse(
-            content="working",
-            tool_calls=[
-                ToolCallRequest(id="call_1", name="structured_success_plugin", arguments={})
-            ],
-            usage={},
-        ),
-        LLMResponse(content="done", tool_calls=[], usage={}),
+            LLMResponse(
+                content="working",
+                tool_calls=[
+                    ToolCallRequest(id="call_1", name="structured_success_plugin", arguments={})
+                ],
+                usage={},
+            ),
+            LLMResponse(content="done", tool_calls=[], usage={}),
         ]
     )
 
     result = await AgentRunner().run(
         make_run_spec(
             provider,
-        initial_messages=[{"role": "user", "content": "run plugin"}],
-        tools=_load_entry_point_plugin(_StructuredSuccessPluginTool, tmp_path),
-        model="test-model",
-        max_iterations=2,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        fail_on_tool_error=True,
+            initial_messages=[{"role": "user", "content": "run plugin"}],
+            tools=_load_entry_point_plugin(_StructuredSuccessPluginTool, tmp_path),
+            model="test-model",
+            max_iterations=2,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+            fail_on_tool_error=True,
         )
     )
 
@@ -533,11 +541,11 @@ async def test_runner_blocks_repeated_external_fetches():
     result = await runner.run(
         make_run_spec(
             provider,
-        initial_messages=[{"role": "user", "content": "research task"}],
-        tools=tools,
-        model="test-model",
-        max_iterations=4,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+            initial_messages=[{"role": "user", "content": "research task"}],
+            tools=tools,
+            model="test-model",
+            max_iterations=4,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
         )
     )
 

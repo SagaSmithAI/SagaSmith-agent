@@ -828,6 +828,25 @@ class AgentLoop:
                 return
             self._set_runtime_checkpoint(session, payload)
 
+        async def _audit_tool_batch(
+            assistant_message: dict[str, Any],
+            tool_results: list[dict[str, Any]],
+        ) -> None:
+            audit_path = str(os.environ.get("NANOBOT_TOOL_AUDIT_PATH") or "").strip()
+            if not audit_path:
+                return
+            path = Path(audit_path).expanduser().resolve()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            row = {
+                "schema_version": 1,
+                "recorded_at_unix": time.time(),
+                "session_key": session.key if session is not None else active_session_key,
+                "assistant_message": assistant_message,
+                "tool_results": tool_results,
+            }
+            with path.open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n")
+
         async def _drain_pending(*, limit: int = _MAX_INJECTIONS_PER_TURN) -> list[dict[str, Any]]:
             """Drain follow-up messages from the pending queue.
 
@@ -874,7 +893,7 @@ class AgentLoop:
             # completions are injected in-order rather than dispatched separately.
             if (
                 not items
-                    and session is not None
+                and session is not None
                 and self.subagents.get_running_count_by_session(session.key) > 0
             ):
                 try:
@@ -987,62 +1006,63 @@ class AgentLoop:
                 turn_scope_stack.enter_context(scope)
             hook = build_agent_turn_hook(
                 AgentTurnHookSpec(
-                on_progress=on_progress,
-                on_stream=on_stream,
-                on_stream_end=on_stream_end,
-                channel=channel,
-                chat_id=chat_id,
-                message_id=message_id,
-                metadata=metadata,
-                session_key=active_session_key,
-                workspace=effective_scope.project_path,
-                tool_hint_max_length=self.tool_hint_max_length,
-                on_iteration=lambda iteration: setattr(self, "_current_iteration", iteration),
-                registered_hook_factories=self._hook_factories,
-                turn_hook_factories=list(hook_factories or []),
-                registered_hooks=self._extra_hooks,
-                turn_hooks=list(hooks or []),
-                ephemeral=ephemeral,
-                run_extra_hooks_for_ephemeral=run_extra_hooks_for_ephemeral,
+                    on_progress=on_progress,
+                    on_stream=on_stream,
+                    on_stream_end=on_stream_end,
+                    channel=channel,
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    metadata=metadata,
+                    session_key=active_session_key,
+                    workspace=effective_scope.project_path,
+                    tool_hint_max_length=self.tool_hint_max_length,
+                    on_iteration=lambda iteration: setattr(self, "_current_iteration", iteration),
+                    registered_hook_factories=self._hook_factories,
+                    turn_hook_factories=list(hook_factories or []),
+                    registered_hooks=self._extra_hooks,
+                    turn_hooks=list(hooks or []),
+                    ephemeral=ephemeral,
+                    run_extra_hooks_for_ephemeral=run_extra_hooks_for_ephemeral,
                 )
             )
             result = await self.runner.run(
                 AgentRunSpec(
-                initial_messages=initial_messages,
-                tools=effective_tools,
-                runtime=runtime,
-                max_iterations=self.max_iterations,
-                max_tool_result_chars=self.max_tool_result_chars,
-                hook=hook,
-                error_message="Sorry, I encountered an error calling the AI model.",
-                concurrent_tools=True,
-                workspace=effective_scope.project_path,
-                session_key=session.key if session else None,
-                context_block_limit=self.context_block_limit,
-                provider_retry_mode=self.provider_retry_mode,
-                progress_callback=on_progress,
-                stream_progress_deltas=on_stream is not None,
-                retry_wait_callback=on_retry_wait,
-                checkpoint_callback=_checkpoint,
-                injection_callback=_drain_pending,
-                # Sustained goals may legitimately exceed NANOBOT_LLM_TIMEOUT_S; idle stall
-                # is still capped by NANOBOT_STREAM_IDLE_TIMEOUT_S in streaming providers.
-                llm_timeout_s=runner_wall_llm_timeout_s(
-                    self.sessions,
-                    session.key if session is not None else session_key,
-                    metadata=session_metadata,
-                    message_metadata=metadata,
-                ),
+                    initial_messages=initial_messages,
+                    tools=effective_tools,
+                    runtime=runtime,
+                    max_iterations=self.max_iterations,
+                    max_tool_result_chars=self.max_tool_result_chars,
+                    hook=hook,
+                    error_message="Sorry, I encountered an error calling the AI model.",
+                    concurrent_tools=True,
+                    workspace=effective_scope.project_path,
+                    session_key=session.key if session else None,
+                    context_block_limit=self.context_block_limit,
+                    provider_retry_mode=self.provider_retry_mode,
+                    progress_callback=on_progress,
+                    stream_progress_deltas=on_stream is not None,
+                    retry_wait_callback=on_retry_wait,
+                    checkpoint_callback=_checkpoint,
+                    injection_callback=_drain_pending,
+                    # Sustained goals may legitimately exceed NANOBOT_LLM_TIMEOUT_S; idle stall
+                    # is still capped by NANOBOT_STREAM_IDLE_TIMEOUT_S in streaming providers.
+                    llm_timeout_s=runner_wall_llm_timeout_s(
+                        self.sessions,
+                        session.key if session is not None else session_key,
+                        metadata=session_metadata,
+                        message_metadata=metadata,
+                    ),
                     goal_active_predicate=lambda: (
                         sustained_goal_active(session.metadata) if session is not None else False
                     ),
-                goal_continue_message=_goal_continue,
-                finalize_on_max_iterations=turn_continuation.should_finalize_on_max_iterations(
-                    pending_queue_available=pending_queue is not None and session is not None,
-                    session_metadata=session_metadata,
-                    message_metadata=metadata,
-                ),
-                context_barrier_callback=_rebuild_after_context_barrier,
+                    goal_continue_message=_goal_continue,
+                    finalize_on_max_iterations=turn_continuation.should_finalize_on_max_iterations(
+                        pending_queue_available=pending_queue is not None and session is not None,
+                        session_metadata=session_metadata,
+                        message_metadata=metadata,
+                    ),
+                    context_barrier_callback=_rebuild_after_context_barrier,
+                    tool_audit_callback=_audit_tool_batch,
                 )
             )
         finally:
@@ -1175,9 +1195,9 @@ class AgentLoop:
                 task.add_done_callback(
                     lambda t, k=effective_key: (
                         self._active_tasks.get(k, []) and self._active_tasks[k].remove(t)
-                    if t in self._active_tasks.get(k, [])
-                    else None
-                )
+                        if t in self._active_tasks.get(k, [])
+                        else None
+                    )
                 )
         finally:
             # MCP stdio transports use AnyIO cancel scopes; close them from the task that opened them.
@@ -1301,7 +1321,7 @@ class AgentLoop:
                         OutboundMessage(
                             channel=msg.channel,
                             chat_id=msg.chat_id,
-                        content="Sorry, I encountered an error.",
+                            content="Sorry, I encountered an error.",
                         )
                     )
                     if not turn_continuation.internal_continuation_pending(msg.metadata):
