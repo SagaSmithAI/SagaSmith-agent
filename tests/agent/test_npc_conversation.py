@@ -31,7 +31,6 @@ def _capsule(*, actor_id="npc", bootstrap=True, sequence=1):
             "campaign_id": "campaign",
             "branch_id": "branch",
             "actor_revision": 2,
-            "campaign_revision": 5,
             "working_state_revision": 0,
             "inbox_cursor": sequence,
             "conversation_revision": 2,
