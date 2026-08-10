@@ -784,6 +784,7 @@ class MCPToolWrapper(_MCPWrapperBase):
                     return ToolResult.error(
                         f"(MCP tool returned malformed content: {type(exc).__name__})"
                     )
+
     def _persist_domain_context(
         self,
         rendered: str,
@@ -1197,9 +1198,9 @@ async def connect_mcp_servers(
                     return name, None
 
             host_token = str((cfg.env or {}).get("SAGASMITH_NPC_HOST_TOKEN") or "").strip()
-            sagasmith_stdio = "sagasmith" in " ".join(
-                (name, cfg.command, *(cfg.args or []))
-            ).casefold()
+            sagasmith_stdio = (
+                "sagasmith" in " ".join((name, cfg.command, *(cfg.args or []))).casefold()
+            )
             if transport_type == "stdio" and sagasmith_stdio and not host_token:
                 host_token = secrets.token_urlsafe(32)
 
@@ -1363,7 +1364,11 @@ async def connect_mcp_servers(
                             "type": "object",
                             "additionalProperties": False,
                             "required": [
-                                "campaign_id", "conversation_id", "action", "payload", "host_token"
+                                "campaign_id",
+                                "conversation_id",
+                                "action",
+                                "payload",
+                                "host_token",
                             ],
                             "properties": {
                                 "campaign_id": {"type": "string"},
@@ -1371,7 +1376,9 @@ async def connect_mcp_servers(
                                 "action": {
                                     "type": "string",
                                     "enum": [
-                                        "claim_activation", "submit_proposal", "cancel_activation"
+                                        "claim_activation",
+                                        "submit_proposal",
+                                        "cancel_activation",
                                     ],
                                 },
                                 "payload": {"type": "object"},

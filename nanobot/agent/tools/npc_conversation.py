@@ -208,9 +208,7 @@ class NpcConversationWorkerTool(Tool):
                         payload={
                             "activation_ref": str(descriptor["activation_ref"]),
                             "lease_id": str(capsule["lease_id"]),
-                            "expected_conversation_revision": int(
-                                capsule["conversation_revision"]
-                            ),
+                            "expected_conversation_revision": int(capsule["conversation_revision"]),
                             "idempotency_key": (
                                 f"npc-cancel:{descriptor['activation_ref']}:"
                                 f"{capsule['conversation_revision']}"
@@ -224,9 +222,7 @@ class NpcConversationWorkerTool(Tool):
                 str((capsule or {}).get("actor_runtime_id") or ""),
             )
             return ToolResult.error(f"Error: isolated NPC activation rejected: {exc}")
-        self._pool.confirm_last_activation(
-            conversation_id, str(capsule["actor_runtime_id"])
-        )
+        self._pool.confirm_last_activation(conversation_id, str(capsule["actor_runtime_id"]))
         safe_result = {
             key: result.get(key)
             for key in (

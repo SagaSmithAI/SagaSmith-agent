@@ -96,8 +96,10 @@ def _proposal(capsule, text="My answer."):
             }
         ],
         "proposed_action": {
-            "summary": "", "target_refs": [],
-            "settlement": "narrative", "mechanic_hint": "",
+            "summary": "",
+            "target_refs": [],
+            "settlement": "narrative",
+            "mechanic_hint": "",
         },
         "resolution_requests": [],
         "working_deltas": {"facts": [], "actor_knowledge": [], "commitments": []},

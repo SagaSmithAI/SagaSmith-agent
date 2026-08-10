@@ -39,9 +39,7 @@ _OUTPUT_SHAPE = {
         {
             "text": "speakable text",
             "speech_act": "short open description of the conversational move",
-            "truth_posture": (
-                "believes_true|uncertain|intentional_deception|opinion|nonfactual"
-            ),
+            "truth_posture": ("believes_true|uncertain|intentional_deception|opinion|nonfactual"),
             "basis_refs": ["constraints.allowed_basis_refs item"],
             "targets": ["constraints.allowed_target_actor_ids item"],
             "language": "string",
@@ -69,6 +67,7 @@ _OUTPUT_SHAPE = {
     "visible_cues": ["player-observable cue"],
     "decision_summary": "private string",
 }
+
 
 class NpcConversationWorkerError(ValueError):
     """Raised when a private capsule or worker proposal violates the host contract."""
@@ -113,7 +112,9 @@ def _extract_json(content: str | None) -> dict[str, Any]:
     try:
         value = json.loads(text)
     except (TypeError, json.JSONDecodeError) as exc:
-        raise NpcConversationWorkerError(f"NPC worker did not return one JSON object: {exc}") from exc
+        raise NpcConversationWorkerError(
+            f"NPC worker did not return one JSON object: {exc}"
+        ) from exc
     return _object(value, "npc_conversation.proposal")
 
 
@@ -155,8 +156,13 @@ def validate_activation_capsule(value: Any) -> dict[str, Any]:
     if capsule.get("schema_version") != 2 or capsule.get("contract") != "npc-conversation.v2":
         raise NpcConversationWorkerError("unsupported NPC activation capsule contract")
     constraints = _object(capsule.get("constraints"), "capsule.constraints")
-    if any(constraints.get(key) is not False for key in ("may_call_tools", "may_roll_dice", "may_write_state")):
-        raise NpcConversationWorkerError("NPC activation capsule must prohibit tools and state writes")
+    if any(
+        constraints.get(key) is not False
+        for key in ("may_call_tools", "may_roll_dice", "may_write_state")
+    ):
+        raise NpcConversationWorkerError(
+            "NPC activation capsule must prohibit tools and state writes"
+        )
     if constraints.get("output_contract") != "npc-conversation-proposal.v3":
         raise NpcConversationWorkerError("unsupported NPC conversation proposal contract")
     if not isinstance(capsule.get("inbox"), list):
@@ -315,9 +321,7 @@ class NpcConversationWorkerPool:
                                 ),
                             }
                         )
-                        state.inbox_cursor = int(
-                            dict(capsule["context_manifest"])["inbox_cursor"]
-                        )
+                        state.inbox_cursor = int(dict(capsule["context_manifest"])["inbox_cursor"])
                         state.turn_count += 1
                         for name, value in dict(response.usage or {}).items():
                             if isinstance(value, int):
@@ -327,7 +331,7 @@ class NpcConversationWorkerPool:
                     state.messages.append(
                         {
                             "role": "assistant",
-                            "content": response.content or "{\"invalid_proposal\":true}",
+                            "content": response.content or '{"invalid_proposal":true}',
                         }
                     )
                     state.messages.append(
@@ -393,9 +397,7 @@ class NpcConversationWorkerPool:
                 timeout=self.timeout_s,
             )
             if response.finish_reason == "error" or response.tool_calls:
-                raise NpcConversationWorkerError(
-                    response.content or "NPC proposal repair failed"
-                )
+                raise NpcConversationWorkerError(response.content or "NPC proposal repair failed")
             proposal = normalize_worker_proposal(_extract_json(response.content), capsule)
             state.messages.append(
                 {

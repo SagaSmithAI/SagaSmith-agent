@@ -96,6 +96,7 @@ def _fake_mcp_module(
 ) -> None:
     mod = ModuleType("mcp")
     mod.types = SimpleNamespace(
+        Tool=SimpleNamespace,
         TextContent=_FakeTextContent,
         TextResourceContents=_FakeTextResourceContents,
         BlobResourceContents=_FakeBlobResourceContents,
@@ -516,13 +517,7 @@ async def test_mcp_exact_domain_binding_emits_a_one_time_context_barrier(
             return SimpleNamespace(
                 content=[
                     _FakeTextContent(
-                        json.dumps(
-                            {
-                                "authority": {
-                                    "host_context_binding": dict(binding)
-                                }
-                            }
-                        )
+                        json.dumps({"authority": {"host_context_binding": dict(binding)}})
                     )
                 ],
                 isError=False,
@@ -561,12 +556,10 @@ async def test_mcp_exact_domain_binding_emits_a_one_time_context_barrier(
         first = await wrapper.execute(campaign_id="campaign-1")
         second = await wrapper.execute(campaign_id="campaign-1")
         binding.update(
-                DomainContextBinding(
-                    domain="sagasmith-dnd",
-                    campaign_id="campaign-1",
-                    principal_fingerprint=mcp_mod.principal_fingerprint(
-                        local_principal
-                    ),
+            DomainContextBinding(
+                domain="sagasmith-dnd",
+                campaign_id="campaign-1",
+                principal_fingerprint=mcp_mod.principal_fingerprint(local_principal),
                 role="dm",
                 audience="player",
                 branch_id="branch-1",
@@ -589,12 +582,13 @@ def test_domain_binding_is_not_read_from_arbitrary_nested_content() -> None:
         principal_fingerprint="a" * 64,
     ).to_dict()
 
-    assert mcp_mod._host_context_binding(
-        {"module_content": {"host_context_binding": binding}}
-    ) is None
-    assert mcp_mod._host_context_binding(
-        {"result": {"authority": {"host_context_binding": binding}}}
-    ) == binding
+    assert (
+        mcp_mod._host_context_binding({"module_content": {"host_context_binding": binding}}) is None
+    )
+    assert (
+        mcp_mod._host_context_binding({"result": {"authority": {"host_context_binding": binding}}})
+        == binding
+    )
 
 
 @pytest.mark.asyncio
@@ -611,9 +605,7 @@ async def test_exact_domain_binding_requires_transport_authenticated_principal(
         assert arguments == {"campaign_id": "campaign-1"}
         return SimpleNamespace(
             content=[
-                _FakeTextContent(
-                    json.dumps({"authority": {"host_context_binding": binding}})
-                )
+                _FakeTextContent(json.dumps({"authority": {"host_context_binding": binding}}))
             ],
             isError=False,
         )
@@ -634,16 +626,12 @@ async def test_exact_domain_binding_requires_transport_authenticated_principal(
         definition,
         session_store=sessions,
     )
-    with request_context(
-        RequestContext(channel="cli", chat_id="direct", session_key="cli:direct")
-    ):
+    with request_context(RequestContext(channel="cli", chat_id="direct", session_key="cli:direct")):
         result = await wrapper.execute(campaign_id="campaign-1")
 
     assert is_tool_error_result(wrapper.name, result)
     assert "malformed content: ValueError" in result
-    assert "_domain_context_binding" not in sessions.get_or_create(
-        "cli:direct"
-    ).metadata
+    assert "_domain_context_binding" not in sessions.get_or_create("cli:direct").metadata
 
 
 @pytest.mark.asyncio
@@ -1439,6 +1427,59 @@ async def test_connect_mcp_servers_wraps_windows_stdio_launchers(
     assert captured["command"] == r"C:\Windows\System32\cmd.exe"
     assert captured["args"] == ["/d", "/c", "npx", "-y", "chrome-devtools-mcp@latest"]
     assert captured["env"] is None
+
+
+@pytest.mark.asyncio
+async def test_sagasmith_stdio_registers_authenticated_model_hidden_transport(
+    fake_mcp_runtime: dict[str, object | None],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from mcp import types
+
+    session = _make_fake_session(["server_capabilities"])
+
+    async def call_tool(name: str, arguments: dict) -> SimpleNamespace:
+        assert name == "server_capabilities"
+        assert arguments == {}
+        return SimpleNamespace(
+            content=[
+                types.TextContent(
+                    text=json.dumps(
+                        {"npc_conversations": {"host_transport": "private_authenticated_unlisted"}}
+                    ),
+                )
+            ]
+        )
+
+    session.call_tool = call_tool
+    fake_mcp_runtime["session"] = session
+    captured = {}
+
+    @asynccontextmanager
+    async def _capturing_stdio_client(params: object):
+        captured["env"] = params.env
+        yield object(), object()
+
+    monkeypatch.setattr(sys.modules["mcp.client.stdio"], "stdio_client", _capturing_stdio_client)
+    registry = ToolRegistry()
+    stacks = await connect_mcp_servers(
+        {
+            "dnd": MCPServerConfig(
+                command="python",
+                args=["-m", "sagasmith_dnd_mcp"],
+            )
+        },
+        registry,
+    )
+    for stack in stacks.values():
+        await stack.aclose()
+
+    hidden_name = "mcp_dnd_npc_conversation_transport"
+    assert hidden_name in registry.tool_names
+    assert hidden_name not in registry.definition_names()
+    hidden = registry.get(hidden_name)
+    assert hidden is not None
+    assert hidden._host_token == captured["env"]["SAGASMITH_NPC_HOST_TOKEN"]
 
 
 @pytest.mark.asyncio
