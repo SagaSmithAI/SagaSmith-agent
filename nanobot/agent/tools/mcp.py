@@ -63,6 +63,7 @@ _WINDOWS_SHELL_LAUNCHERS: frozenset[str] = frozenset(("npx", "npm", "pnpm", "yar
 _SANITIZE_RE = re.compile(r"_+")
 _RELOAD_LOCKS: WeakKeyDictionary[Any, asyncio.Lock] = WeakKeyDictionary()
 _ReconnectCallback = Callable[[str, str, Tool], Awaitable[Tool | None]]
+_PostCallSyncCallback = Callable[[], Awaitable[None]]
 _MCP_CONTEXT_TOOL_LIMIT = 48
 
 
@@ -570,6 +571,7 @@ class MCPToolWrapper(_MCPWrapperBase):
         *,
         inject_principal: bool = False,
         session_store: Any | None = None,
+        post_call_sync: _PostCallSyncCallback | None = None,
     ):
         self._set_mcp_connection(session, server_name)
         self._original_name = tool_def.name
@@ -580,6 +582,7 @@ class MCPToolWrapper(_MCPWrapperBase):
         self._tool_timeout = tool_timeout
         self._inject_principal = inject_principal
         self._session_store = session_store
+        self._post_call_sync = post_call_sync
         meta = getattr(tool_def, "meta", None)
         if not isinstance(meta, dict):
             meta = {}
@@ -712,6 +715,8 @@ class MCPToolWrapper(_MCPWrapperBase):
                 )
                 return ToolResult.error(f"(MCP tool call failed: {type(exc).__name__})")
             else:
+                if self._post_call_sync is not None:
+                    await self._post_call_sync()
                 # Success — extract text and persist any image content as artifacts.
                 try:
                     rendered = self._render_call_result(
@@ -1158,6 +1163,8 @@ async def connect_mcp_servers(
         session: Any | None = None
         refresh_task: asyncio.Task[None] | None = None
         refresh_lock = asyncio.Lock()
+        refresh_generation = 0
+        synced_generation = 0
 
         try:
             transport_type = cfg.type
@@ -1269,6 +1276,16 @@ async def connect_mcp_servers(
                 await server_stack.aclose()
                 return name, None
 
+            async def wait_for_pending_tool_refresh() -> None:
+                # The receive loop dispatches list_changed independently of the
+                # tool-call task. Yield once for an ordered notification to
+                # publish its refresh task, then keep the next model request
+                # from observing stale native schemas.
+                await asyncio.sleep(0)
+                task = refresh_task
+                if task is not None and task is not asyncio.current_task():
+                    await asyncio.shield(task)
+
             async def sync_tools(*, warn_unmatched: bool = False) -> list[str]:
                 if session is None:
                     return []
@@ -1323,6 +1340,7 @@ async def connect_mcp_servers(
                             tool_timeout=cfg.tool_timeout,
                             inject_principal=cfg.inject_principal,
                             session_store=session_store,
+                            post_call_sync=wait_for_pending_tool_refresh,
                         )
                         if reconnect is not None:
                             wrapper.set_reconnect_handler(reconnect)
@@ -1343,8 +1361,12 @@ async def connect_mcp_servers(
                     return available_raw_names
 
             async def refresh_after_notification() -> None:
+                nonlocal synced_generation
                 try:
-                    await sync_tools()
+                    while synced_generation < refresh_generation:
+                        target_generation = refresh_generation
+                        await sync_tools()
+                        synced_generation = target_generation
                     logger.info("MCP server '{}': refreshed tools after list_changed", name)
                 except asyncio.CancelledError:
                     raise
@@ -1352,10 +1374,11 @@ async def connect_mcp_servers(
                     logger.exception("MCP server '{}': failed to refresh changed tool list", name)
 
             async def handle_server_message(message: Any) -> None:
-                nonlocal refresh_task
+                nonlocal refresh_generation, refresh_task
                 payload = _mcp_jsonrpc_payload(message)
                 if _payload_value(payload, "method") != "notifications/tools/list_changed":
                     return
+                refresh_generation += 1
                 if refresh_task is None or refresh_task.done():
                     refresh_task = asyncio.create_task(
                         refresh_after_notification(),

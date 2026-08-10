@@ -882,6 +882,42 @@ async def test_tools_list_changed_refreshes_native_registry(
 
 
 @pytest.mark.asyncio
+async def test_tool_call_waits_for_list_changed_registry_refresh(
+    fake_mcp_runtime: dict[str, object | None],
+) -> None:
+    session = _make_fake_session(["exposure"])
+    fake_mcp_runtime["session"] = session
+    registry = ToolRegistry()
+    stacks = await connect_mcp_servers(
+        {"test": MCPServerConfig(command="fake", enabled_tools=["*"])},
+        registry,
+    )
+    handler = fake_mcp_runtime["message_handler"]
+    assert callable(handler)
+
+    async def call_tool(_name: str, arguments: dict) -> SimpleNamespace:
+        session.list_tools = _make_fake_session(
+            ["exposure", "module_query"]
+        ).list_tools
+        await handler(SimpleNamespace(method="notifications/tools/list_changed"))
+        return SimpleNamespace(
+            content=[_FakeTextContent("{}")],
+            isError=False,
+            structuredContent={"loaded_tools": ["module_query"]},
+        )
+
+    session.call_tool = call_tool
+    exposure = registry.get("mcp_test_exposure")
+    assert exposure is not None
+
+    await exposure.execute(action="set")
+
+    assert "mcp_test_module_query" in registry.tool_names
+    for stack in stacks.values():
+        await stack.aclose()
+
+
+@pytest.mark.asyncio
 async def test_connect_mcp_servers_enabled_tools_supports_wrapped_names(
     fake_mcp_runtime: dict[str, object | None],
 ) -> None:
