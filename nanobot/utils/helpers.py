@@ -296,6 +296,8 @@ _UNSAFE_MEDIA_FILENAME_CHARS = re.compile(
     re.UNICODE,
 )
 _TOOL_RESULT_PREVIEW_CHARS = 1200
+_TOOL_RESULT_SUMMARY_MAX_FIELDS = 64
+_TOOL_RESULT_SUMMARY_SCALAR_CHARS = 240
 _TOOL_RESULTS_DIR = ".nanobot/tool-results"
 _TOOL_RESULT_RETENTION_SECS = 7 * 24 * 60 * 60
 _TOOL_RESULT_MAX_BUCKETS = 32
@@ -416,6 +418,54 @@ def stringify_text_blocks(content: list[dict[str, Any]]) -> str | None:
     return "\n".join(parts)
 
 
+def _tool_result_json_summary(text: str) -> str | None:
+    """Summarize oversized JSON without copying nested payloads into context."""
+
+    try:
+        payload = json.loads(text)
+    except (TypeError, json.JSONDecodeError):
+        return None
+
+    if isinstance(payload, dict):
+        scalars: list[tuple[str, Any]] = []
+        containers: list[tuple[str, str]] = []
+        for key, value in payload.items():
+            if not isinstance(key, str):
+                continue
+            if isinstance(value, dict):
+                containers.append((key, f"<object: {len(value)} fields>"))
+            elif isinstance(value, list):
+                containers.append((key, f"<array: {len(value)} items>"))
+            elif isinstance(value, str) and len(value) > _TOOL_RESULT_SUMMARY_SCALAR_CHARS:
+                scalars.append(
+                    (
+                        key,
+                        value[:_TOOL_RESULT_SUMMARY_SCALAR_CHARS]
+                        + f"... <{len(value)} chars>",
+                    )
+                )
+            else:
+                scalars.append((key, value))
+
+        # Scalars come first so mechanically useful root metadata remains visible
+        # even when a large nested payload precedes it in the original document.
+        selected = (scalars + containers)[:_TOOL_RESULT_SUMMARY_MAX_FIELDS]
+        summary = dict(selected)
+        omitted = len(scalars) + len(containers) - len(selected)
+        if omitted:
+            summary["<omitted root fields>"] = omitted
+    elif isinstance(payload, list):
+        summary = {"<root>": f"array with {len(payload)} items"}
+    else:
+        return None
+
+    rendered = json.dumps(summary, ensure_ascii=False, indent=2)
+    return "[JSON structure summary]\n" + truncate_text(
+        rendered,
+        _TOOL_RESULT_PREVIEW_CHARS - len("[JSON structure summary]\n"),
+    )
+
+
 def _render_tool_result_reference(
     filepath: Path,
     *,
@@ -518,7 +568,9 @@ def maybe_persist_tool_result(
         else:
             write_text_atomic(path, text_payload)
 
-    preview = text_payload[:_TOOL_RESULT_PREVIEW_CHARS]
+    preview = _tool_result_json_summary(text_payload)
+    if preview is None:
+        preview = text_payload[:_TOOL_RESULT_PREVIEW_CHARS]
     return _render_tool_result_reference(
         path,
         original_size=len(text_payload),
