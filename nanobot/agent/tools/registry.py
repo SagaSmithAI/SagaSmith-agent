@@ -106,7 +106,8 @@ class ToolRegistry:
         visible_tools = [
             tool
             for tool in self._tools.values()
-            if not callable(getattr(tool, "is_available", None)) or tool.is_available(ctx)
+            if getattr(tool, "_model_visible", True)
+            and (not callable(getattr(tool, "is_available", None)) or tool.is_available(ctx))
         ]
         definitions = [tool.to_schema() for tool in visible_tools]
         builtins: list[dict[str, Any]] = []
@@ -131,7 +132,8 @@ class ToolRegistry:
         names = [
             name
             for name, tool in self._tools.items()
-            if not callable(getattr(tool, "is_available", None)) or tool.is_available(ctx)
+            if getattr(tool, "_model_visible", True)
+            and (not callable(getattr(tool, "is_available", None)) or tool.is_available(ctx))
         ]
         return sorted(names, key=lambda name: (name.startswith("mcp_"), name))
 

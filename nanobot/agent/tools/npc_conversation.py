@@ -136,46 +136,96 @@ class NpcConversationWorkerTool(Tool):
         if not campaign_id:
             return ToolResult.error("Error: campaign_id is required for NPC activation")
         descriptor = dict(activation or {})
-        required = {"activation_id", "actor_runtime_id", "actor_id", "worker_handle"}
+        required = {
+            "activation_ref",
+            "actor_id",
+            "from_cursor",
+            "conversation_revision",
+        }
         if missing := sorted(required - set(descriptor)):
             return ToolResult.error(f"Error: activation is missing fields: {missing}")
-        checkout = None
-        submit = None
+        capsule: dict[str, Any] | None = None
+        transport = None
         try:
-            checkout = self._mcp_tool("npc_activation_checkout", mcp_server)
-            selected_server = str(getattr(checkout, "_server_name", "")) or mcp_server
-            submit = self._mcp_tool("npc_activation_submit", selected_server)
-            options = self._pool.checkout_options(
-                conversation_id, str(descriptor["actor_runtime_id"])
-            )
+            transport = self._mcp_tool("npc_conversation_transport", mcp_server)
+            activation_ref = str(descriptor["activation_ref"])
+            expected_revision = int(descriptor["conversation_revision"])
             capsule = await self._call_mcp(
-                checkout,
-                "npc_activation_checkout",
+                transport,
+                "npc_conversation_transport.claim_activation",
                 campaign_id=campaign_id,
                 conversation_id=conversation_id,
-                activation_id=str(descriptor["activation_id"]),
-                worker_handle=str(descriptor["worker_handle"]),
-                cursor=int(options["cursor"]),
-                include_bootstrap=bool(options["include_bootstrap"]),
+                action="claim_activation",
+                payload={
+                    "activation_ref": activation_ref,
+                    "cursor": int(descriptor["from_cursor"]),
+                    "include_bootstrap": True,
+                    "expected_conversation_revision": expected_revision,
+                    "idempotency_key": f"npc-claim:{activation_ref}:{expected_revision}",
+                },
             )
             proposal = await self._pool.activate(capsule, runtime=request.runtime)
-            result = await self._call_mcp(
-                submit,
-                "npc_activation_submit",
-                campaign_id=campaign_id,
-                conversation_id=conversation_id,
-                activation_id=str(descriptor["activation_id"]),
-                worker_handle=str(descriptor["worker_handle"]),
-                lease_id=str(capsule["lease_id"]),
-                proposal=proposal,
-            )
+            submit_revision = int(capsule["conversation_revision"])
+            result: dict[str, Any] = {}
+            for attempt in range(3):
+                result = await self._call_mcp(
+                    transport,
+                    "npc_conversation_transport.submit_proposal",
+                    campaign_id=campaign_id,
+                    conversation_id=conversation_id,
+                    action="submit_proposal",
+                    payload={
+                        "activation_ref": activation_ref,
+                        "lease_id": str(capsule["lease_id"]),
+                        "proposal": proposal,
+                        "expected_conversation_revision": submit_revision,
+                        "idempotency_key": (
+                            f"npc-submit:{activation_ref}:{submit_revision}:{attempt}"
+                        ),
+                    },
+                )
+                if result.get("status") != "validation_failed":
+                    break
+                if attempt == 2:
+                    issues = result.get("validation_issues") or []
+                    raise NpcConversationWorkerError(
+                        f"MCP rejected proposal after repairs: {issues}"
+                    )
+                proposal = await self._pool.repair_after_mcp_validation(
+                    capsule,
+                    validation_issues=list(result.get("validation_issues") or []),
+                    runtime=request.runtime,
+                )
         except (NpcConversationWorkerError, asyncio.TimeoutError) as exc:
+            if transport is not None and capsule is not None:
+                try:
+                    await self._call_mcp(
+                        transport,
+                        "npc_conversation_transport.cancel_activation",
+                        campaign_id=campaign_id,
+                        conversation_id=conversation_id,
+                        action="cancel_activation",
+                        payload={
+                            "activation_ref": str(descriptor["activation_ref"]),
+                            "lease_id": str(capsule["lease_id"]),
+                            "expected_conversation_revision": int(
+                                capsule["conversation_revision"]
+                            ),
+                            "idempotency_key": (
+                                f"npc-cancel:{descriptor['activation_ref']}:"
+                                f"{capsule['conversation_revision']}"
+                            ),
+                        },
+                    )
+                except NpcConversationWorkerError:
+                    pass
             self._pool.rollback_last_activation(
-                conversation_id, str(descriptor.get("actor_runtime_id") or "")
+                conversation_id,
+                str((capsule or {}).get("actor_runtime_id") or ""),
             )
             return ToolResult.error(f"Error: isolated NPC activation rejected: {exc}")
         self._pool.confirm_last_activation(
-            conversation_id, str(descriptor["actor_runtime_id"])
+            conversation_id, str(capsule["actor_runtime_id"])
         )
         safe_result = {
             key: result.get(key)
@@ -183,7 +233,8 @@ class NpcConversationWorkerTool(Tool):
                 "status",
                 "publication",
                 "resolution_requests",
-                "followup_activations",
+                "validation_issues",
+                "conversation_revision",
             )
             if key in result
         }

@@ -18,14 +18,15 @@ from nanobot.utils.llm_runtime import LLMRuntime
 def _capsule(*, actor_id="npc", bootstrap=True, sequence=1):
     actor_runtime_id = f"conversation:{actor_id}"
     return {
-        "schema_version": 1,
-        "contract": "npc-conversation.v1",
+        "schema_version": 2,
+        "contract": "npc-conversation.v2",
         "conversation_id": "conversation",
         "activation_id": f"activation-{sequence}",
         "actor_runtime_id": actor_runtime_id,
         "actor_id": actor_id,
         "lease_id": f"lease-{sequence}",
         "lease_expires_at_ns": 9999999999999999999,
+        "conversation_revision": 2,
         "context_manifest": {
             "campaign_id": "campaign",
             "branch_id": "branch",
@@ -33,6 +34,7 @@ def _capsule(*, actor_id="npc", bootstrap=True, sequence=1):
             "campaign_revision": 5,
             "working_state_revision": 0,
             "inbox_cursor": sequence,
+            "conversation_revision": 2,
         },
         "bootstrap": (
             {
@@ -56,8 +58,8 @@ def _capsule(*, actor_id="npc", bootstrap=True, sequence=1):
                 "type": "speech",
                 "speaker_actor_id": "pc",
                 "content": f"Question {sequence}",
-                "perceived_by": [actor_id],
-                "understood_by": [actor_id],
+                "comprehension": "full",
+                "audience_decision_id": f"audience-{sequence}",
             }
         ],
         "constraints": {
@@ -69,14 +71,14 @@ def _capsule(*, actor_id="npc", bootstrap=True, sequence=1):
             "may_call_tools": False,
             "may_roll_dice": False,
             "may_write_state": False,
-            "output_contract": "npc-conversation-proposal.v2",
+            "output_contract": "npc-conversation-proposal.v3",
         },
     }
 
 
 def _proposal(capsule, text="My answer."):
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "conversation_id": capsule["conversation_id"],
         "activation_id": capsule["activation_id"],
         "actor_runtime_id": capsule["actor_runtime_id"],
@@ -93,7 +95,10 @@ def _proposal(capsule, text="My answer."):
                 "delivery": "calmly",
             }
         ],
-        "proposed_action": {"kind": "none", "target_ref": "", "summary": ""},
+        "proposed_action": {
+            "summary": "", "target_refs": [],
+            "settlement": "narrative", "mechanic_hint": "",
+        },
         "resolution_requests": [],
         "working_deltas": {"facts": [], "actor_knowledge": [], "commitments": []},
         "visible_cues": [],
@@ -195,17 +200,16 @@ async def test_worker_repair_preserves_role_order_and_rollback_restores_cursor()
     assert pool.status("conversation")["workers"][0]["turn_count"] == 0
 
 
-def test_worker_rejects_free_utterance_and_uncited_factual_segment() -> None:
+def test_worker_checks_transport_identity_but_leaves_semantics_to_mcp() -> None:
     capsule = _capsule()
     free = _proposal(capsule)
     free["utterance"] = {"text": "Bypass."}
-    with pytest.raises(NpcConversationWorkerError, match="unknown fields"):
-        normalize_worker_proposal(free, capsule)
+    assert normalize_worker_proposal(free, capsule)["utterance"]["text"] == "Bypass."
 
-    uncited = _proposal(capsule)
-    uncited["utterance_segments"][0]["basis_refs"] = []
-    with pytest.raises(NpcConversationWorkerError, match="requires a basis_ref"):
-        normalize_worker_proposal(uncited, capsule)
+    wrong = _proposal(capsule)
+    wrong["activation_id"] = "another-activation"
+    with pytest.raises(NpcConversationWorkerError, match="activation_id"):
+        normalize_worker_proposal(wrong, capsule)
 
 
 class FakeMcpTool:
@@ -222,33 +226,45 @@ class FakeMcpTool:
         return json.dumps(value)
 
 
+def test_host_private_transport_stays_callable_but_out_of_model_definitions() -> None:
+    registry = ToolRegistry()
+    transport = FakeMcpTool("npc_conversation_transport", {})
+    transport._model_visible = False
+    registry.register(transport)
+    assert transport.name in registry.tool_names
+    assert transport.name not in registry.definition_names()
+
+
 @pytest.mark.asyncio
 async def test_bridge_keeps_private_capsule_and_proposal_out_of_director_result() -> None:
     capsule = _capsule()
     provider = FakeProvider([_proposal(capsule, "Safe publication.")])
     registry = ToolRegistry()
-    checkout = FakeMcpTool("npc_activation_checkout", capsule)
 
-    def submit_response(kwargs):
-        assert kwargs["proposal"]["private_intent"] == "Keep a private secret."
+    def transport_response(kwargs):
+        if kwargs["action"] == "claim_activation":
+            return capsule
+        assert kwargs["action"] == "submit_proposal"
+        proposal = kwargs["payload"]["proposal"]
+        assert proposal["private_intent"] == "Keep a private secret."
         return {
-            "status": "published",
+            "status": "publication_ready",
             "publication": {
-                "speech": kwargs["proposal"]["utterance_segments"][0]["text"],
+                "speech": proposal["utterance_segments"][0]["text"],
                 "visible_cues": [],
             },
             "resolution_requests": [],
+            "conversation_revision": 3,
         }
 
-    submit = FakeMcpTool("npc_activation_submit", submit_response)
-    registry.register(checkout)
-    registry.register(submit)
+    transport = FakeMcpTool("npc_conversation_transport", transport_response)
+    registry.register(transport)
     tool = NpcConversationWorkerTool(registry)
     activation = {
-        "activation_id": capsule["activation_id"],
-        "actor_runtime_id": capsule["actor_runtime_id"],
+        "activation_ref": "opaque-activation-ref",
         "actor_id": capsule["actor_id"],
-        "worker_handle": "opaque-handle",
+        "from_cursor": 0,
+        "conversation_revision": 1,
     }
     with request_context(
         RequestContext(channel="test", chat_id="chat", runtime=_runtime(provider))
@@ -264,8 +280,59 @@ async def test_bridge_keeps_private_capsule_and_proposal_out_of_director_result(
     assert "private knowledge" not in rendered
     assert "private_intent" not in rendered
     assert "proposal" not in rendered
-    assert checkout.calls[0]["include_bootstrap"] is True
-    assert submit.calls[0]["lease_id"] == capsule["lease_id"]
+    assert transport.calls[0]["action"] == "claim_activation"
+    assert transport.calls[0]["payload"]["include_bootstrap"] is True
+    assert transport.calls[1]["payload"]["lease_id"] == capsule["lease_id"]
 
     released = json.loads(await tool.execute("release", "conversation"))
     assert released["released_workers"] == 1
+
+
+@pytest.mark.asyncio
+async def test_bridge_repairs_mcp_validation_failure_within_same_lease() -> None:
+    capsule = _capsule()
+    first = _proposal(capsule, "Unaccepted.")
+    repaired = _proposal(capsule, "Repaired.")
+    provider = FakeProvider([first, repaired])
+    calls = []
+
+    def transport_response(kwargs):
+        calls.append(deepcopy(kwargs))
+        if kwargs["action"] == "claim_activation":
+            return capsule
+        submissions = [item for item in calls if item["action"] == "submit_proposal"]
+        if len(submissions) == 1:
+            return {
+                "status": "validation_failed",
+                "validation_issues": [{"path": "proposal", "message": "repair me"}],
+                "lease_retained": True,
+                "conversation_revision": 2,
+            }
+        return {
+            "status": "publication_ready",
+            "publication": {"speech": "Repaired."},
+            "conversation_revision": 3,
+        }
+
+    registry = ToolRegistry()
+    registry.register(FakeMcpTool("npc_conversation_transport", transport_response))
+    tool = NpcConversationWorkerTool(registry)
+    with request_context(
+        RequestContext(channel="test", chat_id="chat", runtime=_runtime(provider))
+    ):
+        rendered = await tool.execute(
+            "activate",
+            "conversation",
+            campaign_id="campaign",
+            activation={
+                "activation_ref": "activation-ref",
+                "actor_id": "npc",
+                "from_cursor": 0,
+                "conversation_revision": 1,
+            },
+        )
+    result = json.loads(rendered)
+    assert result["publication"]["speech"] == "Repaired."
+    submissions = [item for item in calls if item["action"] == "submit_proposal"]
+    assert len(submissions) == 2
+    assert {item["payload"]["lease_id"] for item in submissions} == {capsule["lease_id"]}

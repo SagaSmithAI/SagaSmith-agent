@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import shutil
 import urllib.parse
 from collections.abc import Awaitable, Callable
@@ -783,7 +784,6 @@ class MCPToolWrapper(_MCPWrapperBase):
                     return ToolResult.error(
                         f"(MCP tool returned malformed content: {type(exc).__name__})"
                     )
-
     def _persist_domain_context(
         self,
         rendered: str,
@@ -913,6 +913,19 @@ class MCPToolWrapper(_MCPWrapperBase):
                 exc,
             )
             return None
+
+
+class MCPHostPrivateToolWrapper(MCPToolWrapper):
+    """Callable by Host code while absent from every model tool definition."""
+
+    _model_visible = False
+
+    def __init__(self, *args: Any, host_token: str, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._host_token = host_token
+
+    async def execute(self, **kwargs: Any) -> str:
+        return await super().execute(**kwargs, host_token=self._host_token)
 
 
 class MCPResourceWrapper(_MCPWrapperBase):
@@ -1160,7 +1173,7 @@ async def connect_mcp_servers(
     entered the MCP SDK contexts alive so reconnect and shutdown can close
     AnyIO cancel scopes from their owning task.
     """
-    from mcp import ClientSession, StdioServerParameters
+    from mcp import ClientSession, StdioServerParameters, types
     from mcp.client.sse import sse_client
     from mcp.client.stdio import stdio_client
     from mcp.client.streamable_http import streamable_http_client
@@ -1183,6 +1196,13 @@ async def connect_mcp_servers(
                     await server_stack.aclose()
                     return name, None
 
+            host_token = str((cfg.env or {}).get("SAGASMITH_NPC_HOST_TOKEN") or "").strip()
+            sagasmith_stdio = "sagasmith" in " ".join(
+                (name, cfg.command, *(cfg.args or []))
+            ).casefold()
+            if transport_type == "stdio" and sagasmith_stdio and not host_token:
+                host_token = secrets.token_urlsafe(32)
+
             if transport_type in {"sse", "streamableHttp"}:
                 ok, error = validate_url_target(cfg.url)
                 if not ok:
@@ -1196,10 +1216,13 @@ async def connect_mcp_servers(
                     return name, None
 
             if transport_type == "stdio":
+                child_env = dict(cfg.env or {})
+                if host_token:
+                    child_env["SAGASMITH_NPC_HOST_TOKEN"] = host_token
                 command, args, env = _normalize_windows_stdio_command(
                     cfg.command,
                     cfg.args,
-                    cfg.env or None,
+                    child_env or None,
                 )
                 params = StdioServerParameters(
                     command=command,
@@ -1312,6 +1335,63 @@ async def connect_mcp_servers(
                         matched_enabled_tools.add(tool_def.name)
                     if wrapped_name in enabled_tools:
                         matched_enabled_tools.add(wrapped_name)
+
+            # SagaSmith v2 keeps activation transport out of tools/list. The
+            # trusted Host synthesizes one hidden wrapper only after verifying
+            # the server-advertised conversation capability.
+            if host_token and "server_capabilities" in available_raw_names:
+                try:
+                    capability_result = await session.call_tool("server_capabilities", arguments={})
+                    capability_text = next(
+                        (
+                            block.text
+                            for block in capability_result.content
+                            if isinstance(block, types.TextContent)
+                        ),
+                        "{}",
+                    )
+                    capability_data = json.loads(capability_text)
+                    capability_payload = capability_data.get("result", capability_data)
+                    npc_capability = dict(capability_payload.get("npc_conversations") or {})
+                except Exception:
+                    npc_capability = {}
+                if npc_capability.get("host_transport") == "private_authenticated_unlisted":
+                    private_def = types.Tool(
+                        name="npc_conversation_transport",
+                        description="Host-private SagaSmith NPC activation transport.",
+                        inputSchema={
+                            "type": "object",
+                            "additionalProperties": False,
+                            "required": [
+                                "campaign_id", "conversation_id", "action", "payload", "host_token"
+                            ],
+                            "properties": {
+                                "campaign_id": {"type": "string"},
+                                "conversation_id": {"type": "string"},
+                                "action": {
+                                    "type": "string",
+                                    "enum": [
+                                        "claim_activation", "submit_proposal", "cancel_activation"
+                                    ],
+                                },
+                                "payload": {"type": "object"},
+                                "host_token": {"type": "string"},
+                                "principal_id": {"type": "string", "default": "system:local"},
+                            },
+                        },
+                    )
+                    private_wrapper = MCPHostPrivateToolWrapper(
+                        session,
+                        name,
+                        private_def,
+                        tool_timeout=cfg.tool_timeout,
+                        inject_principal=cfg.inject_principal,
+                        default_tool_profile=cfg.default_tool_profile,
+                        session_store=session_store,
+                        host_token=host_token,
+                    )
+                    registry.register(private_wrapper)
+                    registered_count += 1
 
             if enabled_tools and not allow_all_tools:
                 unmatched_enabled_tools = sorted(enabled_tools - matched_enabled_tools)
