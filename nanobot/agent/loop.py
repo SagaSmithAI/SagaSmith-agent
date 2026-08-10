@@ -300,6 +300,10 @@ class AgentLoop:
         _tc = tools_config or ToolsConfig()
         defaults = AgentDefaults()
         self.bus = bus
+        self._tool_audit_process_id = str(
+            os.environ.get("NANOBOT_TOOL_AUDIT_PROCESS_ID")
+            or f"pid:{os.getpid()}:{time.time_ns()}"
+        )
         self.runtime_events = runtime_events or RuntimeEventBus()
         self.runtime_event_publisher = RuntimeEventPublisher(self.runtime_events)
         self.channels_config = channels_config
@@ -838,8 +842,9 @@ class AgentLoop:
             path = Path(audit_path).expanduser().resolve()
             path.parent.mkdir(parents=True, exist_ok=True)
             row = {
-                "schema_version": 1,
+                "schema_version": 2,
                 "recorded_at_unix": time.time(),
+                "process_id": self._tool_audit_process_id,
                 "session_key": session.key if session is not None else active_session_key,
                 "assistant_message": assistant_message,
                 "tool_results": tool_results,
