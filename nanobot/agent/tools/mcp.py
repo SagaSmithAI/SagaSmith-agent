@@ -23,7 +23,7 @@ from nanobot.agent.domain_context import (
     principal_fingerprint,
 )
 from nanobot.agent.tools.base import Tool, ToolResult
-from nanobot.agent.tools.context import RequestContext, current_request_context
+from nanobot.agent.tools.context import current_request_context
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.events import (
     INBOUND_META_RUNTIME_CONTROL,
@@ -64,7 +64,6 @@ _SANITIZE_RE = re.compile(r"_+")
 _RELOAD_LOCKS: WeakKeyDictionary[Any, asyncio.Lock] = WeakKeyDictionary()
 _ReconnectCallback = Callable[[str, str, Tool], Awaitable[Tool | None]]
 _MCP_CONTEXT_TOOL_LIMIT = 48
-_SESSION_MCP_TOOL_PROFILES: dict[tuple[str, str], str] = {}
 
 
 def _first_string_field(value: Any, names: frozenset[str]) -> str | None:
@@ -99,29 +98,6 @@ def _host_context_binding(value: Any) -> Mapping[str, Any] | None:
         result = value.get("result")
         if isinstance(result, Mapping):
             return _host_context_binding(result)
-    return None
-
-
-def _profile_session_key(ctx: RequestContext | None) -> str | None:
-    if ctx is None:
-        return None
-    return ctx.session_key or f"{ctx.channel}:{ctx.chat_id}"
-
-
-def _profile_from_rendered_result(rendered: str) -> str | None:
-    try:
-        payload = json.loads(rendered)
-    except (TypeError, ValueError):
-        return None
-    if not isinstance(payload, dict):
-        return None
-    candidates = [payload]
-    if isinstance(payload.get("result"), dict):
-        candidates.append(payload["result"])
-    for candidate in candidates:
-        profile = candidate.get("tool_profile")
-        if isinstance(profile, str) and profile.strip():
-            return profile.strip().lower()
     return None
 
 
@@ -593,7 +569,6 @@ class MCPToolWrapper(_MCPWrapperBase):
         tool_timeout: int = 30,
         *,
         inject_principal: bool = False,
-        default_tool_profile: str | None = None,
         session_store: Any | None = None,
     ):
         self._set_mcp_connection(session, server_name)
@@ -608,13 +583,6 @@ class MCPToolWrapper(_MCPWrapperBase):
         meta = getattr(tool_def, "meta", None)
         if not isinstance(meta, dict):
             meta = {}
-        profiles = meta.get("sagasmith_tool_profiles") or []
-        self._tool_profiles = frozenset(
-            str(profile).strip().lower() for profile in profiles if str(profile).strip()
-        )
-        self._default_tool_profile = (
-            str(default_tool_profile).strip().lower() if default_tool_profile else None
-        )
         domain_context = meta.get("sagasmith_domain_context")
         self._domain_context = (
             domain_context.strip()
@@ -669,18 +637,6 @@ class MCPToolWrapper(_MCPWrapperBase):
     @property
     def parameters(self) -> dict[str, Any]:
         return self._parameters
-
-    def is_available(self, ctx: RequestContext | None) -> bool:
-        """Apply MCP-provided phase metadata independently for each chat session."""
-        if not self._tool_profiles or not self._default_tool_profile:
-            return True
-        session_key = _profile_session_key(ctx)
-        profile = (
-            _SESSION_MCP_TOOL_PROFILES.get((session_key, self._server_name))
-            if session_key is not None
-            else None
-        )
-        return (profile or self._default_tool_profile) in self._tool_profiles
 
     def _trusted_principal(self) -> str:
         # Wrappers are shared across sessions, so identity must remain task-local.
@@ -761,10 +717,6 @@ class MCPToolWrapper(_MCPWrapperBase):
                     rendered = self._render_call_result(result.content, kwargs)
                     if getattr(result, "isError", False):
                         return ToolResult.error(rendered)
-                    profile = _profile_from_rendered_result(rendered)
-                    session_key = _profile_session_key(current_request_context())
-                    if profile and session_key is not None:
-                        _SESSION_MCP_TOOL_PROFILES[(session_key, self._server_name)] = profile
                     context_changed = self._persist_domain_context(
                         rendered,
                         kwargs,
@@ -795,7 +747,7 @@ class MCPToolWrapper(_MCPWrapperBase):
         if self._domain_context is None or self._session_store is None:
             return False
         request = current_request_context()
-        session_key = _profile_session_key(request)
+        session_key = request.session_key or f"{request.channel}:{request.chat_id}"
         if session_key is None:
             return False
         try:
@@ -1182,6 +1134,9 @@ async def connect_mcp_servers(
     async def open_single_server(name: str, cfg) -> tuple[str, AsyncExitStack | None]:
         server_stack = AsyncExitStack()
         await server_stack.__aenter__()
+        session: Any | None = None
+        refresh_task: asyncio.Task[None] | None = None
+        refresh_lock = asyncio.Lock()
 
         try:
             transport_type = cfg.type
@@ -1293,49 +1248,115 @@ async def connect_mcp_servers(
                 await server_stack.aclose()
                 return name, None
 
+            async def sync_tools(*, warn_unmatched: bool = False) -> list[str]:
+                if session is None:
+                    return []
+                async with refresh_lock:
+                    listed = await session.list_tools()
+                    enabled_tools = set(cfg.enabled_tools)
+                    allow_all_tools = "*" in enabled_tools
+                    desired: dict[str, Any] = {}
+                    matched_enabled_tools: set[str] = set()
+                    available_raw_names = [tool_def.name for tool_def in listed.tools]
+                    available_wrapped_names = [
+                        _sanitize_mcp_tool_name(f"mcp_{name}_{tool_def.name}")
+                        for tool_def in listed.tools
+                    ]
+                    for tool_def in listed.tools:
+                        wrapped_name = _sanitize_mcp_tool_name(f"mcp_{name}_{tool_def.name}")
+                        if (
+                            not allow_all_tools
+                            and tool_def.name not in enabled_tools
+                            and wrapped_name not in enabled_tools
+                        ):
+                            continue
+                        desired[wrapped_name] = tool_def
+                        if tool_def.name in enabled_tools:
+                            matched_enabled_tools.add(tool_def.name)
+                        if wrapped_name in enabled_tools:
+                            matched_enabled_tools.add(wrapped_name)
+
+                    for registered_name in list(registry.tool_names):
+                        existing = registry.get(registered_name)
+                        if (
+                            type(existing) is MCPToolWrapper
+                            and getattr(existing, "_server_name", None) == name
+                            and registered_name not in desired
+                        ):
+                            registry.unregister(registered_name)
+
+                    reconnect = next(
+                        (
+                            getattr(registry.get(registered_name), "_reconnect", None)
+                            for registered_name in registry.tool_names
+                            if getattr(registry.get(registered_name), "_server_name", None) == name
+                            and getattr(registry.get(registered_name), "_reconnect", None) is not None
+                        ),
+                        None,
+                    )
+                    for wrapped_name, tool_def in desired.items():
+                        wrapper = MCPToolWrapper(
+                            session,
+                            name,
+                            tool_def,
+                            tool_timeout=cfg.tool_timeout,
+                            inject_principal=cfg.inject_principal,
+                            session_store=session_store,
+                        )
+                        if reconnect is not None:
+                            wrapper.set_reconnect_handler(reconnect)
+                        registry.register(wrapper)
+                        logger.debug("MCP: registered tool '{}' from server '{}'", wrapped_name, name)
+
+                    if warn_unmatched and enabled_tools and not allow_all_tools:
+                        unmatched = sorted(enabled_tools - matched_enabled_tools)
+                        if unmatched:
+                            logger.warning(
+                                "MCP server '{}': enabledTools entries not found: {}. "
+                                "Available raw names: {}. Available wrapped names: {}",
+                                name,
+                                ", ".join(unmatched),
+                                ", ".join(available_raw_names) or "(none)",
+                                ", ".join(available_wrapped_names) or "(none)",
+                            )
+                    return available_raw_names
+
+            async def refresh_after_notification() -> None:
+                try:
+                    await sync_tools()
+                    logger.info("MCP server '{}': refreshed tools after list_changed", name)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logger.exception("MCP server '{}': failed to refresh changed tool list", name)
+
+            async def handle_server_message(message: Any) -> None:
+                nonlocal refresh_task
+                payload = _mcp_jsonrpc_payload(message)
+                if _payload_value(payload, "method") != "notifications/tools/list_changed":
+                    return
+                if refresh_task is None or refresh_task.done():
+                    refresh_task = asyncio.create_task(
+                        refresh_after_notification(),
+                        name=f"mcp-tools-refresh:{name}",
+                    )
+
             read = _filter_malformed_mcp_progress_notifications(read, name)
-            session = await server_stack.enter_async_context(ClientSession(read, write))
+            session = await server_stack.enter_async_context(
+                ClientSession(read, write, message_handler=handle_server_message)
+            )
             await session.initialize()
 
-            tools = await session.list_tools()
+            available_raw_names = await sync_tools(warn_unmatched=True)
             enabled_tools = set(cfg.enabled_tools)
             allow_all_tools = "*" in enabled_tools
-            registered_count = 0
-            matched_enabled_tools: set[str] = set()
-            available_raw_names = [tool_def.name for tool_def in tools.tools]
-            available_wrapped_names = [
-                _sanitize_mcp_tool_name(f"mcp_{name}_{tool_def.name}") for tool_def in tools.tools
-            ]
-            for tool_def in tools.tools:
-                wrapped_name = _sanitize_mcp_tool_name(f"mcp_{name}_{tool_def.name}")
-                if (
-                    not allow_all_tools
-                    and tool_def.name not in enabled_tools
-                    and wrapped_name not in enabled_tools
-                ):
-                    logger.debug(
-                        "MCP: skipping tool '{}' from server '{}' (not in enabledTools)",
-                        wrapped_name,
-                        name,
-                    )
-                    continue
-                wrapper = MCPToolWrapper(
-                    session,
-                    name,
-                    tool_def,
-                    tool_timeout=cfg.tool_timeout,
-                    inject_principal=cfg.inject_principal,
-                    default_tool_profile=cfg.default_tool_profile,
-                    session_store=session_store,
-                )
-                registry.register(wrapper)
-                logger.debug("MCP: registered tool '{}' from server '{}'", wrapper.name, name)
-                registered_count += 1
-                if enabled_tools:
-                    if tool_def.name in enabled_tools:
-                        matched_enabled_tools.add(tool_def.name)
-                    if wrapped_name in enabled_tools:
-                        matched_enabled_tools.add(wrapped_name)
+            registered_count = len(
+                [
+                    tool_name
+                    for tool_name in registry.tool_names
+                    if getattr(registry.get(tool_name), "_server_name", None) == name
+                ]
+            )
 
             # SagaSmith v2 keeps activation transport out of tools/list. The
             # trusted Host synthesizes one hidden wrapper only after verifying
@@ -1393,24 +1414,11 @@ async def connect_mcp_servers(
                         private_def,
                         tool_timeout=cfg.tool_timeout,
                         inject_principal=cfg.inject_principal,
-                        default_tool_profile=cfg.default_tool_profile,
                         session_store=session_store,
                         host_token=host_token,
                     )
                     registry.register(private_wrapper)
                     registered_count += 1
-
-            if enabled_tools and not allow_all_tools:
-                unmatched_enabled_tools = sorted(enabled_tools - matched_enabled_tools)
-                if unmatched_enabled_tools:
-                    logger.warning(
-                        "MCP server '{}': enabledTools entries not found: {}. Available raw names: {}. "
-                        "Available wrapped names: {}",
-                        name,
-                        ", ".join(unmatched_enabled_tools),
-                        ", ".join(available_raw_names) or "(none)",
-                        ", ".join(available_wrapped_names) or "(none)",
-                    )
 
             # Only register resources and prompts when no tool restriction is
             # active.  enabledTools is a per-*tool* allowlist; resources and

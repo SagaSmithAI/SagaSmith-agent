@@ -81,7 +81,7 @@ async def test_mcp_routing_context_prefers_available_mcp_capabilities() -> None:
 
 @pytest.fixture
 def fake_mcp_runtime() -> dict[str, object | None]:
-    return {"session": None}
+    return {"session": None, "message_handler": None}
 
 
 @pytest.fixture(autouse=True)
@@ -117,8 +117,9 @@ def _fake_mcp_module(
             self.cwd = cwd
 
     class _FakeClientSession:
-        def __init__(self, _read: object, _write: object) -> None:
+        def __init__(self, _read: object, _write: object, message_handler=None) -> None:
             self._session = fake_mcp_runtime["session"]
+            fake_mcp_runtime["message_handler"] = message_handler
 
         async def __aenter__(self) -> object:
             return self._session
@@ -175,85 +176,6 @@ def _make_wrapper(session: object, *, timeout: float = 0.1) -> MCPToolWrapper:
         inputSchema={"type": "object", "properties": {}},
     )
     return MCPToolWrapper(session, "test", tool_def, tool_timeout=timeout)
-
-
-def _profiled_wrapper(
-    session: object,
-    *,
-    name: str,
-    profiles: list[str],
-    default: str = "authoring",
-) -> MCPToolWrapper:
-    tool_def = SimpleNamespace(
-        name=name,
-        description=f"{name} tool",
-        inputSchema={"type": "object", "properties": {}},
-        meta={"sagasmith_tool_profiles": profiles},
-    )
-    return MCPToolWrapper(
-        session,
-        "sagasmith_dnd",
-        tool_def,
-        default_tool_profile=default,
-    )
-
-
-def test_mcp_tool_profiles_filter_schemas_and_stale_execution_per_session() -> None:
-    registry = ToolRegistry()
-    authoring = _profiled_wrapper(
-        SimpleNamespace(call_tool=None), name="module_write", profiles=["authoring"]
-    )
-    combat = _profiled_wrapper(
-        SimpleNamespace(call_tool=None), name="combat_status", profiles=["combat"]
-    )
-    registry.register(authoring)
-    registry.register(combat)
-
-    ctx = RequestContext(channel="discord", chat_id="profile-a", session_key="profile-a")
-    with request_context(ctx):
-        assert registry.definition_names() == [authoring.name]
-        tool, _, error = registry.prepare_call(combat.name, {})
-        assert tool is None
-        assert "unavailable in the current tool profile" in error
-
-
-def test_mcp_server_config_accepts_camel_case_default_tool_profile() -> None:
-    config = MCPServerConfig.model_validate({"command": "demo", "defaultToolProfile": "authoring"})
-    assert config.default_tool_profile == "authoring"
-
-
-@pytest.mark.asyncio
-async def test_mcp_profile_transition_is_scoped_to_current_session() -> None:
-    async def call_tool(_name: str, arguments: dict) -> object:
-        return SimpleNamespace(
-            content=[_FakeTextContent(json.dumps({"tool_profile": "combat"}))],
-            isError=False,
-        )
-
-    transition = _profiled_wrapper(
-        SimpleNamespace(call_tool=call_tool),
-        name="combat_start",
-        profiles=["play"],
-        default="play",
-    )
-    combat = _profiled_wrapper(
-        SimpleNamespace(call_tool=None),
-        name="combat_status",
-        profiles=["combat"],
-        default="play",
-    )
-    session_a = RequestContext(channel="discord", chat_id="a", session_key="phase-a")
-    session_b = RequestContext(channel="discord", chat_id="b", session_key="phase-b")
-
-    with request_context(session_a):
-        assert transition.is_available(session_a)
-        assert not combat.is_available(session_a)
-        await transition.execute()
-        assert combat.is_available(session_a)
-        assert not transition.is_available(session_a)
-    with request_context(session_b):
-        assert transition.is_available(session_b)
-        assert not combat.is_available(session_b)
 
 
 def test_wrapper_preserves_non_nullable_unions() -> None:
@@ -914,6 +836,30 @@ async def test_connect_mcp_servers_enabled_tools_defaults_to_all(
 
 
 @pytest.mark.asyncio
+async def test_tools_list_changed_refreshes_native_registry(
+    fake_mcp_runtime: dict[str, object | None],
+) -> None:
+    session = _make_fake_session(["exposure", "server_capabilities"])
+    fake_mcp_runtime["session"] = session
+    registry = ToolRegistry()
+    stacks = await connect_mcp_servers(
+        {"test": MCPServerConfig(command="fake", enabled_tools=["*"])},
+        registry,
+    )
+    session.list_tools = _make_fake_session(["exposure", "combat_status"]).list_tools
+    handler = fake_mcp_runtime["message_handler"]
+    assert callable(handler)
+    await handler(SimpleNamespace(method="notifications/tools/list_changed"))
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    assert "mcp_test_combat_status" in registry.tool_names
+    assert "mcp_test_server_capabilities" not in registry.tool_names
+    for stack in stacks.values():
+        await stack.aclose()
+
+
+@pytest.mark.asyncio
 async def test_connect_mcp_servers_enabled_tools_supports_wrapped_names(
     fake_mcp_runtime: dict[str, object | None],
 ) -> None:
@@ -1312,7 +1258,7 @@ async def test_connect_mcp_servers_one_failure_does_not_block_others(
     sessions = {"good": _make_fake_session(["demo"])}
 
     class _SelectiveClientSession:
-        def __init__(self, read: object, _write: object) -> None:
+        def __init__(self, read: object, _write: object, message_handler=None) -> None:
             self._session = sessions[read]
 
         async def __aenter__(self) -> object:

@@ -70,14 +70,14 @@ def _capsule(*, actor_id="npc", bootstrap=True, sequence=1):
             "may_call_tools": False,
             "may_roll_dice": False,
             "may_write_state": False,
-            "output_contract": "npc-conversation-proposal.v3",
+            "output_contract": "npc-conversation-proposal.v4",
         },
     }
 
 
 def _proposal(capsule, text="My answer."):
     return {
-        "schema_version": 3,
+        "schema_version": 4,
         "conversation_id": capsule["conversation_id"],
         "activation_id": capsule["activation_id"],
         "actor_runtime_id": capsule["actor_runtime_id"],

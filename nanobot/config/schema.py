@@ -375,9 +375,6 @@ class MCPServerConfig(Base):
     inject_principal: bool = (
         False  # Replace MCP principal_id arguments with the trusted inbound sender identity.
     )
-    default_tool_profile: str | None = (
-        None  # Optional per-session profile used with MCP tool metadata.
-    )
 
 
 def _lazy_default(module_path: str, class_name: str) -> Any:

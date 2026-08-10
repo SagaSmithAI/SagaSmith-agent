@@ -167,7 +167,7 @@ class ToolRegistry:
                 None,
                 params,
                 ToolResult.error(
-                    f"Error: Tool '{name}' is unavailable in the current tool profile."
+                    f"Error: Tool '{name}' is unavailable in the current request."
                 ),
             )
 
