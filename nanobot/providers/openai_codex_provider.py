@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -26,6 +27,13 @@ from nanobot.providers.openai_responses import (
 
 DEFAULT_CODEX_URL = "https://chatgpt.com/backend-api/codex/responses"
 DEFAULT_ORIGINATOR = "nanobot"
+_RETRYABLE_STREAM_ERROR_TOKENS = frozenset(
+    {
+        "server_error",
+        "service_unavailable_error",
+        "server_is_overloaded",
+    }
+)
 
 
 class OpenAICodexProvider(LLMProvider):
@@ -257,6 +265,10 @@ def _codex_error_response(exc: Exception) -> LLMResponse:
     detail = str(exc).strip()
 
     status_code = getattr(exc, "status_code", None)
+    error_type = getattr(exc, "error_type", None)
+    error_code = getattr(exc, "error_code", None)
+    if error_type is None and error_code is None:
+        error_type, error_code = _stream_error_type_code(detail)
     error_kind: str | None = None
     default_detail: str | None = None
     should_retry: bool | None = getattr(exc, "should_retry", None)
@@ -277,12 +289,25 @@ def _codex_error_response(exc: Exception) -> LLMResponse:
         error_kind = "http"
         default_detail = "HTTP request failed"
 
+    stream_tokens = {
+        token
+        for token in (
+            LLMProvider._normalize_error_token(error_type),
+            LLMProvider._normalize_error_token(error_code),
+        )
+        if token is not None
+    }
+    if stream_tokens & _RETRYABLE_STREAM_ERROR_TOKENS:
+        if not isinstance(exc, _CodexHTTPError):
+            error_kind = "server"
+        should_retry = True if should_retry is None else should_retry
+
     if status_code is not None and should_retry is None:
         retry_content = None if int(status_code) == 429 and isinstance(exc, _CodexHTTPError) else detail
         should_retry = _should_retry_status(
             int(status_code),
-            getattr(exc, "error_type", None),
-            getattr(exc, "error_code", None),
+            error_type,
+            error_code,
             retry_content,
         )
 
@@ -295,11 +320,28 @@ def _codex_error_response(exc: Exception) -> LLMResponse:
         retry_after=retry_after,
         error_status_code=int(status_code) if status_code is not None else None,
         error_kind=error_kind,
-        error_type=getattr(exc, "error_type", None),
-        error_code=getattr(exc, "error_code", None),
+        error_type=error_type,
+        error_code=error_code,
         error_retry_after_s=retry_after,
         error_should_retry=should_retry,
     )
+
+
+def _stream_error_type_code(detail: str) -> tuple[str | None, str | None]:
+    """Read typed terminal SSE errors without treating arbitrary RuntimeErrors as transient."""
+
+    error_type, error_code = LLMProvider._extract_error_type_code(detail)
+    if error_type is not None or error_code is not None:
+        return error_type, error_code
+
+    def token(field: str) -> str | None:
+        match = re.search(
+            rf"[\"']{field}[\"']\s*:\s*[\"']([a-zA-Z0-9_.-]+)[\"']",
+            detail,
+        )
+        return match.group(1).casefold() if match else None
+
+    return token("type"), token("code")
 
 
 def _codex_log_summary(exc_type: str, response: LLMResponse) -> str:

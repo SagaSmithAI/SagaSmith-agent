@@ -17,6 +17,7 @@ from nanobot.providers.openai_codex_provider import (
     _friendly_error,
     _request_codex,
     _should_retry_status,
+    _stream_error_type_code,
 )
 
 
@@ -57,6 +58,38 @@ def test_codex_blank_timeout_root_cause_reproduction() -> None:
     legacy_response = provider_base.LLMResponse(content=legacy_content, finish_reason="error")
     assert legacy_response.error_kind is None
     assert legacy_response.error_should_retry is None
+
+
+@pytest.mark.parametrize(
+    ("detail", "expected"),
+    [
+        (
+            "Response failed: {'type': 'server_error', 'code': 'server_error'}",
+            ("server_error", "server_error"),
+        ),
+        (
+            'Response failed: {"type":"service_unavailable_error",'
+            '"code":"server_is_overloaded"}',
+            ("service_unavailable_error", "server_is_overloaded"),
+        ),
+    ],
+)
+def test_codex_terminal_stream_error_metadata_is_recovered(
+    detail: str,
+    expected: tuple[str, str],
+) -> None:
+    assert _stream_error_type_code(detail) == expected
+    response = _codex_error_response(RuntimeError(detail))
+    assert (response.error_type, response.error_code) == expected
+    assert response.error_kind == "server"
+    assert response.error_should_retry is True
+
+
+def test_untyped_runtime_error_does_not_become_retryable() -> None:
+    response = _codex_error_response(RuntimeError("local conversion bug"))
+
+    assert response.error_kind is None
+    assert response.error_should_retry is None
 
 
 def test_codex_http_friendly_error_omits_raw_body() -> None:
@@ -340,6 +373,36 @@ async def test_codex_retry_uses_structured_timeout_metadata(monkeypatch) -> None
         calls += 1
         if calls == 1:
             raise httpx.ReadTimeout("")
+        return "ok", [], "stop", {}, None
+
+    async def fake_sleep(delay: float) -> None:
+        delays.append(delay)
+
+    monkeypatch.setattr("nanobot.providers.openai_codex_provider._request_codex", fake_request)
+    monkeypatch.setattr(provider_base.asyncio, "sleep", fake_sleep)
+
+    provider = OpenAICodexProvider()
+    response = await provider.chat_with_retry(messages=[{"role": "user", "content": "hello"}])
+
+    assert response.content == "ok"
+    assert calls == 2
+    assert delays == [1]
+
+
+@pytest.mark.asyncio
+async def test_codex_retry_recovers_from_typed_terminal_server_error(monkeypatch) -> None:
+    calls = 0
+    delays: list[float] = []
+
+    _mock_codex_token(monkeypatch)
+
+    async def fake_request(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError(
+                "Response failed: {'type': 'server_error', 'code': 'server_error'}"
+            )
         return "ok", [], "stop", {}, None
 
     async def fake_sleep(delay: float) -> None:
