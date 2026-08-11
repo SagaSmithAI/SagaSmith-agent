@@ -337,3 +337,6 @@ async def test_bridge_repairs_mcp_validation_failure_within_same_lease() -> None
     submissions = [item for item in calls if item["action"] == "submit_proposal"]
     assert len(submissions) == 2
     assert {item["payload"]["lease_id"] for item in submissions} == {capsule["lease_id"]}
+    repair_payload = json.loads(provider.calls[1]["messages"][-1]["content"])
+    assert "npc-conversation-proposal.v4" in repair_payload["instruction"]
+    assert "raw allowed_target_actor_ids" in repair_payload["instruction"]

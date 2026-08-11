@@ -377,7 +377,12 @@ class NpcConversationWorkerPool:
                         {
                             "task": "repair_npc_conversation_proposal",
                             "validation_issues": validation_issues,
-                            "instruction": "Return one corrected v3 proposal only.",
+                            "instruction": (
+                                "Return one corrected npc-conversation-proposal.v4 object only. "
+                                "Use raw allowed_target_actor_ids for utterance segment targets "
+                                "and resolution request actor_ids; only proposed_action.target_refs "
+                                "uses the actor:<id> form."
+                            ),
                             "output_shape": _OUTPUT_SHAPE,
                         },
                         ensure_ascii=False,
