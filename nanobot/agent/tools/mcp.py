@@ -1524,7 +1524,7 @@ async def connect_mcp_servers(
             # the operator intended to restrict capabilities — registering
             # unrestricted resource/prompt wrappers would violate that intent.
             # The default ["*"] (allow-all) means no restriction was intended.
-            register_extras = allow_all_tools
+            register_extras = allow_all_tools and cfg.expose_resources_and_prompts
             if register_extras:
                 try:
                     resources_result = await session.list_resources()
@@ -1560,7 +1560,7 @@ async def connect_mcp_servers(
             else:
                 logger.info(
                     "MCP server '{}': skipping resource/prompt registration "
-                    "(enabledTools does not include '*' — only tools allowed)",
+                    "(tool restriction or exposeResourcesAndPrompts=false)",
                     name,
                 )
 

@@ -372,6 +372,7 @@ class MCPServerConfig(Base):
     enabled_tools: list[str] = Field(
         default_factory=lambda: ["*"]
     )  # Only register these tools; accepts raw MCP names or wrapped mcp_<server>_<tool> names; ["*"] = all capabilities (tools, resources, prompts); any restriction = only listed tools, no resources/prompts
+    expose_resources_and_prompts: bool = True  # Wrap MCP resources/prompts as model tools.
     inject_principal: bool = (
         False  # Replace MCP principal_id arguments with the trusted inbound sender identity.
     )

@@ -1135,6 +1135,35 @@ async def test_connect_mcp_servers_enabled_tools_wildcard_allows_resources_and_p
 
 
 @pytest.mark.asyncio
+async def test_connect_mcp_servers_wildcard_can_disable_resources_and_prompts(
+    fake_mcp_runtime: dict[str, object | None],
+) -> None:
+    """Dynamic native tools can remain unrestricted without pseudo-tool extras."""
+    fake_mcp_runtime["session"] = _make_fake_session_with_capabilities(
+        tool_names=["demo"],
+        resource_names=["public_data"],
+        prompt_names=["help_prompt"],
+    )
+    registry = ToolRegistry()
+    stacks = await connect_mcp_servers(
+        {
+            "test": MCPServerConfig(
+                command="fake",
+                enabled_tools=["*"],
+                expose_resources_and_prompts=False,
+            )
+        },
+        registry,
+    )
+    for stack in stacks.values():
+        await stack.aclose()
+
+    assert "mcp_test_demo" in registry.tool_names
+    assert not any("public_data" in name for name in registry.tool_names)
+    assert not any("help_prompt" in name for name in registry.tool_names)
+
+
+@pytest.mark.asyncio
 async def test_connect_mcp_servers_enabled_tools_warns_on_unknown_entries(
     fake_mcp_runtime: dict[str, object | None], monkeypatch: pytest.MonkeyPatch
 ) -> None:
