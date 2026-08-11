@@ -467,6 +467,22 @@ def _normalize_schema_for_openai(schema: Any) -> dict[str, Any]:
 
     normalized.setdefault("properties", {})
     normalized.setdefault("required", [])
+    required = set(normalized["required"])
+    for name, prop in normalized["properties"].items():
+        if (
+            name not in required
+            and isinstance(prop, dict)
+            and prop.get("nullable") is True
+        ):
+            # MCP/Pydantic commonly describes an omitted optional parameter as
+            # ``anyOf: [value, null]`` with ``default: null``.  Responses tools
+            # need only the non-null branch when the property is not required;
+            # retaining the non-standard nullable marker encourages models to
+            # fabricate string/list/number null sentinels instead of omitting
+            # the argument.  Required nullable properties keep their marker.
+            prop.pop("nullable", None)
+            if prop.get("default") is None:
+                prop.pop("default", None)
     return normalized
 
 

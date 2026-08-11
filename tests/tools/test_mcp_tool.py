@@ -214,7 +214,7 @@ def test_wrapper_normalizes_nullable_property_type_union() -> None:
 
     wrapper = MCPToolWrapper(SimpleNamespace(call_tool=None), "test", tool_def)
 
-    assert wrapper.parameters["properties"]["name"] == {"type": "string", "nullable": True}
+    assert wrapper.parameters["properties"]["name"] == {"type": "string"}
 
 
 def test_wrapper_normalizes_nullable_property_anyof() -> None:
@@ -237,7 +237,31 @@ def test_wrapper_normalizes_nullable_property_anyof() -> None:
     assert wrapper.parameters["properties"]["name"] == {
         "type": "string",
         "description": "optional name",
+    }
+
+
+def test_wrapper_preserves_required_nullable_property() -> None:
+    tool_def = SimpleNamespace(
+        name="demo",
+        description="demo tool",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {
+                    "anyOf": [{"type": "string"}, {"type": "null"}],
+                    "default": None,
+                },
+            },
+            "required": ["name"],
+        },
+    )
+
+    wrapper = MCPToolWrapper(SimpleNamespace(call_tool=None), "test", tool_def)
+
+    assert wrapper.parameters["properties"]["name"] == {
+        "type": "string",
         "nullable": True,
+        "default": None,
     }
 
 
