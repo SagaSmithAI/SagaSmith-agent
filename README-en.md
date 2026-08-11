@@ -64,44 +64,56 @@ workspace, or ActorKnowledge context into the new actor. A chat attachment may
 transport a package, but only MCP validation, allowlisted file access, and public
 transactions can place it in a campaign.
 
-## Start the full Windows workspace
+## Install and start the full Windows workspace
 
-[`start.bat`](start.bat) is the single Agent + D&D MCP + D&D UI Gateway entry point. NanoBot starts the stdio MCP as a child process; the script also starts a principal-aware HTTP/SSE adapter on `127.0.0.1:8766`.
-
-Expected sibling layout:
+Requirements are Windows 11, [uv](https://docs.astral.sh/uv/), Python 3.11+, and Node.js 22.12+ with npm. Keep the current SagaSmith repositories as siblings; see the [full Windows workspace guide](docs/guides/install-full-workspace-windows.md) for the complete layout, component boundaries, and troubleshooting.
 
 ```text
 SagaSmith/
-  SagaSmith-agent/
-  SagaSmith-dnd-mcp/
-  SagaSmith-dnd-skills/
-  SagaSmith-module-gen-skills/
-  reference/DnD-Books/
+  SagaSmith-agent/              # Agent, channels, and WebUI
+  sagasmith-core/               # neutral persistence and Pack infrastructure
+  sagasmith-dnd/                # D&D rules runtime
+  sagasmith-coc/                # CoC rules runtime
+  SagaSmith-dnd-mcp/            # authoritative D&D service
+  SagaSmith-coc-mcp/            # authoritative CoC service
+  SagaSmith-dnd-skills/         # D&D Agent procedures
+  SagaSmith-coc-skills/         # CoC Agent procedures
+  SagaSmith-module-gen-skills/  # current-schema Module Pack authoring
+  SagaSmith-dnd-content-library/# redistributable public Pack catalog
+  SagaSmith-dnd-ui/             # D&D UI
+  sagasmith-coc-ui/             # CoC UI
 ```
 
+Run one BAT from the Agent repository:
+
 ```powershell
-cd SagaSmith-dnd-mcp
-uv sync --all-extras
+cd SagaSmith-agent
+.\install-all.bat
+```
 
-cd ..\SagaSmith-coc-mcp
-uv sync --all-extras
+The installer uses lockfiles to sync all Agent Python extras, both MCPs, and their editable Core/system runtimes. It runs `npm ci` and builds the Agent, D&D, and CoC Web UIs, checks the D&D/CoC/ModuleGen Skills contracts, and validates the public D&D content catalog. It never overwrites `config/config.json` and never imports or activates a Pack in a campaign.
 
-cd ..\SagaSmith-agent
-uv sync --all-extras
-# configure provider, model, channels, and both SagaSmith MCP servers
+Create the repo-local Agent configuration after installation:
+
+```powershell
+uv run nanobot onboard --wizard --config config\config.json --workspace workspace
+```
+
+Then follow the [MCP configuration guide](docs/guides/configure-mcp-tools.md) for the provider, model preset, channels, Full Skills, and both `sagasmith_dnd` and `sagasmith_coc`. When a config already exists, the installer performs a read-only runtime preflight; an incomplete config is reported as a next step and is never overwritten. Re-audit an existing installation with:
+
+```powershell
+.\install-all.bat --verify-only
+```
+
+After configuration passes, [`start.bat`](start.bat) starts the Agent, both stdio MCP children, and the D&D UI Gateway on `127.0.0.1:8766`:
+
+```powershell
 .\start.bat
 ```
 
-The script checks `uv`, the local config, Full D&D Skills exposure and its
-phase plan, the D&D core-tool allowlist, the 900-second PDF timeout, separate
-rulebook and campaign-module import allowlists, and both sibling MCP
-executables. It prepares their workspace homes, waits for the D&D UI Gateway
-health check, and then starts the foreground Agent gateway. It stops the UI
-adapter when the Agent exits. See [the MCP guide](docs/guides/configure-mcp-tools.md).
-Keep machine paths and secrets out of Git; reference provider keys through
-environment variables.
+The committed public catalog contains only redistributable SRD Packs. A complete private library must be built locally from books the user owns through the current draft → Agent review → finalize flow. The installer does not copy commercial sources, generate private Packs, or choose campaign activation; import and activation remain Lobby content-control operations.
 
-The UI connects to `http://127.0.0.1:8766` by default. Non-loopback access requires an explicit bearer token and origin allowlist; without a token, the adapter rejects remote requests.
+The UI connects to `http://127.0.0.1:8766` by default. Non-loopback access requires an explicit bearer token and origin allowlist; without a token, the adapter rejects remote requests. Keep machine paths and secrets out of Git and reference provider keys through environment variables.
 
 ## Generic quick start
 

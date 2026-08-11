@@ -37,6 +37,7 @@ full reference first.
 
 | Goal | Guide |
 |---|---|
+| Install the complete SagaSmith Windows source workspace | [`guides/install-full-workspace-windows.md`](./guides/install-full-workspace-windows.md) |
 | Build a personal AI agent | [`guides/build-a-personal-ai-agent.md`](./guides/build-a-personal-ai-agent.md) |
 | Run a self-hosted AI agent | [`guides/self-hosted-ai-agent.md`](./guides/self-hosted-ai-agent.md) |
 | Use a browser AI agent WebUI | [`guides/ai-agent-webui.md`](./guides/ai-agent-webui.md) |

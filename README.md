@@ -74,48 +74,56 @@ Agent 不解析或改写最终 `.sagasmith-pack`，也不缓存第二份怪物�
 workspace memory 或 actor knowledge 填进新角色。分享文件可作为聊天附件或
 workspace artifact 传递，但只有 MCP 校验、白名单读取和公开写事务才能使其进入战役。
 
-## Windows 一键启动当前工作区
+## Windows 完整安装与启动
 
-仓库根目录的 [`start.bat`](start.bat) 是 Agent + D&D MCP + D&D UI Gateway 的单一入口。D&D MCP 使用 stdio，由 NanoBot 根据配置启动为子进程；脚本同时在 `127.0.0.1:8766` 启动 principal-aware HTTP/SSE adapter，供 D&D UI 观察权威状态与提交受 MCP 校验的战斗移动。
-
-准备相邻仓库：
+需要 Windows 11、[uv](https://docs.astral.sh/uv/)、Python 3.11+，以及 Node.js 22.12+（含 npm）。把当前 SagaSmith 仓库放在同一个父目录；完整布局、组件职责和故障排查见 [Windows 全工作区安装指南](docs/guides/install-full-workspace-windows.zh-CN.md)。
 
 ```text
 SagaSmith/
-  SagaSmith-agent/
-  SagaSmith-dnd-mcp/
-  SagaSmith-dnd-skills/
-  SagaSmith-module-gen-skills/
-  reference/DnD-Books/
+  SagaSmith-agent/              # Agent、渠道与 WebUI
+  sagasmith-core/               # 通用持久化与 Pack 基础设施
+  sagasmith-dnd/                # D&D 规则运行时
+  sagasmith-coc/                # CoC 规则运行时
+  SagaSmith-dnd-mcp/            # D&D 权威服务
+  SagaSmith-coc-mcp/            # CoC 权威服务
+  SagaSmith-dnd-skills/         # D&D Agent 流程
+  SagaSmith-coc-skills/         # CoC Agent 流程
+  SagaSmith-module-gen-skills/  # 当前 schema 的 Module Pack 创作流程
+  SagaSmith-dnd-content-library/# 可再分发的公开 Pack 目录
+  SagaSmith-dnd-ui/             # D&D UI
+  sagasmith-coc-ui/             # CoC UI
 ```
 
-安装：
+从 Agent 仓库运行一个 BAT 即可安装完整源码工作区：
 
 ```powershell
-cd SagaSmith-dnd-mcp
-uv sync --all-extras
-
-cd ..\SagaSmith-coc-mcp
-uv sync --all-extras
-
-cd ..\SagaSmith-agent
-uv sync --all-extras
+cd SagaSmith-agent
+.\install-all.bat
 ```
 
-然后按 [配置指南](docs/guides/configure-mcp-tools.md) 创建或检查 `config/config.json` 中的 provider、model preset、channel，以及 `tools.mcpServers.sagasmith_dnd` / `sagasmith_coc`，运行：
+它会使用锁文件同步 Agent 的全部 Python extras、两个 MCP 及其 editable Core/系统运行时；以 `npm ci` 构建 Agent、D&D、CoC 三个 Web UI；核对 D&D、CoC、ModuleGen Skills；最后验证公开 D&D 内容目录。安装器不会覆盖 `config/config.json`，也不会把任何 Pack 导入或激活到战役中。
+
+安装后配置 repo-local Agent：
+
+```powershell
+uv run nanobot onboard --wizard --config config\config.json --workspace workspace
+```
+
+再按 [MCP 配置指南](docs/guides/configure-mcp-tools.md) 配置 provider、model preset、channel、Full Skills，以及 `sagasmith_dnd` / `sagasmith_coc`。配置存在时，安装器会执行只读 runtime preflight；配置尚未就绪只会给出下一步，不会覆盖它。随时可重新审计：
+
+```powershell
+.\install-all.bat --verify-only
+```
+
+配置通过后，用 [`start.bat`](start.bat) 启动 Agent、两个 stdio MCP 子进程和 `127.0.0.1:8766` 上的 D&D UI Gateway：
 
 ```powershell
 .\start.bat
 ```
 
-脚本会检查 `uv`、Agent 配置、Full D&D Skills 暴露及 phase plan、D&D
-核心工具清单、900 秒 PDF 超时、规则书与战役模组两个独立 allowlist，
-以及两个相邻 MCP executable，创建各自的 workspace MCP home，先等待 D&D
-UI Gateway 健康检查通过，再以前台启动 Agent gateway；退出 Agent 时会
-清理 UI Gateway 子进程。详细配置见
-[configure-mcp-tools](docs/guides/configure-mcp-tools.md)。
+公开目录当前只包含具备再分发许可的 SRD Pack。完整私有内容库必须由用户拥有的规则书/模组在本地通过最新 draft → Agent review → finalize 流程构建；安装 BAT 不复制商业书籍、不生成私有 Pack，也不替用户选择 campaign activation。最终导入与激活属于 Lobby 的内容控制流程。
 
-UI 默认连接 `http://127.0.0.1:8766`。若要从非本机访问，必须设置 `SAGASMITH_DND_GATEWAY_TOKEN`、显式 origin allowlist 与 UI 对应 token；无 token 时 gateway 拒绝所有非 loopback 请求。
+UI 默认连接 `http://127.0.0.1:8766`。非本机访问必须设置 `SAGASMITH_DND_GATEWAY_TOKEN`、显式 origin allowlist 与 UI 对应 token；无 token 时 gateway 拒绝所有非 loopback 请求。
 
 > `config/config.json` 通常包含本机路径与密钥，不应提交。使用环境变量引用 provider secret。
 
