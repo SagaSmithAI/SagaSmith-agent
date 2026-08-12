@@ -37,6 +37,69 @@ def _make_loop(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_loop_context_barrier_keeps_completed_call_arguments(tmp_path):
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.agent.tools.base import ToolResult
+    from nanobot.bus.queue import MessageBus
+
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    provider.generation = GenerationSettings()
+    requests: list[list[dict]] = []
+
+    async def chat_with_retry(*, messages, **_kwargs):
+        requests.append([dict(message) for message in messages])
+        if len(requests) == 1:
+            return LLMResponse(
+                content="",
+                tool_calls=[
+                    ToolCallRequest(
+                        id="checkout",
+                        name="branch_change",
+                        arguments={
+                            "action": "checkout",
+                            "payload": {"branch_id": "branch-b"},
+                            "idempotency_key": "checkout-once",
+                        },
+                    )
+                ],
+            )
+        return LLMResponse(content="continued after checkout", usage={})
+
+    provider.chat_with_retry = chat_with_retry
+    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
+    barrier_tools = MagicMock()
+    barrier_tools.get_definitions.return_value = []
+    barrier_tools.execute = AsyncMock(
+        return_value=ToolResult(
+            '{"result":{"branch":{"id":"branch-b","is_current":true}}}',
+            context_barrier=True,
+        )
+    )
+    session = loop.sessions.get_or_create("cli:barrier")
+
+    final_content, _, _, _, _ = await loop._run_agent_loop(
+        [
+            {"role": "system", "content": "PRIVATE_OLD_CONTEXT"},
+            {"role": "user", "content": "Checkout once, then continue."},
+        ],
+        runtime=loop.llm_runtime(),
+        session=session,
+        tools=barrier_tools,
+    )
+
+    assert final_content == "continued after checkout"
+    rebuilt = requests[1]
+    assert "PRIVATE_OLD_CONTEXT" not in str(rebuilt)
+    marker = str(rebuilt[-1]["content"])
+    assert '"tool":"branch_change"' in marker
+    assert '"action":"checkout"' in marker
+    assert '"branch_id":"branch-b"' in marker
+    assert '"idempotency_key":"checkout-once"' in marker
+    assert '"transition_completed":true' in marker
+
+
+@pytest.mark.asyncio
 async def test_ephemeral_runner_enters_and_restores_turn_scopes(tmp_path):
     loop = _make_loop(tmp_path)
 

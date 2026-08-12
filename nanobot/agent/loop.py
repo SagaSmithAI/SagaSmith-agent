@@ -58,7 +58,7 @@ from nanobot.bus.runtime_events import (
 )
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.config.schema import AgentDefaults, ModelPresetConfig
-from nanobot.providers.base import LLMProvider
+from nanobot.providers.base import LLMProvider, tool_arguments_object_for_replay
 from nanobot.providers.factory import ProviderSnapshot
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_HISTORY_META,
@@ -971,7 +971,12 @@ class AgentLoop:
                 {"role": "user", "content": original_user_text or "Continue."},
             )
             bootstrap_rows = [
-                {"tool": call.name, "result": str(result)}
+                {
+                    "tool": call.name,
+                    "arguments": tool_arguments_object_for_replay(call.arguments),
+                    "result": str(result),
+                    "transition_completed": True,
+                }
                 for call, result in zip(tool_calls, results)
                 if bool(getattr(result, "context_barrier", False))
             ]
