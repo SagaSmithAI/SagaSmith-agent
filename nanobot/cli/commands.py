@@ -1914,6 +1914,11 @@ app.add_typer(
 @app.command()
 def agent(
     message: str = typer.Option(None, "--message", "-m", help="Message to send to the agent"),
+    message_file: Path | None = typer.Option(
+        None,
+        "--message-file",
+        help="UTF-8 file containing the single message to send to the agent",
+    ),
     session_id: str = typer.Option("cli:direct", "--session", "-s", help="Session ID"),
     sender_id: str = typer.Option(
         "user",
@@ -1933,6 +1938,16 @@ def agent(
     from nanobot.bus.queue import MessageBus
     from nanobot.cron.service import CronService
     from nanobot.providers.image_generation import image_gen_provider_configs
+
+    if message is not None and message_file is not None:
+        raise typer.BadParameter("use either --message or --message-file, not both")
+    if message_file is not None:
+        try:
+            message = message_file.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise typer.BadParameter(
+                f"cannot read --message-file {message_file}: {exc}"
+            ) from exc
 
     config = _load_runtime_config(config, workspace)
     sync_workspace_templates(config.workspace_path)

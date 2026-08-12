@@ -1304,6 +1304,7 @@ def test_agent_help_shows_workspace_and_config_options():
     assert "--config" in stripped_output
     assert "-c" in stripped_output
     assert "--sender-id" in stripped_output
+    assert "--message-file" in stripped_output
 
 
 def test_agent_uses_default_config_when_no_workspace_or_config_flags(mock_agent_runtime):
@@ -1336,6 +1337,32 @@ def test_agent_passes_authenticated_sender_identity(mock_agent_runtime):
         mock_agent_runtime["agent_loop"].process_direct.await_args.kwargs["sender_id"]
         == "regression-dm"
     )
+
+
+def test_agent_reads_long_single_message_from_file(mock_agent_runtime, tmp_path: Path):
+    message_path = tmp_path / "prompt.txt"
+    message = "source-backed prompt\n" * 5000
+    message_path.write_text(message, encoding="utf-8")
+
+    result = runner.invoke(app, ["agent", "--message-file", str(message_path)])
+
+    assert result.exit_code == 0
+    assert mock_agent_runtime["agent_loop"].process_direct.await_args.args[0] == message
+
+
+def test_agent_rejects_message_and_message_file_together(
+    mock_agent_runtime, tmp_path: Path
+):
+    message_path = tmp_path / "prompt.txt"
+    message_path.write_text("prompt", encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        ["agent", "--message", "inline", "--message-file", str(message_path)],
+    )
+
+    assert result.exit_code != 0
+    assert "either --message or --message-file" in result.output
 
 
 def test_agent_uses_explicit_config_path(mock_agent_runtime, tmp_path: Path):
