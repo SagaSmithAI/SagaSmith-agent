@@ -1,7 +1,7 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
 chcp 65001 >nul
-title SagaSmith Full Workspace Installer
+title SagaSmith Local D^&D Installer
 
 set "SKIP_UI=0"
 set "VERIFY_ONLY=0"
@@ -39,11 +39,8 @@ echo [INFO] Agent repository:    %AGENT_ROOT%
 for %%D in (
     "sagasmith-core"
     "sagasmith-dnd"
-    "sagasmith-coc"
     "SagaSmith-dnd-mcp"
-    "SagaSmith-coc-mcp"
     "SagaSmith-dnd-skills"
-    "SagaSmith-coc-skills"
     "SagaSmith-module-gen-skills"
     "SagaSmith-dnd-content-library"
 ) do (
@@ -58,7 +55,7 @@ if "%SKIP_UI%"=="0" (
         echo [ERROR] Missing SagaSmith Agent WebUI: %AGENT_ROOT%\webui
         goto :failed
     )
-    for %%D in ("SagaSmith-dnd-ui" "sagasmith-coc-ui") do (
+    for %%D in ("SagaSmith-dnd-ui") do (
         if not exist "%SAGASMITH_ROOT%\%%~D\" (
             echo [ERROR] Missing required sibling repository: %%~D
             echo         Expected directory: %SAGASMITH_ROOT%\%%~D
@@ -100,7 +97,7 @@ if "%SKIP_UI%"=="0" (
 
 if "%VERIFY_ONLY%"=="1" goto :verify
 
-for %%P in ("sagasmith-dnd-mcp.exe" "sagasmith-coc-mcp.exe" "nanobot.exe") do (
+for %%P in ("sagasmith-dnd-mcp.exe" "nanobot.exe") do (
     tasklist /FI "IMAGENAME eq %%~P" /NH | %SystemRoot%\System32\find.exe /I "%%~P" >nul
     if not errorlevel 1 (
         echo [ERROR] %%~P is running and its Windows executable is locked.
@@ -112,15 +109,6 @@ for %%P in ("sagasmith-dnd-mcp.exe" "sagasmith-coc-mcp.exe" "nanobot.exe") do (
 
 echo [INSTALL] D^&D MCP + Core + D^&D runtime
 pushd "%SAGASMITH_ROOT%\SagaSmith-dnd-mcp" >nul
-uv sync --all-extras --frozen
-if errorlevel 1 (
-    popd >nul
-    goto :failed
-)
-popd >nul
-
-echo [INSTALL] CoC MCP + Core + CoC runtime
-pushd "%SAGASMITH_ROOT%\SagaSmith-coc-mcp" >nul
 uv sync --all-extras --frozen
 if errorlevel 1 (
     popd >nul
@@ -166,29 +154,14 @@ if "%SKIP_UI%"=="0" (
     )
     popd >nul
 
-    echo [INSTALL] SagaSmith CoC UI
-    pushd "%SAGASMITH_ROOT%\sagasmith-coc-ui" >nul
-    call npm ci
-    if errorlevel 1 (
-        popd >nul
-        goto :failed
-    )
-    call npm run build
-    if errorlevel 1 (
-        popd >nul
-        goto :failed
-    )
-    popd >nul
 )
 
 if not exist "%AGENT_ROOT%\workspace\.sagasmith-dnd-mcp" mkdir "%AGENT_ROOT%\workspace\.sagasmith-dnd-mcp"
-if not exist "%AGENT_ROOT%\workspace\.sagasmith-coc-mcp" mkdir "%AGENT_ROOT%\workspace\.sagasmith-coc-mcp"
 
 :verify
 echo [INFO] Verifying installed runtimes and content contracts...
 for %%F in (
     "%SAGASMITH_ROOT%\SagaSmith-dnd-mcp\.venv\Scripts\sagasmith-dnd-mcp.exe"
-    "%SAGASMITH_ROOT%\SagaSmith-coc-mcp\.venv\Scripts\sagasmith-coc-mcp.exe"
     "%AGENT_ROOT%\.venv\Scripts\nanobot.exe"
 ) do (
     if not exist "%%~F" (
@@ -203,15 +176,8 @@ if errorlevel 1 (
     echo [ERROR] D^&D runtime import verification failed.
     goto :failed
 )
-"%SAGASMITH_ROOT%\SagaSmith-coc-mcp\.venv\Scripts\python.exe" -c "import sagasmith_core, sagasmith_coc, sagasmith_coc_mcp"
-if errorlevel 1 (
-    echo [ERROR] CoC runtime import verification failed.
-    goto :failed
-)
-
 for %%F in (
     "%SAGASMITH_ROOT%\SagaSmith-dnd-skills\full\SKILL.md"
-    "%SAGASMITH_ROOT%\SagaSmith-coc-skills\full\SKILL.md"
     "%SAGASMITH_ROOT%\SagaSmith-module-gen-skills\SKILL.md"
 ) do (
     if not exist "%%~F" (
@@ -234,7 +200,6 @@ if "%SKIP_UI%"=="0" (
     for %%F in (
         "%AGENT_ROOT%\nanobot\web\dist\index.html"
         "%SAGASMITH_ROOT%\SagaSmith-dnd-ui\dist\index.html"
-        "%SAGASMITH_ROOT%\sagasmith-coc-ui\dist\index.html"
     ) do (
         if not exist "%%~F" (
             echo [ERROR] Missing Web UI build artifact: %%~F
@@ -256,29 +221,29 @@ if exist "%AGENT_ROOT%\config\config.json" (
 ) else (
     set "CONFIG_READY=0"
     echo [NEXT] No config\config.json was changed or created.
-    echo        Run the repo-local onboard wizard, then add both MCP servers as documented:
+    echo        Run the repo-local onboard wizard, then configure the D^&D MCP as documented:
     echo        uv run nanobot onboard --wizard --config config\config.json --workspace workspace
     echo        docs\guides\configure-mcp-tools.md
 )
 
-echo [OK] SagaSmith full workspace installation is valid.
-echo      Software, UIs, Skills, and the redistributable public catalog are ready.
+echo [OK] SagaSmith local D^&D installation is valid.
+echo      Agent, D^&D MCP, UIs, Skills, and the redistributable public catalog are ready.
 echo      Private or commercial Packs were not copied, imported, or activated.
 if "%CONFIG_READY%"=="1" echo [NEXT] Start with: start.bat
 exit /b 0
 
 :failed
-echo [ERROR] SagaSmith full workspace installation did not complete.
+echo [ERROR] SagaSmith local D^&D installation did not complete.
 exit /b 1
 
 :help
 echo Usage: install-all.bat [--verify-only] [--skip-ui]
 echo.
-echo Installs the full sibling SagaSmith source workspace on Windows:
+echo Installs the D^&D-first local SagaSmith system on Windows:
 echo   - Agent plus all Python extras
-echo   - D^&D and CoC MCPs plus editable Core/system runtimes
-echo   - Agent, D^&D, and CoC Web UIs
-echo   - D^&D/CoC/ModuleGen Skills contract checks
+echo   - D^&D MCP plus editable Core/system runtimes
+echo   - Agent and D^&D Web UIs
+echo   - D^&D/ModuleGen Skills contract checks
 echo   - redistributable public D^&D content catalog validation
 echo.
 echo Options:

@@ -1,10 +1,10 @@
-# Install the full Windows workspace
+# Install the local D&D system on Windows
 
-This flow installs the current SagaSmith Agent, authoritative D&D/CoC runtimes, three Web UIs, Agent Skills, and the redistributable content catalog from sibling source repositories on Windows 11.
+This flow installs SagaSmith Agent, the authoritative D&D runtime, Agent and D&D Web UIs, D&D/ModuleGen Skills, and the redistributable D&D content catalog from sibling source repositories on Windows 11.
 
 ## Scope
 
-`install-all.bat` uses committed lockfiles to sync the Agent with all extras and both MCP environments. The MCP editable sources install Core and the matching system runtimes. It then runs `npm ci` and builds the Agent, D&D, and CoC UIs; checks Full D&D, Full CoC, and Module Pack generation Skills; validates the committed public D&D catalog; and creates empty repo-local MCP homes when needed.
+`install-all.bat` uses committed lockfiles to sync the Agent and D&D MCP environments. The MCP editable sources install Core and the D&D system runtime. It then builds the Agent and D&D UIs, checks Full D&D and Module Pack generation Skills, validates the public D&D catalog, and creates the repo-local D&D data home when needed.
 
 It does not clone or update repositories, overwrite `config/config.json`, read provider secrets, modify campaigns, import or activate Packs, or copy books and adventures that cannot be redistributed.
 
@@ -17,15 +17,11 @@ SagaSmith/
   SagaSmith-agent/
   sagasmith-core/
   sagasmith-dnd/
-  sagasmith-coc/
   SagaSmith-dnd-mcp/
-  SagaSmith-coc-mcp/
   SagaSmith-dnd-skills/
-  SagaSmith-coc-skills/
   SagaSmith-module-gen-skills/
   SagaSmith-dnd-content-library/
   SagaSmith-dnd-ui/
-  sagasmith-coc-ui/
 ```
 
 Check the toolchain in PowerShell:
@@ -66,14 +62,20 @@ Create the repo-local config after the software install:
 uv run nanobot onboard --wizard --config config\config.json --workspace workspace
 ```
 
-Follow [Configure MCP tools](configure-mcp-tools.md) to add Full Skills and both MCP servers. Then run:
+Apply the local D&D connection without replacing provider secrets, then verify and start:
 
 ```powershell
+.venv\Scripts\python.exe scripts\configure_dnd_local.py --apply
 .\install-all.bat --verify-only
 .\start.bat
 ```
 
-`start.bat` repeats the runtime preflight, starts the D&D UI Gateway and foreground Agent gateway, and cleans up the UI Gateway child when the Agent exits.
+`start.bat` repeats preflight, starts one authoritative streamable-HTTP D&D MCP, serves the built D&D Workbench through its gateway, starts the Agent, and cleans up both child processes when the Agent exits.
+
+Run `stop.bat` from another terminal for an explicit stop. It reads only the exact process IDs
+written by `start.bat`, stops the Agent, Workbench gateway, and MCP, then removes the runtime marker.
+
+Use `scripts\local_dnd_data.py doctor`, `backup`, `verify`, and `restore --yes` while `start.bat` is stopped. A restore retains the displaced workspace in a timestamped `workspace.pre-restore-*` directory.
 
 ## What “all content” means
 

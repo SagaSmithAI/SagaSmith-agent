@@ -39,25 +39,26 @@ tools and publishes selected domain tools after `exposure(set)`.
   "tools": {
     "mcpServers": {
       "sagasmith_dnd": {
-        "command": "..\\SagaSmith-dnd-mcp\\.venv\\Scripts\\sagasmith-dnd-mcp.exe",
-        "args": [],
-        "cwd": "..\\SagaSmith-dnd-mcp",
-        "env": {
-          "SAGASMITH_DND_MCP_HOME": "..\\SagaSmith-agent\\workspace\\.sagasmith-dnd-mcp",
-          "SAGASMITH_DND_SKILLS_DIR": "..\\SagaSmith-dnd-skills",
-          "SAGASMITH_DND_MCP_RULE_IMPORT_ROOTS": "..\\reference\\DnD-Books\\5e\\Books",
-          "SAGASMITH_DND_MCP_MODULE_IMPORT_ROOTS": "..\\reference\\DnD-Books\\5e\\Campaign",
-          "SAGASMITH_DND_MCP_RULE_OCR": "1",
-          "SAGASMITH_DND_MCP_MODULE_OCR": "1",
-          "SAGASMITH_DND_MCP_AUTO_SEED": "1"
-        },
+        "type": "streamableHttp",
+        "url": "http://127.0.0.1:8767/mcp",
+        "headers": {},
         "toolTimeout": 900,
         "injectPrincipal": true,
-        "enabledTools": ["*"]
+        "enabledTools": ["*"],
+        "exposeResourcesAndPrompts": true
       }
-    }
+    },
+    "ssrfWhitelist": ["127.0.0.1/32"]
   }
 }
+```
+
+The checked-in D&D-first helper updates this server entry and the loopback SSRF allowlist, removes
+the known `sagasmith_coc` runtime entry, and preserves providers, secrets, and unrelated servers.
+It creates `config/config.json.bak` before an explicit write:
+
+```powershell
+.venv\Scripts\python.exe scripts\configure_dnd_local.py --apply
 ```
 
 The six always-available tools are `exposure`, `server_capabilities`, `storage_status`,
@@ -72,10 +73,9 @@ Use the protocol in this order:
 4. Let nanobot process `tools/list_changed`, then call the newly listed domain tool directly.
 5. Call `exposure(action="get")` to inspect the current session binding and loaded tool ids.
 
-The MCP connection is the exposure session. Its campaign, principal, phase and loaded tools remain
-server-owned. A phase change can remove incompatible tools from the next native tool list. If an
-operator must isolate unrelated principals, run separate trusted MCP connections/processes; do not
-let model-authored fields choose transport identity.
+The one localhost MCP process is the authority shared by Agent and D&D Workbench. Each MCP
+connection remains its own exposure session; campaign, principal, phase and loaded tools stay
+server-owned. A phase change can remove incompatible tools from the next native tool list.
 
 ## Pack authoring boundary
 
@@ -109,12 +109,6 @@ NPC proposal v4 requires only transport identity, a response decision and text f
 segment. Truth posture, basis references, targets, language and delivery are optional. When those
 fields are supplied, MCP validates their actor-scoped references; it does not invent narrative
 meaning. Mechanical effects must be requested and settled through public engine tools.
-
-## CoC and other servers
-
-Do not assume that another SagaSmith server implements the D&D exposure contract. Read its
-`server_capabilities` and configure the tools it actually advertises. A fixed-catalogue server may
-still use a narrow `enabledTools` list.
 
 ## Production notes
 

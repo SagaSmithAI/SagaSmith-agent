@@ -8,6 +8,7 @@ import {
   Settings,
   SquarePen,
   Blocks,
+  Swords,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -174,6 +175,12 @@ export function Sidebar(props: SidebarProps) {
           onClick={props.onOpenAutomations}
           active={props.activeUtility === "automations"}
           icon={<CalendarClock className="h-4 w-4" />}
+        />
+        <SidebarActionButton
+          collapsed={collapsed}
+          label={t("sidebar.dndWorkbench", { defaultValue: "D&D Workbench" })}
+          onClick={() => window.location.assign("http://127.0.0.1:8766/")}
+          icon={<Swords className="h-4 w-4" />}
         />
         {props.archivedCount ? (
           <SidebarActionButton

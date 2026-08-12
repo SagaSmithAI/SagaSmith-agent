@@ -101,7 +101,7 @@ cd SagaSmith-agent
 .\install-all.bat
 ```
 
-它会使用锁文件同步 Agent 的全部 Python extras、两个 MCP 及其 editable Core/系统运行时；以 `npm ci` 构建 Agent、D&D、CoC 三个 Web UI；核对 D&D、CoC、ModuleGen Skills；最后验证公开 D&D 内容目录。安装器不会覆盖 `config/config.json`，也不会把任何 Pack 导入或激活到战役中。
+当前本地安装器以 D&D 为核心：同步 Agent、D&D MCP 及其 editable Core/系统运行时；构建 Agent 与 D&D Web UI；核对 D&D、ModuleGen Skills；最后验证公开 D&D 内容目录。安装器不会覆盖 `config/config.json`，也不会把任何 Pack 导入或激活到战役中。
 
 安装后配置 repo-local Agent：
 

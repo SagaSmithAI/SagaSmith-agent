@@ -91,7 +91,7 @@ cd SagaSmith-agent
 .\install-all.bat
 ```
 
-The installer uses lockfiles to sync all Agent Python extras, both MCPs, and their editable Core/system runtimes. It runs `npm ci` and builds the Agent, D&D, and CoC Web UIs, checks the D&D/CoC/ModuleGen Skills contracts, and validates the public D&D content catalog. It never overwrites `config/config.json` and never imports or activates a Pack in a campaign.
+The current local installer is D&D-first: it syncs Agent and the D&D MCP with editable Core/system runtimes, builds the Agent and D&D Web UIs, checks D&D/ModuleGen Skills, and validates the public D&D catalog. It never overwrites `config/config.json` and never imports or activates a Pack in a campaign.
 
 Create the repo-local Agent configuration after installation:
 
