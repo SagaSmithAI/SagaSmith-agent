@@ -1,86 +1,102 @@
-# Install the local D&D system on Windows
+# Install and operate the local SagaSmith stack
 
-This flow installs SagaSmith Agent, the authoritative D&D runtime, Agent and D&D Web UIs, D&D/ModuleGen Skills, and the redistributable D&D content catalog from sibling source repositories on Windows 11.
+SagaSmith Agent is the user-facing entry point. D&D, Call of Cthulhu, and
+Narrative are independent optional modes; selecting one never installs or
+configures either of the others.
 
-## Scope
+The implementation is a Python CLI. There is no BAT installer or parallel
+start/stop protocol.
 
-`install-all.bat` uses committed lockfiles to sync the Agent and D&D MCP environments. The MCP editable sources install Core and the D&D system runtime. It then builds the Agent and D&D UIs, checks Full D&D and Module Pack generation Skills, validates the public D&D catalog, and creates the repo-local D&D data home when needed.
+## Requirements
 
-It does not clone or update repositories, overwrite `config/config.json`, read provider secrets, modify campaigns, import or activate Packs, or copy books and adventures that cannot be redistributed.
+- Python 3.11 or newer and `uv`
+- Node.js 22.12 or newer with npm when building Web UIs
+- sibling source repositories for `--source workspace`
+- a configured Agent provider before starting the gateway
 
-## Requirements and layout
-
-Install `uv`, Python 3.11+, Node.js 22.12+, and npm. Keep these repositories as siblings:
-
-```text
-SagaSmith/
-  SagaSmith-agent/
-  sagasmith-core/
-  sagasmith-dnd/
-  SagaSmith-dnd-mcp/
-  SagaSmith-dnd-skills/
-  SagaSmith-module-gen-skills/
-  SagaSmith-dnd-content-library/
-  SagaSmith-dnd-ui/
-```
-
-Check the toolchain in PowerShell:
-
-```powershell
-uv --version
-uv python find ">=3.11"
-node --version
-npm --version
-```
-
-## Install and verify
-
-```powershell
-cd C:\path\to\SagaSmith\SagaSmith-agent
-.\install-all.bat
-```
-
-Software installation failures return a nonzero exit code. A missing or incomplete Agent config is reported as a next step rather than overwritten.
-
-Stop any running Agent or MCP before installation because Windows locks active executables. `--verify-only` remains safe while services are running.
-
-```powershell
-# Audit without installing or building
-.\install-all.bat --verify-only
-
-# Backend-only install/audit; not a complete product installation
-.\install-all.bat --skip-ui
-
-.\install-all.bat --help
-```
-
-## Configure and start
-
-Create the repo-local config after the software install:
+Create the initial Agent config if it does not exist:
 
 ```powershell
 uv run nanobot onboard --wizard --config config\config.json --workspace workspace
 ```
 
-Apply the local D&D connection without replacing provider secrets, then verify and start:
+## Choose modes
+
+Repeat `--mode` to install any combination. Omitting it installs all three.
 
 ```powershell
-.venv\Scripts\python.exe scripts\configure_dnd_local.py --apply
-.\install-all.bat --verify-only
-.\start.bat
+# D&D only
+uv run nanobot sagasmith install --mode dnd
+
+# CoC and Narrative
+uv run nanobot sagasmith install --mode coc --mode narrative
+
+# D&D, CoC, and Narrative
+uv run nanobot sagasmith install
 ```
 
-`start.bat` repeats preflight, starts one authoritative streamable-HTTP D&D MCP, serves the built D&D Workbench through its gateway, starts the Agent, and cleans up both child processes when the Agent exits.
+Use `--skip-ui` for a backend-only development install and `--verify-only` for
+a non-installing audit. Released checkouts may be materialized outside the
+developer workspace with `--source release --release-ref <tag-or-branch>`.
 
-Run `stop.bat` from another terminal for an explicit stop. It reads only the exact process IDs
-written by `start.bat`, stops the Agent, Workbench gateway, and MCP, then removes the runtime marker.
+The installer reconciles only SagaSmith-owned MCP and Skill entries. It backs
+up an existing config before changing it and preserves providers, secrets,
+channels, unrelated MCP servers, and unrelated Skill roots.
 
-Use `scripts\local_dnd_data.py doctor`, `backup`, `verify`, and `restore --yes` while `start.bat` is stopped. A restore retains the displaced workspace in a timestamped `workspace.pre-restore-*` directory.
+## Lifecycle
 
-## What “all content” means
+```powershell
+uv run nanobot sagasmith doctor
+uv run nanobot sagasmith start
+uv run nanobot sagasmith status
+uv run nanobot sagasmith logs
+uv run nanobot sagasmith stop
+```
 
-The source install covers current public software, Skills, and the redistributable catalog. The committed catalog currently contains two CC-BY SRD preset Packs. A complete private library is built locally from sources the user owns and cannot be distributed by the public installer.
+The exact child process IDs and commands are recorded under
+`workspace/.sagasmith-local`. Stop targets only those recorded processes.
 
-Private Packs follow the current mechanical first pass → Agent evidence review and draft repair → immutable finalize lifecycle. Lobby content controls then handle import, dependency resolution, and campaign activation. A successful software installation does not silently place content in a campaign.
+Default local endpoints are:
 
-For the Chinese guide, see [Windows 全工作区安装](install-full-workspace-windows.zh-CN.md).
+| Surface | Address |
+|---|---|
+| Agent WebUI | `http://127.0.0.1:8765/` |
+| D&D Workbench gateway | `http://127.0.0.1:8766/` |
+| D&D MCP | `http://127.0.0.1:8767/mcp` |
+| CoC Workbench gateway | `http://127.0.0.1:8768/` |
+| CoC MCP | `http://127.0.0.1:8769/mcp` |
+| Narrative MCP | Agent-owned session-scoped stdio |
+
+Each logical Agent session gets its own SagaSmith MCP connection and mutable
+native tool registry. `tools/list_changed` therefore changes only that chat's
+authoritative schema.
+
+## Backup, restore, and upgrade
+
+Stop the stack before backup, restore, upgrade, or rollback.
+
+```powershell
+uv run nanobot sagasmith backup C:\backups\sagasmith.zip
+uv run nanobot sagasmith verify-backup C:\backups\sagasmith.zip
+uv run nanobot sagasmith restore C:\backups\sagasmith.zip --yes
+uv run nanobot sagasmith upgrade
+uv run nanobot sagasmith rollback --yes
+```
+
+Backups contain the three separate domain state roots and the stack manifest.
+They exclude provider secrets, logs, source books, and source checkouts.
+Upgrade refuses dirty repositories, creates a backup first, fast-forwards only,
+reinstalls, and runs verification. Rollback also refuses dirty repositories.
+
+Uninstall removes managed config while preserving data by default:
+
+```powershell
+uv run nanobot sagasmith uninstall --yes
+uv run nanobot sagasmith uninstall --yes --purge-data
+```
+
+## Content boundary
+
+Software installation never imports or activates a Pack. Private books and
+adventures remain local and follow mechanical draft, Agent evidence review,
+immutable finalization, Lobby import, and explicit activation.

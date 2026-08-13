@@ -751,12 +751,40 @@ class GatewayHTTPHandler:
             return self._handle_webui_sidebar_state(request)
         if got == "/api/webui/sidebar-state/update":
             return self._handle_webui_sidebar_state_update(request)
+        if got == "/api/sagasmith":
+            return self._handle_sagasmith(request)
+        if got == "/api/sagasmith/configure":
+            return self._handle_sagasmith_configure(request)
         return None
 
     def _handle_commands(self, request: WsRequest) -> Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
         return _http_json_response({"commands": builtin_command_palette()})
+
+    def _handle_sagasmith(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        from nanobot.webui.sagasmith_api import sagasmith_payload
+
+        try:
+            return _http_json_response(sagasmith_payload())
+        except (OSError, ValueError) as exc:
+            return _http_error(400, str(exc))
+
+    def _handle_sagasmith_configure(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        from nanobot.webui.sagasmith_api import configure_sagasmith_modes
+
+        query = _parse_query(request.path)
+        modes = [value for value in query.get("mode", []) if value]
+        if not modes:
+            return _http_error(400, "at least one mode is required")
+        try:
+            return _http_json_response(configure_sagasmith_modes(modes))
+        except (OSError, ValueError) as exc:
+            return _http_error(400, str(exc))
 
     def _handle_workspaces(self, connection: Any, request: WsRequest) -> Response:
         if not self.check_api_token(request):

@@ -75,6 +75,7 @@ from nanobot.cli.gateway import create_gateway_app  # noqa: E402
 from nanobot.cli.stream import StreamRenderer, ThinkingSpinner  # noqa: E402
 from nanobot.config.paths import get_workspace_path, is_default_workspace  # noqa: E402
 from nanobot.config.schema import Config  # noqa: E402
+from nanobot.sagasmith_local.cli import app as sagasmith_app  # noqa: E402
 from nanobot.utils.evaluator import evaluate_response  # noqa: E402
 from nanobot.utils.helpers import sync_workspace_templates  # noqa: E402
 from nanobot.utils.restart import (  # noqa: E402
@@ -213,6 +214,7 @@ app = typer.Typer(
     help=f"{__logo__} nanobot - Personal AI Assistant",
     no_args_is_help=True,
 )
+app.add_typer(sagasmith_app, name="sagasmith")
 
 console = Console()
 EXIT_COMMANDS = {"exit", "quit", "/exit", "/quit", ":q"}

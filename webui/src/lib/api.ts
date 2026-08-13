@@ -15,6 +15,8 @@ import type {
   SessionDeleteResult,
   SessionAutomationsPayload,
   SettingsPayload,
+  SagaSmithMode,
+  SagaSmithStackPayload,
   SettingsUpdate,
   SidebarStatePayload,
   SkillDetail,
@@ -302,6 +304,33 @@ export async function fetchSettings(
     `${base}/api/settings`,
     token,
     undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function fetchSagaSmithStack(
+  token: string,
+  base: string = "",
+): Promise<SagaSmithStackPayload> {
+  return request<SagaSmithStackPayload>(
+    `${base}/api/sagasmith`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function configureSagaSmithStack(
+  token: string,
+  modes: SagaSmithMode[],
+  base: string = "",
+): Promise<SagaSmithStackPayload> {
+  const query = new URLSearchParams();
+  modes.forEach((mode) => query.append("mode", mode));
+  return request<SagaSmithStackPayload>(
+    `${base}/api/sagasmith/configure?${query}`,
+    token,
+    { method: "POST" },
     API_READ_TIMEOUT_MS,
   );
 }

@@ -376,6 +376,11 @@ class MCPServerConfig(Base):
     inject_principal: bool = (
         False  # Replace MCP principal_id arguments with the trusted inbound sender identity.
     )
+    session_scoped: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("sessionScoped", "session_scoped"),
+        serialization_alias="sessionScoped",
+    )  # Give each logical Agent session its own MCP session and mutable native schema.
 
 
 def _lazy_default(module_path: str, class_name: str) -> Any:

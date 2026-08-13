@@ -84,14 +84,16 @@ SagaSmith/
   sagasmith-coc-ui/             # CoC UI
 ```
 
-Run one BAT from the Agent repository:
+Install any combination from the Agent repository. Omitting `--mode` selects all three:
 
 ```powershell
 cd SagaSmith-agent
-.\install-all.bat
+uv run nanobot sagasmith install --mode dnd
+uv run nanobot sagasmith install --mode coc --mode narrative
+uv run nanobot sagasmith install
 ```
 
-The current local installer is D&D-first: it syncs Agent and the D&D MCP with editable Core/system runtimes, builds the Agent and D&D Web UIs, checks D&D/ModuleGen Skills, and validates the public D&D catalog. It never overwrites `config/config.json` and never imports or activates a Pack in a campaign.
+The Python installer keeps D&D, CoC, and Narrative optional and independently versioned. It reconciles only SagaSmith-owned config fields, builds only selected UIs, and never imports or activates a Pack.
 
 Create the repo-local Agent configuration after installation:
 
@@ -99,21 +101,21 @@ Create the repo-local Agent configuration after installation:
 uv run nanobot onboard --wizard --config config\config.json --workspace workspace
 ```
 
-Then follow the [MCP configuration guide](docs/guides/configure-mcp-tools.md) for the provider, model preset, channels, Full Skills, and both `sagasmith_dnd` and `sagasmith_coc`. When a config already exists, the installer performs a read-only runtime preflight; an incomplete config is reported as a next step and is never overwritten. Re-audit an existing installation with:
+Then follow the [MCP configuration guide](docs/guides/configure-mcp-tools.md). Re-audit an existing installation with:
 
 ```powershell
-.\install-all.bat --verify-only
+uv run nanobot sagasmith install --verify-only
 ```
 
-After configuration passes, [`start.bat`](start.bat) starts the Agent, both stdio MCP children, and the D&D UI Gateway on `127.0.0.1:8766`:
+After configuration passes, start the selected services and Agent:
 
 ```powershell
-.\start.bat
+uv run nanobot sagasmith start
 ```
 
 The committed public catalog contains only redistributable SRD Packs. A complete private library must be built locally from books the user owns through the current draft → Agent review → finalize flow. The installer does not copy commercial sources, generate private Packs, or choose campaign activation; import and activation remain Lobby content-control operations.
 
-The UI connects to `http://127.0.0.1:8766` by default. Non-loopback access requires an explicit bearer token and origin allowlist; without a token, the adapter rejects remote requests. Keep machine paths and secrets out of Git and reference provider keys through environment variables.
+D&D and CoC Workbenches use ports 8766 and 8768. Non-loopback access requires an explicit bearer token and origin allowlist. Keep machine paths and secrets out of Git and reference provider keys through environment variables.
 
 ## Generic quick start
 

@@ -82,11 +82,13 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
   checkVersion,
+  configureSagaSmithStack,
   createModelConfiguration,
   disableNanobotFeature,
   enableNanobotFeature,
   fetchAutomations,
   fetchSettings,
+  fetchSagaSmithStack,
   fetchSettingsUsage,
   fetchCliApps,
   fetchMcpPresets,
@@ -144,6 +146,8 @@ import type {
   ProviderModelsPayload,
   SessionAutomationJob,
   SettingsPayload,
+  SagaSmithMode,
+  SagaSmithStackPayload,
   SkillSummary,
   TranscriptionSettingsUpdate,
   WebSearchSettingsUpdate,
@@ -6347,6 +6351,7 @@ function RuntimeSettings({
   };
   return (
     <div className="space-y-7">
+      <SagaSmithStackSettings />
       <section>
         <SettingsSectionTitle>{tx("settings.sections.identity", "Identity")}</SettingsSectionTitle>
         <SettingsGroup>
@@ -6503,6 +6508,114 @@ function RuntimeSettings({
         </SettingsGroup>
       </section>
     </div>
+  );
+}
+
+function SagaSmithStackSettings() {
+  const { token } = useClient();
+  const { t } = useTranslation();
+  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  const [payload, setPayload] = useState<SagaSmithStackPayload | null>(null);
+  const [selected, setSelected] = useState<Set<SagaSmithMode>>(new Set());
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchSagaSmithStack(token)
+      .then((value) => {
+        if (cancelled) return;
+        setPayload(value);
+        setSelected(new Set(value.modes));
+      })
+      .catch((reason) => {
+        if (!cancelled) setError(reason instanceof Error ? reason.message : String(reason));
+      });
+    return () => { cancelled = true; };
+  }, [token]);
+
+  const toggle = (mode: SagaSmithMode) => {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(mode)) next.delete(mode);
+      else next.add(mode);
+      return next;
+    });
+  };
+  const save = async () => {
+    if (!selected.size) {
+      setError(tx("settings.sagasmith.selectMode", "Select at least one mode."));
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const next = await configureSagaSmithStack(token, Array.from(selected));
+      setPayload(next);
+      setSelected(new Set(next.modes));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const labels: Record<SagaSmithMode, string> = {
+    dnd: "D&D 5e",
+    coc: "Call of Cthulhu 7e",
+    narrative: tx("settings.sagasmith.narrative", "Narrative"),
+  };
+  return (
+    <section>
+      <SettingsSectionTitle>{tx("settings.sections.sagasmith", "SagaSmith local stack")}</SettingsSectionTitle>
+      <SettingsGroup>
+        <SettingsRow
+          title={tx("settings.sagasmith.modes", "Installed modes")}
+          description={tx("settings.sagasmith.help", "Each mode is optional. Configuration changes only SagaSmith-owned MCP and Skill entries.")}
+        >
+          <div className="flex flex-wrap justify-end gap-2">
+            {(Object.keys(labels) as SagaSmithMode[]).map((mode) => (
+              <Button
+                key={mode}
+                type="button"
+                size="sm"
+                variant={selected.has(mode) ? "default" : "outline"}
+                className="rounded-full"
+                onClick={() => toggle(mode)}
+              >
+                {selected.has(mode) ? <Check className="mr-1.5 h-3.5 w-3.5" /> : null}
+                {labels[mode]}
+              </Button>
+            ))}
+          </div>
+        </SettingsRow>
+        <SettingsRow
+          title={tx("settings.sagasmith.health", "Local services")}
+          description={error || (payload?.doctor.ok
+            ? tx("settings.sagasmith.ready", "Installed contracts are healthy.")
+            : tx("settings.sagasmith.cli", "Use `nanobot sagasmith doctor` for installation diagnostics."))}
+        >
+          <span className={cn("text-xs font-medium", payload?.doctor.ok ? "text-emerald-600" : "text-muted-foreground")}>{payload?.doctor.ok ? "READY" : "CHECK"}</span>
+        </SettingsRow>
+        {payload?.workbenches ? (
+          <SettingsRow title={tx("settings.sagasmith.workbenches", "Workbenches")} description={payload.state_root}>
+            <div className="flex flex-wrap justify-end gap-2">
+              {Object.entries(payload.workbenches).map(([name, url]) => url ? (
+                <Button key={name} size="sm" variant="outline" className="rounded-full" asChild>
+                  <a href={url} target="_blank" rel="noreferrer">{name}<ExternalLink className="ml-1.5 h-3.5 w-3.5" /></a>
+                </Button>
+              ) : null)}
+            </div>
+          </SettingsRow>
+        ) : null}
+        <div className="flex justify-end border-t border-border/60 px-4 py-3">
+          <Button size="sm" className="rounded-full" disabled={busy} onClick={() => void save()}>
+            {busy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : null}
+            {tx("settings.sagasmith.save", "Save modes")}
+          </Button>
+        </div>
+      </SettingsGroup>
+    </section>
   );
 }
 

@@ -160,6 +160,41 @@ async def test_connect_mcp_retries_when_no_servers_connect(
 
 
 @pytest.mark.asyncio
+async def test_session_scoped_mcp_uses_independent_connections_and_native_registries(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    config = MCPServerConfig(command="fake", sessionScoped=True)
+    loop = _make_loop(tmp_path, mcp_servers={"sagasmith_dnd": config})
+    connections: list[SimpleNamespace] = []
+
+    async def _fake_connect(_servers, registry, **_kwargs):
+        marker = f"mcp_sagasmith_dnd_session_{len(connections)}"
+        registry.register(_FakeMcpTool(marker))
+
+        async def close() -> None:
+            return None
+
+        connection = SimpleNamespace(aclose=close)
+        connections.append(connection)
+        return {"sagasmith_dnd": connection}
+
+    monkeypatch.setattr("nanobot.agent.tools.mcp.connect_mcp_servers", _fake_connect)
+
+    first = await loop._tools_for_session("websocket:first")
+    second = await loop._tools_for_session("websocket:second")
+
+    assert first is await loop._tools_for_session("websocket:first")
+    assert first is not second
+    assert "mcp_sagasmith_dnd_session_0" in first
+    assert "mcp_sagasmith_dnd_session_0" not in second
+    assert "mcp_sagasmith_dnd_session_1" in second
+    assert loop._mcp_servers == {}
+    assert set(loop._session_mcp_stacks) == {"websocket:first", "websocket:second"}
+    await loop.close_mcp()
+
+
+@pytest.mark.asyncio
 async def test_agent_loop_run_closes_mcp_from_connection_owner_task(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,

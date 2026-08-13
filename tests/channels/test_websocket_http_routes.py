@@ -2219,3 +2219,64 @@ def test_bootstrap_secret_also_enforced_on_localhost(bus: MagicMock) -> None:
     channel = _ch(bus, host="0.0.0.0", tokenIssueSecret="s3cret")
     resp = channel.gateway.http._handle_bootstrap(_LOCAL, _NO_HEADERS)
     assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_sagasmith_stack_routes_require_auth_and_preserve_optional_modes(
+    bus: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nanobot.webui import sagasmith_api
+
+    configured: list[list[str]] = []
+    monkeypatch.setattr(
+        sagasmith_api,
+        "sagasmith_payload",
+        lambda: {"modes": ["dnd"], "running": False},
+    )
+    monkeypatch.setattr(
+        sagasmith_api,
+        "configure_sagasmith_modes",
+        lambda modes: configured.append(modes) or {"modes": modes, "changed": True},
+    )
+    channel = _ch(bus, session_manager=_seed_session(tmp_path), port=_free_port())
+
+    denied = await channel.gateway.http._dispatch_misc_routes(
+        _LOCAL,
+        _FakeReq({}, path="/api/sagasmith"),
+        "/api/sagasmith",
+    )
+    assert denied is not None
+    assert denied.status_code == 401
+
+    token = channel.gateway.tokens.issue_api_token(300)
+    auth = {"Authorization": f"Bearer {token}"}
+    status = await channel.gateway.http._dispatch_misc_routes(
+        _LOCAL,
+        _FakeReq(auth, path="/api/sagasmith"),
+        "/api/sagasmith",
+    )
+    assert status is not None
+    assert status.status_code == 200
+    assert json.loads(status.body)["modes"] == ["dnd"]
+
+    missing = await channel.gateway.http._dispatch_misc_routes(
+        _LOCAL,
+        _FakeReq(auth, path="/api/sagasmith/configure"),
+        "/api/sagasmith/configure",
+    )
+    assert missing is not None
+    assert missing.status_code == 400
+
+    configured_response = await channel.gateway.http._dispatch_misc_routes(
+        _LOCAL,
+        _FakeReq(
+            auth,
+            path="/api/sagasmith/configure?mode=dnd&mode=narrative",
+        ),
+        "/api/sagasmith/configure",
+    )
+    assert configured_response is not None
+    assert configured_response.status_code == 200
+    assert configured == [["dnd", "narrative"]]

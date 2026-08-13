@@ -1695,7 +1695,17 @@ async def reload_servers(state: Any, registry: ToolRegistry) -> dict[str, Any]:
             from nanobot.config.loader import load_config, resolve_config_env_vars
 
             config = resolve_config_env_vars(load_config())
-            next_servers = dict(config.tools.mcp_servers)
+            configured_servers = dict(config.tools.mcp_servers)
+            next_servers = {
+                name: server
+                for name, server in configured_servers.items()
+                if not getattr(server, "session_scoped", False)
+            }
+            next_session_servers = {
+                name: server
+                for name, server in configured_servers.items()
+                if getattr(server, "session_scoped", False)
+            }
         except Exception as exc:
             logger.warning("MCP hot reload could not read config: {}", exc)
             return {
@@ -1704,6 +1714,17 @@ async def reload_servers(state: Any, registry: ToolRegistry) -> dict[str, Any]:
                 "requires_restart": True,
                 "error": str(exc),
             }
+
+        current_session_servers = dict(getattr(state, "_session_mcp_servers", {}))
+        session_changed = {
+            name: _server_signature(server)
+            for name, server in current_session_servers.items()
+        } != {
+            name: _server_signature(server)
+            for name, server in next_session_servers.items()
+        }
+        if session_changed:
+            state._session_mcp_servers = next_session_servers
 
         current_servers = dict(state._mcp_servers)
         current_names = set(current_servers)
@@ -1747,8 +1768,19 @@ async def reload_servers(state: Any, registry: ToolRegistry) -> dict[str, Any]:
             state._mcp_stacks.update(connected)
             _attach_reconnect_handlers(state, registry, connected)
 
+        # A session registry is a point-in-time clone of the global registry.
+        # Recreate it after either static or session-scoped MCP configuration
+        # changes so existing conversations never keep stale wrappers/schemas.
+        if session_changed or removed or added or changed or connected:
+            for connections in getattr(state, "_session_mcp_stacks", {}).values():
+                for connection in connections.values():
+                    await connection.aclose()
+            getattr(state, "_session_mcp_stacks", {}).clear()
+            getattr(state, "_session_mcp_tools", {}).clear()
+            getattr(state, "_session_mcp_locks", {}).clear()
+
         failed = sorted(set(to_connect) - set(connected))
-        unchanged = not removed and not added and not changed and not retry_missing
+        unchanged = not removed and not added and not changed and not retry_missing and not session_changed
         ok = not failed
         if failed:
             message = "MCP config reloaded, but some servers did not connect: " + ", ".join(failed)
@@ -1778,6 +1810,7 @@ async def reload_servers(state: Any, registry: ToolRegistry) -> dict[str, Any]:
             "retried": retry_missing,
             "connected": sorted(state._mcp_stacks),
             "configured": sorted(state._mcp_servers),
+            "session_scoped": sorted(getattr(state, "_session_mcp_servers", {})),
             "failed": failed,
             "tools_removed": tools_removed,
             "requires_restart": False,

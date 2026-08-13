@@ -53,6 +53,11 @@ class SkillsLoader:
         if not base.exists():
             return []
         entries: list[dict[str, str]] = []
+        root_skill = base / "SKILL.md"
+        if root_skill.is_file():
+            name = base.name
+            if skip_names is None or name not in skip_names:
+                entries.append({"name": name, "path": str(root_skill), "source": source})
         for skill_dir in base.iterdir():
             if not skill_dir.is_dir():
                 continue
@@ -109,6 +114,9 @@ class SkillsLoader:
             roots.append(self.builtin_skills)
         roots.extend(self.external_skill_dirs)
         for root in roots:
+            root_skill = root / "SKILL.md"
+            if root.name == name and root_skill.exists():
+                return root_skill.read_text(encoding="utf-8")
             path = root / name / "SKILL.md"
             if path.exists():
                 return path.read_text(encoding="utf-8")

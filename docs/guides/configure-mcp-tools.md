@@ -23,7 +23,20 @@ Use a fixed `enabledTools` list for a server with a fixed catalogue. Use `['*']`
 server intentionally changes its native tool list with MCP `tools/list_changed`; nanobot refreshes
 the registry whenever it receives that notification.
 
-## SagaSmith D&D
+## SagaSmith local modes
+
+Prefer the owned reconciler instead of hand-editing these entries:
+
+```powershell
+uv run nanobot sagasmith configure --mode dnd
+uv run nanobot sagasmith configure --mode coc --mode narrative
+```
+
+Each SagaSmith server uses `sessionScoped: true`. Nanobot then creates one MCP
+connection and one mutable native tool registry per logical Agent session, so
+campaign, principal, phase, and `tools/list_changed` cannot leak between chats.
+
+### D&D
 
 SagaSmith D&D uses one session-aware `exposure` protocol and a mutable native tool list. Configure
 the trusted D&D server with `enabledTools: ["*"]`; the server initially publishes only its six core
@@ -44,6 +57,7 @@ tools and publishes selected domain tools after `exposure(set)`.
         "headers": {},
         "toolTimeout": 900,
         "injectPrincipal": true,
+        "sessionScoped": true,
         "enabledTools": ["*"],
         "exposeResourcesAndPrompts": true
       }
@@ -53,13 +67,16 @@ tools and publishes selected domain tools after `exposure(set)`.
 }
 ```
 
-The checked-in D&D-first helper updates this server entry and the loopback SSRF allowlist, removes
-the known `sagasmith_coc` runtime entry, and preserves providers, secrets, and unrelated servers.
-It creates `config/config.json.bak` before an explicit write:
+The reconciler preserves providers, secrets, unrelated servers, and unrelated
+Skill roots. It removes only stale SagaSmith-owned entries and creates
+`config/config.json.bak` before an explicit write.
 
-```powershell
-.venv\Scripts\python.exe scripts\configure_dnd_local.py --apply
-```
+### CoC and Narrative
+
+CoC uses `http://127.0.0.1:8769/mcp` with the same dynamic exposure contract.
+Its authenticated sticky-session Workbench gateway is on port 8768 and binds
+the principal server-side. Narrative remains an Agent-owned session-scoped
+stdio child because it currently has no independent browser client.
 
 The six always-available tools are `exposure`, `server_capabilities`, `storage_status`,
 `campaign_query`, `game_phase`, and `skill_query`. Do not configure retired exposure facades or a

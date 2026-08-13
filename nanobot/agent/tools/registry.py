@@ -32,6 +32,12 @@ class ToolRegistry:
         self._tools[tool.name] = tool
         self._cached_definitions = None
 
+    def clone(self) -> "ToolRegistry":
+        """Copy registrations so one session may mutate MCP tools independently."""
+        cloned = ToolRegistry()
+        cloned._tools = dict(self._tools)
+        return cloned
+
     def unregister(self, name: str) -> None:
         """Unregister a tool by name."""
         self._tools.pop(name, None)

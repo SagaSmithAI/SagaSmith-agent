@@ -392,13 +392,23 @@ class AgentLoop:
         )
         self._unified_session = unified_session
         self._running = False
-        self._mcp_servers = mcp_servers or {}
+        configured_mcp_servers = mcp_servers or {}
+        self._mcp_servers = {
+            name: config
+            for name, config in configured_mcp_servers.items()
+            if not getattr(config, "session_scoped", False)
+        }
+        self._session_mcp_servers = {
+            name: config
+            for name, config in configured_mcp_servers.items()
+            if getattr(config, "session_scoped", False)
+        }
         self._mcp_stacks: dict[str, MCPConnection] = {}
+        self._session_mcp_tools: dict[str, ToolRegistry] = {}
+        self._session_mcp_stacks: dict[str, dict[str, MCPConnection]] = {}
+        self._session_mcp_locks: dict[str, asyncio.Lock] = {}
         self._mcp_connecting = False
         self._runtime_context_providers: list[RuntimeContextProvider] = []
-        self.register_runtime_context_provider(
-            agent_context.mcp_routing_context_provider(self.tools)
-        )
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
         self._background_tasks: list[asyncio.Task] = []
         self._session_locks: dict[str, asyncio.Lock] = {}
@@ -595,6 +605,93 @@ class AgentLoop:
         """Connect configured MCP servers."""
         await agent_context.connect_mcp(self, self.tools)
 
+    async def _tools_for_session(self, session_key: str) -> ToolRegistry:
+        """Return a registry whose mutable MCP schemas belong only to this session."""
+        if not self._session_mcp_servers:
+            return self.tools
+        existing = self._session_mcp_tools.get(session_key)
+        if existing is not None:
+            return existing
+        from nanobot.agent.tools.mcp import connect_mcp_servers
+
+        lock = self._session_mcp_locks.setdefault(session_key, asyncio.Lock())
+        async with lock:
+            existing = self._session_mcp_tools.get(session_key)
+            if existing is not None:
+                return existing
+            registry = self.tools.clone()
+            connections = await connect_mcp_servers(
+                self._session_mcp_servers,
+                registry,
+                session_store=self.sessions,
+            )
+            missing = sorted(set(self._session_mcp_servers) - set(connections))
+            if missing:
+                for connection in connections.values():
+                    await connection.aclose()
+                raise RuntimeError(
+                    "Session-scoped MCP servers did not connect: " + ", ".join(missing)
+                )
+            self._session_mcp_tools[session_key] = registry
+            self._session_mcp_stacks[session_key] = connections
+            self._attach_session_mcp_reconnect(session_key, registry)
+            return registry
+
+    def _attach_session_mcp_reconnect(
+        self,
+        session_key: str,
+        registry: ToolRegistry,
+    ) -> None:
+        for tool_name in registry.tool_names:
+            tool = registry.get(tool_name)
+            server_name = getattr(tool, "_server_name", None)
+            setter = getattr(tool, "set_reconnect_handler", None)
+            if server_name and callable(setter):
+                setter(
+                    partial(
+                        self._reconnect_session_mcp,
+                        session_key,
+                        server_name,
+                        tool_name,
+                    )
+                )
+
+    async def _reconnect_session_mcp(
+        self,
+        session_key: str,
+        server_name: str,
+        tool_name: str,
+    ) -> Any:
+        from nanobot.agent.tools.mcp import connect_mcp_servers
+
+        lock = self._session_mcp_locks.setdefault(session_key, asyncio.Lock())
+        async with lock:
+            registry = self._session_mcp_tools.get(session_key)
+            if registry is None:
+                return None
+            connection = self._session_mcp_stacks.get(session_key, {}).pop(
+                server_name, None
+            )
+            if connection is not None:
+                await connection.aclose()
+            for registered_name in list(registry.tool_names):
+                registered = registry.get(registered_name)
+                if getattr(registered, "_server_name", None) == server_name:
+                    registry.unregister(registered_name)
+            config = self._session_mcp_servers.get(server_name)
+            if config is None:
+                return None
+            connected = await connect_mcp_servers(
+                {server_name: config},
+                registry,
+                session_store=self.sessions,
+            )
+            if server_name not in connected:
+                return None
+            self._session_mcp_stacks.setdefault(session_key, {}).update(connected)
+            self._attach_session_mcp_reconnect(session_key, registry)
+            return registry.get(tool_name)
+
     def register_runtime_context_provider(
         self,
         provider: RuntimeContextProvider,
@@ -739,6 +836,7 @@ class AgentLoop:
         tools = ctx.tools or self.tools
         providers = [
             *tools.get_runtime_context_providers(),
+            agent_context.mcp_routing_context_provider(tools),
             *self._runtime_context_providers,
         ]
         assert ctx.request_context is not None
@@ -1384,6 +1482,12 @@ class AgentLoop:
         if self._background_tasks:
             await asyncio.gather(*self._background_tasks, return_exceptions=True)
             self._background_tasks.clear()
+        for connections in self._session_mcp_stacks.values():
+            for connection in connections.values():
+                await connection.aclose()
+        self._session_mcp_stacks.clear()
+        self._session_mcp_tools.clear()
+        self._session_mcp_locks.clear()
         await agent_context.close_mcp(self)
 
     def _schedule_background(self, coro) -> None:
@@ -1534,6 +1638,8 @@ class AgentLoop:
             )
 
         key = session_key or msg.session_key
+        if tools is None:
+            tools = await self._tools_for_session(key)
         t0 = time.time()
         ctx = TurnContext(
             msg=msg,

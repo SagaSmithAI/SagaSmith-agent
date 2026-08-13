@@ -981,6 +981,26 @@ export interface FilePreviewPayload {
   truncated: boolean;
 }
 
+export type SagaSmithMode = "dnd" | "coc" | "narrative";
+
+export interface SagaSmithStackPayload {
+  schema: string;
+  installed: boolean;
+  modes: SagaSmithMode[];
+  source: string;
+  revision: number;
+  state_root: string;
+  running: boolean;
+  processes: Array<{ name: string; pid: number; running: boolean; log: string }>;
+  workbenches: Partial<Record<"agent" | SagaSmithMode, string>>;
+  changed?: boolean;
+  requires_restart?: boolean;
+  doctor: {
+    ok: boolean;
+    checks: Array<{ name: string; ok: boolean; detail: string }>;
+  };
+}
+
 export type Outbound =
   | { type: "new_chat"; workspace_scope?: WorkspaceScopePayload }
   | { type: "fork_chat"; source_chat_id: string; before_user_index: number; title?: string }

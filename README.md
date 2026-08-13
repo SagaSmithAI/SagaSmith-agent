@@ -94,14 +94,16 @@ SagaSmith/
   sagasmith-coc-ui/             # CoC UI
 ```
 
-从 Agent 仓库运行一个 BAT 即可安装完整源码工作区：
+从 Agent 仓库选择任意模式组合；不传 `--mode` 时安装三个模式：
 
 ```powershell
 cd SagaSmith-agent
-.\install-all.bat
+uv run nanobot sagasmith install --mode dnd
+uv run nanobot sagasmith install --mode coc --mode narrative
+uv run nanobot sagasmith install
 ```
 
-当前本地安装器以 D&D 为核心：同步 Agent、D&D MCP 及其 editable Core/系统运行时；构建 Agent 与 D&D Web UI；核对 D&D、ModuleGen Skills；最后验证公开 D&D 内容目录。安装器不会覆盖 `config/config.json`，也不会把任何 Pack 导入或激活到战役中。
+Python 安装器让 D&D、CoC、Narrative 保持独立可选，只维护 SagaSmith 自己的配置字段并仅构建所选 UI。它不会导入或激活 Pack。
 
 安装后配置 repo-local Agent：
 
@@ -109,21 +111,21 @@ cd SagaSmith-agent
 uv run nanobot onboard --wizard --config config\config.json --workspace workspace
 ```
 
-再按 [MCP 配置指南](docs/guides/configure-mcp-tools.md) 配置 provider、model preset、channel、Full Skills，以及 `sagasmith_dnd` / `sagasmith_coc`。配置存在时，安装器会执行只读 runtime preflight；配置尚未就绪只会给出下一步，不会覆盖它。随时可重新审计：
+再按 [MCP 配置指南](docs/guides/configure-mcp-tools.md) 配置 provider、model preset 与 channel。随时可重新审计：
 
 ```powershell
-.\install-all.bat --verify-only
+uv run nanobot sagasmith install --verify-only
 ```
 
-配置通过后，用 [`start.bat`](start.bat) 启动 Agent、两个 stdio MCP 子进程和 `127.0.0.1:8766` 上的 D&D UI Gateway：
+配置通过后，启动所选权威服务、Workbench 与 Agent：
 
 ```powershell
-.\start.bat
+uv run nanobot sagasmith start
 ```
 
-公开目录当前只包含具备再分发许可的 SRD Pack。完整私有内容库必须由用户拥有的规则书/模组在本地通过最新 draft → Agent review → finalize 流程构建；安装 BAT 不复制商业书籍、不生成私有 Pack，也不替用户选择 campaign activation。最终导入与激活属于 Lobby 的内容控制流程。
+公开目录当前只包含具备再分发许可的 SRD Pack。完整私有内容库必须由用户拥有的规则书/模组在本地通过最新 draft → Agent review → finalize 流程构建；安装器不复制商业书籍、不生成私有 Pack，也不替用户选择 campaign activation。最终导入与激活属于 Lobby 的内容控制流程。
 
-UI 默认连接 `http://127.0.0.1:8766`。非本机访问必须设置 `SAGASMITH_DND_GATEWAY_TOKEN`、显式 origin allowlist 与 UI 对应 token；无 token 时 gateway 拒绝所有非 loopback 请求。
+D&D 与 CoC Workbench 默认位于 8766 与 8768。非本机访问必须设置 bearer token 和显式 origin allowlist；无 token 时 gateway 拒绝所有非 loopback 请求。
 
 > `config/config.json` 通常包含本机路径与密钥，不应提交。使用环境变量引用 provider secret。
 
@@ -146,7 +148,7 @@ nanobot onboard --wizard
 nanobot gateway
 ```
 
-初始化默认创建 `~/.nanobot/config.json` 与 `~/.nanobot/workspace/`。本仓库的 `start.bat` 使用 repo-local `config/config.json` 和 `workspace/`，适合 SagaSmith 整体工作区。
+初始化默认创建 `~/.nanobot/config.json` 与 `~/.nanobot/workspace/`。统一本地栈命令可通过 `--config` 和 `SAGASMITH_LOCAL_HOME` 使用 repo-local 配置与状态目录。
 
 ## MCP 配置原则
 
