@@ -1,5 +1,6 @@
 import json
 from copy import deepcopy
+from pathlib import Path
 
 import pytest
 
@@ -9,8 +10,10 @@ from nanobot.agent.npc_conversation import (
     normalize_worker_proposal,
 )
 from nanobot.agent.tools.context import RequestContext, request_context
+from nanobot.agent.tools.mcp import connect_mcp_servers
 from nanobot.agent.tools.npc_conversation import NpcConversationWorkerTool
 from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.config.schema import MCPServerConfig
 from nanobot.providers.base import GenerationSettings, LLMResponse
 from nanobot.utils.llm_runtime import LLMRuntime
 
@@ -119,6 +122,54 @@ class FakeProvider:
             content=json.dumps(proposal),
             usage={"prompt_tokens": 100, "cached_tokens": 40},
         )
+
+
+class CapsuleProposalProvider:
+    def __init__(self) -> None:
+        self.calls = []
+
+    async def chat_with_retry(self, **kwargs):
+        self.calls.append(deepcopy(kwargs))
+        prompt = json.loads(kwargs["messages"][-1]["content"])
+        actor_runtime_id = str(prompt["actor_runtime_id"])
+        actor_id = actor_runtime_id.split(":", 1)[1]
+        targets = [
+            item for item in prompt["constraints"]["allowed_target_actor_ids"] if item != actor_id
+        ]
+        proposal = {
+            "schema_version": 4,
+            "conversation_id": prompt["conversation_id"],
+            "activation_id": prompt["activation_id"],
+            "actor_runtime_id": actor_runtime_id,
+            "response_bid": {
+                "should_respond": True,
+                "urgency": 60,
+                "reason": "A direct question was asked.",
+            },
+            "private_intent": "Keep unrelated private context private.",
+            "utterance_segments": [
+                {
+                    "text": "The boat left just before dusk.",
+                    "speech_act": "answer",
+                    "truth_posture": "believes_true",
+                    "basis_refs": [prompt["constraints"]["allowed_basis_refs"][0]],
+                    "targets": targets[:1],
+                    "language": "English",
+                    "delivery": "quietly",
+                }
+            ],
+            "proposed_action": {
+                "summary": "",
+                "target_refs": [],
+                "settlement": "narrative",
+                "mechanic_hint": "",
+            },
+            "resolution_requests": [],
+            "working_deltas": {"facts": [], "actor_knowledge": [], "commitments": []},
+            "visible_cues": ["glances toward the harbor"],
+            "decision_summary": "Answer the investigator without exposing private context.",
+        }
+        return LLMResponse(content=json.dumps(proposal), usage={"prompt_tokens": 100})
 
 
 def _runtime(provider):
@@ -340,3 +391,340 @@ async def test_bridge_repairs_mcp_validation_failure_within_same_lease() -> None
     repair_payload = json.loads(provider.calls[1]["messages"][-1]["content"])
     assert "npc-conversation-proposal.v4" in repair_payload["instruction"]
     assert "raw allowed_target_actor_ids" in repair_payload["instruction"]
+
+
+@pytest.mark.asyncio
+async def test_real_coc_stdio_host_dispatches_hidden_conversation_transport(tmp_path: Path) -> None:
+    workspace = Path(__file__).resolve().parents[3]
+    coc_repo = workspace / "SagaSmith-coc-mcp"
+    executable = coc_repo / ".venv" / "Scripts" / "sagasmith-coc-mcp.exe"
+    if not executable.exists():
+        pytest.skip("the sibling CoC MCP development runtime is unavailable")
+
+    registry = ToolRegistry()
+    connections = await connect_mcp_servers(
+        {
+            "coc": MCPServerConfig(
+                command=str(executable),
+                cwd=str(coc_repo),
+                env={
+                    "SAGASMITH_COC_MCP_HOME": str(tmp_path / "coc-home"),
+                    "SAGASMITH_COC_SKILLS_DIR": str(workspace / "SagaSmith-coc-skills"),
+                    "SAGASMITH_MODULEGEN_SKILLS_DIR": str(
+                        workspace / "SagaSmith-module-gen-skills"
+                    ),
+                },
+                enabled_tools=["*"],
+                expose_resources_and_prompts=False,
+            )
+        },
+        registry,
+    )
+
+    async def invoke(tool_name: str, **arguments):
+        tool = registry.get(f"mcp_coc_{tool_name}")
+        assert tool is not None, tool_name
+        result = await tool.execute(**arguments)
+        value = json.loads(str(result))
+        return value.get("result", value)
+
+    try:
+        hidden_name = "mcp_coc_npc_conversation_transport"
+        assert hidden_name in registry.tool_names
+        assert hidden_name not in registry.definition_names()
+        await invoke("exposure", action="open")
+        await invoke("exposure", action="set", add_tool_ids=["campaign_change"])
+        campaign = await invoke(
+            "campaign_change",
+            action="create",
+            data={"name": "Agent stdio dialogue", "idempotency_key": "campaign"},
+        )
+        await invoke("exposure", action="open", campaign_id=campaign["id"])
+        await invoke(
+            "exposure",
+            action="set",
+            campaign_id=campaign["id"],
+            add_tool_ids=["campaign_change", "character_change"],
+        )
+        investigator = await invoke(
+            "character_change",
+            action="create",
+            campaign_id=campaign["id"],
+            data={
+                "name": "Morgan",
+                "character_type": "investigator",
+                "expected_campaign_revision": campaign["revision"],
+                "idempotency_key": "investigator",
+            },
+        )
+        npc = await invoke(
+            "character_change",
+            action="create",
+            campaign_id=campaign["id"],
+            data={
+                "name": "Harbormaster",
+                "character_type": "npc",
+                "summary": "Knows when the lighthouse boat departed.",
+                "expected_campaign_revision": campaign["revision"],
+                "idempotency_key": "npc",
+            },
+        )
+        await invoke(
+            "campaign_change",
+            action="set_phase",
+            campaign_id=campaign["id"],
+            data={"phase": "play", "expected_revision": campaign["revision"]},
+        )
+        await invoke(
+            "exposure",
+            action="set",
+            campaign_id=campaign["id"],
+            add_tool_ids=["npc_conversation"],
+        )
+        opened = await invoke(
+            "npc_conversation",
+            action="open",
+            campaign_id=campaign["id"],
+            data={
+                "participant_actor_ids": [investigator["id"], npc["id"]],
+                "query": "lighthouse departure",
+                "idempotency_key": "open",
+            },
+        )
+        ingested = await invoke(
+            "npc_conversation",
+            action="ingest",
+            campaign_id=campaign["id"],
+            data={
+                "conversation_id": opened["conversation_id"],
+                "event": {
+                    "type": "speech",
+                    "speaker_actor_id": investigator["id"],
+                    "content": "When did the lighthouse boat leave?",
+                    "declared_target_actor_ids": [npc["id"]],
+                },
+                "audience_facts": {
+                    "decision_id": "audience-ingest",
+                    "resolver": "agent",
+                    "perceived_actor_ids": [investigator["id"], npc["id"]],
+                    "understood_actor_ids": [investigator["id"], npc["id"]],
+                    "response_actor_ids": [npc["id"]],
+                    "partial_renditions": {},
+                    "basis_refs": [],
+                    "reason": "Both participants are face to face and share English.",
+                },
+                "expected_conversation_revision": opened["conversation_revision"],
+                "idempotency_key": "ingest",
+            },
+        )
+        activation = ingested["activations"][0]
+        provider = CapsuleProposalProvider()
+        worker = NpcConversationWorkerTool(registry)
+        with request_context(
+            RequestContext(channel="test", chat_id="real-coc", runtime=_runtime(provider))
+        ):
+            rendered = await worker.execute(
+                "activate",
+                opened["conversation_id"],
+                campaign_id=campaign["id"],
+                activation=activation,
+                mcp_server="coc",
+            )
+        result = json.loads(rendered)
+        assert result["status"] == "publication_ready"
+        assert result["publication"]["speech"] == "The boat left just before dusk."
+        assert "private_intent" not in rendered
+        assert "proposal" not in rendered
+        published = await invoke(
+            "npc_conversation",
+            action="publish",
+            campaign_id=campaign["id"],
+            data={
+                "conversation_id": opened["conversation_id"],
+                "publication_id": result["publication"]["publication_id"],
+                "audience_facts": {
+                    "decision_id": "audience-publish",
+                    "resolver": "agent",
+                    "perceived_actor_ids": [investigator["id"], npc["id"]],
+                    "understood_actor_ids": [investigator["id"], npc["id"]],
+                    "response_actor_ids": [],
+                    "partial_renditions": {},
+                    "basis_refs": [],
+                    "reason": "The reply is spoken clearly in shared English.",
+                },
+                "expected_conversation_revision": result["conversation_revision"],
+                "idempotency_key": "publish",
+            },
+        )
+        assert published["publication"]["speech"] == "The boat left just before dusk."
+    finally:
+        for connection in connections.values():
+            await connection.aclose()
+
+
+@pytest.mark.asyncio
+async def test_real_dnd_stdio_host_dispatches_hidden_conversation_transport(tmp_path: Path) -> None:
+    workspace = Path(__file__).resolve().parents[3]
+    dnd_repo = workspace / "SagaSmith-dnd-mcp"
+    executable = dnd_repo / ".venv" / "Scripts" / "sagasmith-dnd-mcp.exe"
+    if not executable.exists():
+        pytest.skip("the sibling D&D MCP development runtime is unavailable")
+
+    registry = ToolRegistry()
+    connections = await connect_mcp_servers(
+        {
+            "dnd": MCPServerConfig(
+                command=str(executable),
+                cwd=str(dnd_repo),
+                env={
+                    "SAGASMITH_DND_MCP_HOME": str(tmp_path / "dnd-home"),
+                    "SAGASMITH_DND_SKILLS_DIR": str(workspace / "SagaSmith-dnd-skills"),
+                    "SAGASMITH_MODULEGEN_SKILLS_DIR": str(
+                        workspace / "SagaSmith-module-gen-skills"
+                    ),
+                    "SAGASMITH_DND_MCP_AUTO_SEED": "0",
+                },
+                enabled_tools=["*"],
+                expose_resources_and_prompts=False,
+            )
+        },
+        registry,
+    )
+
+    async def invoke(tool_name: str, **arguments):
+        tool = registry.get(f"mcp_dnd_{tool_name}")
+        assert tool is not None, tool_name
+        result = await tool.execute(**arguments)
+        value = json.loads(str(result))
+        return value.get("result", value)
+
+    try:
+        hidden_name = "mcp_dnd_npc_conversation_transport"
+        assert hidden_name in registry.tool_names
+        assert hidden_name not in registry.definition_names()
+        await invoke("exposure", action="open")
+        await invoke("exposure", action="set", add_tool_ids=["campaign_create"])
+        campaign = await invoke(
+            "campaign_create",
+            name="Agent stdio dialogue",
+            idempotency_key="campaign",
+        )
+        await invoke("exposure", action="open", campaign_id=campaign["id"])
+        await invoke(
+            "exposure",
+            action="set",
+            campaign_id=campaign["id"],
+            add_tool_ids=["character_create_from"],
+        )
+        npc = await invoke(
+            "character_create_from",
+            mode="direct",
+            payload={
+                "campaign_id": campaign["id"],
+                "name": "Mara",
+                "character_type": "npc",
+                "summary": "Knows when the harbor watch changed.",
+            },
+            idempotency_key="npc",
+        )
+        pc = await invoke(
+            "character_create_from",
+            mode="direct",
+            payload={"campaign_id": campaign["id"], "name": "Aria"},
+            idempotency_key="pc",
+        )
+        current = await invoke(
+            "campaign_query", view="get", payload={"campaign_id": campaign["id"]}
+        )
+        await invoke(
+            "game_phase",
+            campaign_id=campaign["id"],
+            action="set",
+            tool_profile="play",
+            expected_revision=current["revision"],
+            idempotency_key="play",
+        )
+        await invoke(
+            "exposure",
+            action="set",
+            campaign_id=campaign["id"],
+            add_tool_ids=["npc_conversation"],
+        )
+        opened = await invoke(
+            "npc_conversation",
+            campaign_id=campaign["id"],
+            action="open",
+            payload={
+                "participant_actor_ids": [pc["id"], npc["id"]],
+                "query": "harbor watch",
+                "idempotency_key": "open",
+            },
+        )
+        ingested = await invoke(
+            "npc_conversation",
+            campaign_id=campaign["id"],
+            action="ingest",
+            payload={
+                "conversation_id": opened["conversation_id"],
+                "event": {
+                    "type": "speech",
+                    "speaker_actor_id": pc["id"],
+                    "content": "When did the harbor watch change?",
+                    "language": "Common",
+                    "declared_target_actor_ids": [npc["id"]],
+                },
+                "audience_facts": {
+                    "decision_id": "audience-ingest",
+                    "resolver": "agent",
+                    "perceived_actor_ids": [pc["id"], npc["id"]],
+                    "understood_actor_ids": [pc["id"], npc["id"]],
+                    "response_actor_ids": [npc["id"]],
+                    "partial_renditions": {},
+                    "basis_refs": ["scene:current"],
+                    "reason": "Both participants are face to face and share Common.",
+                },
+                "expected_conversation_revision": opened["conversation_revision"],
+                "idempotency_key": "ingest",
+            },
+        )
+        provider = CapsuleProposalProvider()
+        worker = NpcConversationWorkerTool(registry)
+        with request_context(
+            RequestContext(channel="test", chat_id="real-dnd", runtime=_runtime(provider))
+        ):
+            rendered = await worker.execute(
+                "activate",
+                opened["conversation_id"],
+                campaign_id=campaign["id"],
+                activation=ingested["activations"][0],
+                mcp_server="dnd",
+            )
+        result = json.loads(rendered)
+        assert result["status"] == "publication_ready"
+        assert "private_intent" not in rendered
+        assert "proposal" not in rendered
+        published = await invoke(
+            "npc_conversation",
+            campaign_id=campaign["id"],
+            action="publish",
+            payload={
+                "conversation_id": opened["conversation_id"],
+                "publication_id": result["publication"]["publication_id"],
+                "audience_facts": {
+                    "decision_id": "audience-publish",
+                    "resolver": "agent",
+                    "perceived_actor_ids": [pc["id"], npc["id"]],
+                    "understood_actor_ids": [pc["id"], npc["id"]],
+                    "response_actor_ids": [],
+                    "partial_renditions": {},
+                    "basis_refs": ["scene:current"],
+                    "reason": "The reply is spoken clearly in shared Common.",
+                },
+                "expected_conversation_revision": result["conversation_revision"],
+                "idempotency_key": "publish",
+            },
+        )
+        assert published["publication"]["speech"] == "The boat left just before dusk."
+    finally:
+        for connection in connections.values():
+            await connection.aclose()

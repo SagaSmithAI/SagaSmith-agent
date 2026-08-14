@@ -824,32 +824,10 @@ class MCPToolWrapper(_MCPWrapperBase):
                 raise ValueError("MCP host_context_binding names another principal")
         else:
             campaign_id = _first_string_field(arguments, frozenset({"campaign_id"}))
-            campaign_id = campaign_id or (previous.campaign_id if previous else "")
             if not campaign_id:
                 return False
-            if not trusted_fingerprint:
-                return False
-            branch_id = _first_string_field(
-                payload,
-                frozenset({"active_branch_id", "branch_id"}),
-            )
-            requested_audience = _first_string_field(
-                arguments,
-                frozenset({"audience"}),
-            )
-            fallback_audience = previous.audience if previous else ""
-            if previous and not requested_audience:
-                if previous.role in {"owner", "dm"}:
-                    fallback_audience = "dm"
-                elif previous.role == "player":
-                    fallback_audience = "player"
-            binding = DomainContextBinding(
-                domain=self._domain_context,
-                campaign_id=campaign_id,
-                principal_fingerprint=trusted_fingerprint,
-                role=previous.role if previous else "",
-                audience=requested_audience or fallback_audience,
-                branch_id=branch_id or (previous.branch_id if previous else ""),
+            raise ValueError(
+                "campaign-scoped MCP result is missing the current host_context_binding"
             )
         changed = bind_session_context(session, binding)
         self._session_store.save(session)
@@ -1454,7 +1432,7 @@ async def connect_mcp_servers(
                 ]
             )
 
-            # SagaSmith v2 keeps activation transport out of tools/list. The
+            # SagaSmith conversation v3 keeps activation transport out of tools/list. The
             # trusted Host synthesizes one hidden wrapper only after verifying
             # the server-advertised conversation capability.
             if host_token and "server_capabilities" in available_raw_names:

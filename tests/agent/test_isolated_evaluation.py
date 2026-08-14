@@ -68,6 +68,7 @@ def _bundle(kind: str) -> dict[str, Any]:
         domain="sagasmith-dnd",
         campaign_id="campaign-1",
         principal_fingerprint=principal_fingerprint("principal-1"),
+        authorization_fingerprint="b" * 64,
         role="dm",
         audience="dm",
         branch_id="branch-1",

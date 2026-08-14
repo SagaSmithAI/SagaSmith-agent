@@ -1362,6 +1362,7 @@ def test_memory_sdk_marks_domain_history_private(tmp_path):
             domain="sagasmith-dnd",
             campaign_id="campaign-1",
             principal_fingerprint=principal_fingerprint("sdk:dm"),
+            authorization_fingerprint="b" * 64,
             role="dm",
             audience="dm",
             branch_id="branch-1",

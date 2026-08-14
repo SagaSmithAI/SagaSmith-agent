@@ -27,6 +27,7 @@ def _binding(*, branch_id: str = "branch-a") -> DomainContextBinding:
         "domain": "sagasmith-dnd",
         "campaign_id": "campaign-1",
         "principal_fingerprint": principal_fingerprint("discord:user-1"),
+        "authorization_fingerprint": "b" * 64,
         "role": "player",
         "audience": "principal",
         "branch_id": branch_id,
@@ -94,14 +95,28 @@ def test_context_epoch_uses_utf8_canonical_json_compatible_with_mcp() -> None:
         domain="sagasmith-dnd",
         campaign_id="战役一",
         principal_fingerprint="a" * 64,
+        authorization_fingerprint="b" * 64,
         role="dm",
         audience="dm",
         branch_id="分支甲",
     )
 
     assert binding.derived_epoch() == (
-        "759e2a7cef0011d39799f8e2e57b04e4ad5142f75a1acdf0451c75ff096e48b5"
+        "963ddb25065a5676a0c5ea6d55de339ad4dacc4a0d32b984464b68fe72f1ba56"
     )
+
+
+def test_authorization_fingerprint_change_creates_hard_replay_barrier() -> None:
+    session = Session(key="discord:authority")
+    first = _binding()
+    assert bind_session_context(session, first) is True
+    session.messages.append({"role": "assistant", "content": "private actor detail"})
+
+    changed = DomainContextBinding.from_mapping(
+        {**first.to_dict(), "authorization_fingerprint": "c" * 64, "context_epoch": ""}
+    )
+    assert bind_session_context(session, changed) is True
+    assert session.last_consolidated == len(session.messages)
 
 
 def test_domain_prompt_excludes_workspace_user_memory_and_history(tmp_path) -> None:

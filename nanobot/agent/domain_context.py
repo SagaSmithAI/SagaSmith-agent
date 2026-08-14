@@ -1,8 +1,8 @@
 """Host-side context boundaries for MCP-owned domains.
 
 Domain state remains authoritative in the MCP server.  This module only keeps
-the Agent's conversational memory from crossing a campaign, principal, role,
-audience, or branch boundary.
+the Agent's conversational memory from crossing a campaign, authorization,
+role, audience, or branch boundary.
 """
 
 from __future__ import annotations
@@ -54,6 +54,7 @@ class DomainContextBinding:
     domain: str
     campaign_id: str
     principal_fingerprint: str
+    authorization_fingerprint: str
     role: str = ""
     audience: str = ""
     branch_id: str = ""
@@ -73,10 +74,20 @@ class DomainContextBinding:
         )
         if _SHA256.fullmatch(fingerprint) is None:
             raise ValueError("principal_fingerprint must be a lowercase SHA-256 digest")
+        authorization_fingerprint = _text(
+            value.get("authorization_fingerprint"),
+            "authorization_fingerprint",
+            required=True,
+        )
+        if _SHA256.fullmatch(authorization_fingerprint) is None:
+            raise ValueError(
+                "authorization_fingerprint must be a lowercase SHA-256 digest"
+            )
         binding = cls(
             domain=_text(value.get("domain"), "domain", required=True),
             campaign_id=_text(value.get("campaign_id"), "campaign_id", required=True),
             principal_fingerprint=fingerprint,
+            authorization_fingerprint=authorization_fingerprint,
             role=_text(value.get("role"), "role"),
             audience=_text(value.get("audience"), "audience"),
             branch_id=_text(value.get("branch_id"), "branch_id"),
@@ -93,6 +104,7 @@ class DomainContextBinding:
             "domain": self.domain,
             "campaign_id": self.campaign_id,
             "principal_fingerprint": self.principal_fingerprint,
+            "authorization_fingerprint": self.authorization_fingerprint,
             "role": self.role,
             "audience": self.audience,
             "branch_id": self.branch_id,
@@ -111,6 +123,7 @@ class DomainContextBinding:
             "domain": self.domain,
             "campaign_id": self.campaign_id,
             "principal_fingerprint": self.principal_fingerprint,
+            "authorization_fingerprint": self.authorization_fingerprint,
             "role": self.role,
             "audience": self.audience,
             "branch_id": self.branch_id,

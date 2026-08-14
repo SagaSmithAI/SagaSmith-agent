@@ -453,6 +453,7 @@ async def test_mcp_exact_domain_binding_emits_a_one_time_context_barrier(
         domain="sagasmith-dnd",
         campaign_id="campaign-1",
         principal_fingerprint=mcp_mod.principal_fingerprint(local_principal),
+        authorization_fingerprint="b" * 64,
         role="dm",
         audience="dm",
         branch_id="branch-1",
@@ -506,6 +507,7 @@ async def test_mcp_exact_domain_binding_emits_a_one_time_context_barrier(
                 domain="sagasmith-dnd",
                 campaign_id="campaign-1",
                 principal_fingerprint=mcp_mod.principal_fingerprint(local_principal),
+                authorization_fingerprint="b" * 64,
                 role="dm",
                 audience="player",
                 branch_id="branch-1",
@@ -526,6 +528,7 @@ def test_domain_binding_is_not_read_from_arbitrary_nested_content() -> None:
         domain="sagasmith-dnd",
         campaign_id="campaign-secret",
         principal_fingerprint="a" * 64,
+        authorization_fingerprint="b" * 64,
     ).to_dict()
 
     assert (
@@ -545,6 +548,7 @@ async def test_exact_domain_binding_requires_transport_authenticated_principal(
         domain="sagasmith-dnd",
         campaign_id="campaign-1",
         principal_fingerprint="a" * 64,
+        authorization_fingerprint="b" * 64,
     ).to_dict()
 
     async def call_tool(_name: str, arguments: dict) -> object:
