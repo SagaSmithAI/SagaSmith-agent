@@ -18,8 +18,8 @@ from nanobot.utils.llm_runtime import LLMRuntime
 def _capsule(*, actor_id="npc", bootstrap=True, sequence=1):
     actor_runtime_id = f"conversation:{actor_id}"
     return {
-        "schema_version": 2,
-        "contract": "npc-conversation.v2",
+        "schema_version": 3,
+        "contract": "npc-conversation.v3",
         "conversation_id": "conversation",
         "activation_id": f"activation-{sequence}",
         "actor_runtime_id": actor_runtime_id,

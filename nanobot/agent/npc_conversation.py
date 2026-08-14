@@ -155,7 +155,7 @@ def validate_activation_capsule(value: Any) -> dict[str, Any]:
     if missing := sorted(required - set(capsule)):
         raise NpcConversationWorkerError(f"activation capsule is missing fields: {missing}")
     _strict(capsule, "npc_activation.capsule", required)
-    if capsule.get("schema_version") != 2 or capsule.get("contract") != "npc-conversation.v2":
+    if capsule.get("schema_version") != 3 or capsule.get("contract") != "npc-conversation.v3":
         raise NpcConversationWorkerError("unsupported NPC activation capsule contract")
     constraints = _object(capsule.get("constraints"), "capsule.constraints")
     if any(
