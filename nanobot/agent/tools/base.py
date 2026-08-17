@@ -46,11 +46,59 @@ class Schema(ABC):
         return f"{path}.{key}" if path else key
 
     @staticmethod
-    def validate_json_schema_value(val: Any, schema: dict[str, Any], path: str = "") -> list[str]:
+    def validate_json_schema_value(
+        val: Any,
+        schema: dict[str, Any],
+        path: str = "",
+        *,
+        root_schema: dict[str, Any] | None = None,
+    ) -> list[str]:
         """Validate ``val`` against a JSON Schema fragment; returns error messages (empty means valid).
 
         Used by :class:`Tool` and each concrete Schema's :meth:`validate_value`.
         """
+        root = root_schema or schema
+        reference = schema.get("$ref")
+        if isinstance(reference, str) and reference.startswith("#/"):
+            resolved: Any = root
+            for token in reference[2:].split("/"):
+                token = token.replace("~1", "/").replace("~0", "~")
+                if not isinstance(resolved, dict) or token not in resolved:
+                    return [f"{path or 'parameter'} has unresolved schema reference {reference}"]
+                resolved = resolved[token]
+            if not isinstance(resolved, dict):
+                return [f"{path or 'parameter'} has invalid schema reference {reference}"]
+            return Schema.validate_json_schema_value(
+                val,
+                resolved,
+                path,
+                root_schema=root,
+            )
+
+        for keyword in ("allOf", "anyOf", "oneOf"):
+            branches = schema.get(keyword)
+            if not isinstance(branches, list) or not branches:
+                continue
+            branch_errors = [
+                Schema.validate_json_schema_value(
+                    val,
+                    branch,
+                    path,
+                    root_schema=root,
+                )
+                for branch in branches
+                if isinstance(branch, dict)
+            ]
+            matches = sum(not errors for errors in branch_errors)
+            if keyword == "allOf":
+                combined = [error for errors in branch_errors for error in errors]
+                if combined:
+                    return combined
+            elif keyword == "anyOf" and matches == 0:
+                return [f"{path or 'parameter'} does not match any allowed schema"]
+            elif keyword == "oneOf" and matches != 1:
+                return [f"{path or 'parameter'} must match exactly one allowed schema"]
+
         raw_type = schema.get("type")
         nullable = (isinstance(raw_type, list) and "null" in raw_type) or schema.get("nullable", False)
         t = Schema.resolve_json_schema_type(raw_type)
@@ -58,6 +106,8 @@ class Schema(ABC):
 
         if nullable and val is None:
             return []
+        if t == "null" and val is not None:
+            return [f"{label} should be null"]
         if t == "integer" and (not isinstance(val, int) or isinstance(val, bool)):
             return [f"{label} should be integer"]
         if t == "number" and (
@@ -68,6 +118,8 @@ class Schema(ABC):
             return [f"{label} should be {t}"]
 
         errors: list[str] = []
+        if "const" in schema and val != schema["const"]:
+            errors.append(f"{label} must equal {schema['const']!r}")
         if "enum" in schema and val not in schema["enum"]:
             errors.append(f"{label} must be one of {schema['enum']}")
         if t in ("integer", "number"):
@@ -88,12 +140,24 @@ class Schema(ABC):
             additional = schema.get("additionalProperties", True)
             for k, v in val.items():
                 if k in props:
-                    errors.extend(Schema.validate_json_schema_value(v, props[k], Schema.subpath(path, k)))
+                    errors.extend(
+                        Schema.validate_json_schema_value(
+                            v,
+                            props[k],
+                            Schema.subpath(path, k),
+                            root_schema=root,
+                        )
+                    )
                 elif additional is False:
                     errors.append(f"unexpected parameter {Schema.subpath(path, k)}")
                 elif isinstance(additional, dict):
                     errors.extend(
-                        Schema.validate_json_schema_value(v, additional, Schema.subpath(path, k))
+                        Schema.validate_json_schema_value(
+                            v,
+                            additional,
+                            Schema.subpath(path, k),
+                            root_schema=root,
+                        )
                     )
         if t == "array":
             if "minItems" in schema and len(val) < schema["minItems"]:
@@ -104,7 +168,12 @@ class Schema(ABC):
                 prefix = f"{path}[{{}}]" if path else "[{}]"
                 for i, item in enumerate(val):
                     errors.extend(
-                        Schema.validate_json_schema_value(item, schema["items"], prefix.format(i))
+                        Schema.validate_json_schema_value(
+                            item,
+                            schema["items"],
+                            prefix.format(i),
+                            root_schema=root,
+                        )
                     )
         return errors
 
@@ -134,6 +203,7 @@ class ToolResult(str):
 
     is_error: bool
     context_barrier: bool
+    structured_content: Any
 
     def __new__(
         cls,
@@ -141,10 +211,12 @@ class ToolResult(str):
         *,
         is_error: bool = False,
         context_barrier: bool = False,
+        structured_content: Any = None,
     ) -> ToolResult:
         obj = str.__new__(cls, content)
         obj.is_error = is_error
         obj.context_barrier = context_barrier
+        obj.structured_content = deepcopy(structured_content)
         return obj
 
     @classmethod

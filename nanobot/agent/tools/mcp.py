@@ -752,14 +752,15 @@ class MCPToolWrapper(_MCPWrapperBase):
                     await self._post_call_sync()
                 # Success — extract text and persist any image content as artifacts.
                 try:
+                    structured_content = (
+                        None
+                        if getattr(result, "isError", False)
+                        else getattr(result, "structuredContent", None)
+                    )
                     rendered = self._render_call_result(
                         result.content,
                         kwargs,
-                        structured_content=(
-                            None
-                            if getattr(result, "isError", False)
-                            else getattr(result, "structuredContent", None)
-                        ),
+                        structured_content=structured_content,
                     )
                     if getattr(result, "isError", False):
                         return ToolResult.error(rendered)
@@ -771,6 +772,7 @@ class MCPToolWrapper(_MCPWrapperBase):
                     return ToolResult(
                         rendered,
                         context_barrier=context_changed,
+                        structured_content=structured_content,
                     )
                 except Exception as exc:
                     logger.exception(

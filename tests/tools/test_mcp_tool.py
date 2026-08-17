@@ -720,7 +720,10 @@ async def test_execute_prefers_structured_content_over_multiple_text_documents()
 
     wrapper = _make_wrapper(SimpleNamespace(call_tool=call_tool))
 
-    assert json.loads(await wrapper.execute()) == structured
+    result = await wrapper.execute()
+
+    assert json.loads(result) == structured
+    assert result.structured_content == structured
 
 
 # Smallest valid 1x1 PNG, base64 without the data: prefix.
