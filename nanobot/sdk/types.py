@@ -162,6 +162,9 @@ def snapshot_from_payload(
 def result_from_response(response: Any, capture: Any) -> RunResult:
     content = (response.content if response else None) or ""
     metadata = dict(response.metadata) if response and response.metadata else {}
+    resolution_presentations = getattr(capture, "resolution_presentations", None)
+    if resolution_presentations:
+        metadata["resolution_presentations"] = deepcopy(resolution_presentations)
     return RunResult(
         content=content,
         tools_used=capture.tools_used,

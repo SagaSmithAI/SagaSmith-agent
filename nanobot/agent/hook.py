@@ -9,6 +9,7 @@ from typing import Any
 
 from loguru import logger
 
+from nanobot.agent.resolution_presentation import normalize_resolution_presentation
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 
 
@@ -274,6 +275,28 @@ class SDKCaptureHook(AgentHook):
         self.error: str | None = None
         self.tool_events: list[dict[str, str]] = []
         self.had_injections: bool = False
+        self.resolution_presentations: list[dict[str, Any]] = []
+
+    async def after_execute_tool(
+        self,
+        context: AgentHookContext,
+        tool_call: ToolCallRequest,
+        tool: Any,
+        params: Any,
+        result: Any,
+    ) -> None:
+        structured = getattr(result, "structured_content", None)
+        try:
+            presentation = normalize_resolution_presentation(structured)
+        except ValueError as exc:
+            logger.warning(
+                "Ignoring invalid resolution presentation from tool {}: {}",
+                tool_call.name,
+                exc,
+            )
+            return
+        if presentation is not None and len(self.resolution_presentations) < 32:
+            self.resolution_presentations.append(presentation)
 
     async def after_iteration(self, context: AgentHookContext) -> None:
         for call in context.tool_calls:
