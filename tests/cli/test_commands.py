@@ -1362,7 +1362,7 @@ def test_agent_rejects_message_and_message_file_together(
     )
 
     assert result.exit_code != 0
-    assert "either --message or --message-file" in result.output
+    assert "either --message or --message-file" in _strip_ansi(result.output)
 
 
 def test_agent_uses_explicit_config_path(mock_agent_runtime, tmp_path: Path):
