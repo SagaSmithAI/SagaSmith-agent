@@ -45,7 +45,7 @@ def desired_servers(layout: StackLayout, modes: tuple[InstallMode, ...]) -> dict
             "sessionScoped": True,
         }
     if InstallMode.NARRATIVE in selected:
-        repo = layout.repo("SagaSmith-narrative-mcp")
+        repo = layout.repo("sagasmith-narrative")
         result["sagasmith_narrative"] = {
             "type": "stdio",
             "command": str(_python_executable(repo)),
@@ -65,13 +65,17 @@ def desired_skill_roots(layout: StackLayout, modes: tuple[InstallMode, ...]) -> 
     selected = set(modes)
     result: list[str] = []
     if InstallMode.DND in selected:
-        result.append(str(layout.repo("SagaSmith-dnd-skills") / "full" / "skills"))
+        root = layout.repo("sagasmith-dnd") / "skills"
+        result.extend(
+            [str(root / "full" / "skills"), str(root / "dnd-module-generator")]
+        )
     if InstallMode.COC in selected:
-        result.append(str(layout.repo("SagaSmith-coc-skills") / "full" / "skills"))
+        root = layout.repo("sagasmith-coc") / "skills"
+        result.extend(
+            [str(root / "full" / "skills"), str(root / "coc-module-generator")]
+        )
     if InstallMode.NARRATIVE in selected:
-        result.append(str(layout.repo("SagaSmith-narrative-skills") / "skills"))
-    if selected:
-        result.append(str(layout.repo("SagaSmith-module-gen-skills")))
+        result.append(str(layout.repo("sagasmith-narrative") / "skills"))
     return result
 
 
@@ -81,10 +85,9 @@ def _is_owned_skill_path(value: str, layout: StackLayout) -> bool:
     except (OSError, RuntimeError):
         return False
     roots = (
-        layout.repo("SagaSmith-dnd-skills"),
-        layout.repo("SagaSmith-coc-skills"),
-        layout.repo("SagaSmith-narrative-skills"),
-        layout.repo("SagaSmith-module-gen-skills"),
+        layout.repo("sagasmith-dnd") / "skills",
+        layout.repo("sagasmith-coc") / "skills",
+        layout.repo("sagasmith-narrative") / "skills",
     )
     return any(path == root or root in path.parents for root in roots)
 
@@ -153,15 +156,17 @@ def agent_webui_url(layout: StackLayout) -> str:
 def dnd_environment(layout: StackLayout) -> dict[str, str]:
     values = {
         "SAGASMITH_DND_MCP_HOME": str(layout.data_dir / "dnd"),
-        "SAGASMITH_DND_SKILLS_DIR": str(layout.repo("SagaSmith-dnd-skills")),
-        "SAGASMITH_MODULEGEN_SKILLS_DIR": str(layout.repo("SagaSmith-module-gen-skills")),
+        "SAGASMITH_DND_SKILLS_DIR": str(layout.repo("sagasmith-dnd") / "skills"),
+        "SAGASMITH_MODULEGEN_SKILLS_DIR": str(
+            layout.repo("sagasmith-dnd") / "skills" / "dnd-module-generator"
+        ),
         "SAGASMITH_DND_MCP_TRANSPORT": "streamable-http",
         "SAGASMITH_DND_MCP_HTTP_HOST": "127.0.0.1",
         "SAGASMITH_DND_MCP_HTTP_PORT": "8767",
         "SAGASMITH_DND_MCP_URL": "http://127.0.0.1:8767/mcp",
         "SAGASMITH_DND_GATEWAY_HOST": "127.0.0.1",
         "SAGASMITH_DND_GATEWAY_PORT": "8766",
-        "SAGASMITH_DND_UI_DIST": str(layout.repo("SagaSmith-dnd-ui") / "dist"),
+        "SAGASMITH_DND_UI_DIST": str(layout.repo("sagasmith-dnd") / "apps" / "ui" / "dist"),
         "SAGASMITH_AGENT_WEBUI_URL": agent_webui_url(layout),
     }
     rule_root = layout.workspace_root / "reference" / "DnD-Books" / "5e" / "Books"
@@ -187,15 +192,17 @@ def dnd_environment(layout: StackLayout) -> dict[str, str]:
 def coc_environment(layout: StackLayout) -> dict[str, str]:
     values = {
         "SAGASMITH_COC_MCP_HOME": str(layout.data_dir / "coc"),
-        "SAGASMITH_COC_SKILLS_DIR": str(layout.repo("SagaSmith-coc-skills")),
-        "SAGASMITH_MODULEGEN_SKILLS_DIR": str(layout.repo("SagaSmith-module-gen-skills")),
+        "SAGASMITH_COC_SKILLS_DIR": str(layout.repo("sagasmith-coc") / "skills"),
+        "SAGASMITH_MODULEGEN_SKILLS_DIR": str(
+            layout.repo("sagasmith-coc") / "skills" / "coc-module-generator"
+        ),
         "SAGASMITH_COC_MCP_TRANSPORT": "streamable-http",
         "SAGASMITH_COC_MCP_HTTP_HOST": "127.0.0.1",
         "SAGASMITH_COC_MCP_HTTP_PORT": "8769",
         "SAGASMITH_COC_MCP_URL": "http://127.0.0.1:8769/mcp",
         "SAGASMITH_COC_GATEWAY_HOST": "127.0.0.1",
         "SAGASMITH_COC_GATEWAY_PORT": "8768",
-        "SAGASMITH_COC_UI_DIST": str(layout.repo("sagasmith-coc-ui") / "dist"),
+        "SAGASMITH_COC_UI_DIST": str(layout.repo("sagasmith-coc") / "apps" / "ui" / "dist"),
     }
     if configured := os.environ.get("SAGASMITH_COC_MCP_MODULE_IMPORT_ROOTS"):
         values["SAGASMITH_COC_MCP_MODULE_IMPORT_ROOTS"] = configured
@@ -205,6 +212,7 @@ def coc_environment(layout: StackLayout) -> dict[str, str]:
 def narrative_environment(layout: StackLayout) -> dict[str, str]:
     return {
         "SAGASMITH_NARRATIVE_MCP_HOME": str(layout.data_dir / "narrative"),
-        "SAGASMITH_NARRATIVE_SKILLS_DIR": str(layout.repo("SagaSmith-narrative-skills")),
-        "SAGASMITH_MODULEGEN_SKILLS_DIR": str(layout.repo("SagaSmith-module-gen-skills")),
+        "SAGASMITH_NARRATIVE_SKILLS_DIR": str(
+            layout.repo("sagasmith-narrative") / "skills"
+        ),
     }

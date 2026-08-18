@@ -125,24 +125,27 @@ def install_workspace(
     selected = set(modes)
     if not verify_only:
         for mode, repository in (
-            (InstallMode.DND, "SagaSmith-dnd-mcp"),
-            (InstallMode.COC, "SagaSmith-coc-mcp"),
-            (InstallMode.NARRATIVE, "SagaSmith-narrative-mcp"),
+            (InstallMode.DND, "sagasmith-dnd"),
+            (InstallMode.COC, "sagasmith-coc"),
+            (InstallMode.NARRATIVE, "sagasmith-narrative"),
         ):
             if mode in selected:
-                _run([uv, "sync", "--all-extras", "--frozen"], cwd=layout.repo(repository))
+                _run(
+                    [uv, "sync", "--all-packages", "--all-extras", "--frozen"],
+                    cwd=layout.repo(repository),
+                )
         _run([uv, "sync", "--all-extras", "--frozen"], cwd=layout.agent_root)
         if build_ui:
-            ui_repositories = ["SagaSmith-agent"]
+            _run(["npm", "ci"], cwd=layout.agent_root / "webui")
+            _run(["npm", "run", "build"], cwd=layout.agent_root / "webui")
             if InstallMode.DND in selected:
-                ui_repositories.append("SagaSmith-dnd-ui")
+                root = layout.repo("sagasmith-dnd")
+                _run(["npm", "ci"], cwd=root)
+                _run(["npm", "run", "build:ui"], cwd=root)
             if InstallMode.COC in selected:
-                ui_repositories.append("sagasmith-coc-ui")
-            for repository in ui_repositories:
-                root = layout.agent_root if repository == "SagaSmith-agent" else layout.repo(repository)
-                ui_root = root / "webui" if repository == "SagaSmith-agent" else root
-                _run(["npm", "ci"], cwd=ui_root)
-                _run(["npm", "run", "build"], cwd=ui_root)
+                root = layout.repo("sagasmith-coc")
+                _run(["npm", "ci"], cwd=root)
+                _run(["npm", "run", "build:ui"], cwd=root)
 
     if verify_only:
         state = layout.load_state()
@@ -243,7 +246,7 @@ def _command_specs(
     selected = set(modes)
     specs: list[tuple[str, list[str], Path, dict[str, str], str | None]] = []
     if InstallMode.DND in selected:
-        root = layout.repo("SagaSmith-dnd-mcp")
+        root = layout.repo("sagasmith-dnd")
         python = str(_venv_python(root))
         env = dnd_environment(layout)
         specs.extend(
@@ -253,7 +256,7 @@ def _command_specs(
             ]
         )
     if InstallMode.COC in selected:
-        root = layout.repo("SagaSmith-coc-mcp")
+        root = layout.repo("sagasmith-coc")
         python = str(_venv_python(root))
         env = coc_environment(layout)
         specs.extend(
@@ -462,9 +465,9 @@ def doctor(
             config_detail = "Agent config is not valid UTF-8 JSON"
     add("agent-config", config_ok, config_detail)
     for mode, repository, module in (
-        (InstallMode.DND, "SagaSmith-dnd-mcp", "sagasmith_dnd_mcp"),
-        (InstallMode.COC, "SagaSmith-coc-mcp", "sagasmith_coc_mcp"),
-        (InstallMode.NARRATIVE, "SagaSmith-narrative-mcp", "sagasmith_narrative_mcp"),
+        (InstallMode.DND, "sagasmith-dnd", "sagasmith_dnd_mcp"),
+        (InstallMode.COC, "sagasmith-coc", "sagasmith_coc_mcp"),
+        (InstallMode.NARRATIVE, "sagasmith-narrative", "sagasmith_narrative_mcp"),
     ):
         if mode not in selected:
             continue
@@ -476,8 +479,25 @@ def doctor(
             add(f"{mode.value}-runtime", False, str(exc))
         else:
             add(f"{mode.value}-runtime", True, str(python))
-    module_skill = layout.repo("SagaSmith-module-gen-skills") / "SKILL.md"
-    add("modulegen-skill", module_skill.exists(), str(module_skill))
+    for mode, module_skill in (
+        (
+            InstallMode.DND,
+            layout.repo("sagasmith-dnd") / "skills" / "dnd-module-generator" / "SKILL.md",
+        ),
+        (
+            InstallMode.COC,
+            layout.repo("sagasmith-coc") / "skills" / "coc-module-generator" / "SKILL.md",
+        ),
+        (
+            InstallMode.NARRATIVE,
+            layout.repo("sagasmith-narrative")
+            / "skills"
+            / "narrative-project-generator"
+            / "SKILL.md",
+        ),
+    ):
+        if mode in selected:
+            add(f"{mode.value}-generator-skill", module_skill.exists(), str(module_skill))
     if require_ui:
         add(
             "agent-ui",
@@ -485,10 +505,10 @@ def doctor(
             str(layout.agent_root / "nanobot" / "web" / "dist" / "index.html"),
         )
         if InstallMode.DND in selected:
-            path = layout.repo("SagaSmith-dnd-ui") / "dist" / "index.html"
+            path = layout.repo("sagasmith-dnd") / "apps" / "ui" / "dist" / "index.html"
             add("dnd-ui", path.is_file(), str(path))
         if InstallMode.COC in selected:
-            path = layout.repo("sagasmith-coc-ui") / "dist" / "index.html"
+            path = layout.repo("sagasmith-coc") / "apps" / "ui" / "dist" / "index.html"
             add("coc-ui", path.is_file(), str(path))
     if include_runtime:
         agent_port = int(agent_webui_url(layout).split(":")[-1].rstrip("/"))

@@ -25,7 +25,7 @@ It does **not** write D&D/CoC databases directly, reimplement rules/combat/modul
 
 ## D&D: the MCP-first path
 
-[SagaSmith D&D MCP](https://github.com/SagaSmithAI/SagaSmith-dnd-mcp) owns campaigns, rules, modules, characters, knowledge, branches, snapshots, and combat. Every chat session opens its own server-side exposure. The server filters the native tool list by current session, principal, campaign, and phase; the Agent selects only the exact tools needed for the current task.
+The D&D MCP in [sagasmith-dnd](https://github.com/SagaSmithAI/sagasmith-dnd) owns campaigns, rules, modules, characters, knowledge, branches, snapshots, and combat. Every chat session opens its own server-side exposure. The server filters the native tool list by current session, principal, campaign, and phase; the Agent selects only the exact tools needed for the current task.
 
 ```text
 inbound message
@@ -72,16 +72,10 @@ Requirements are Windows 11, [uv](https://docs.astral.sh/uv/), Python 3.11+, and
 SagaSmith/
   SagaSmith-agent/              # Agent, channels, and WebUI
   sagasmith-core/               # neutral persistence and Pack infrastructure
-  sagasmith-dnd/                # D&D rules runtime
-  sagasmith-coc/                # CoC rules runtime
-  SagaSmith-dnd-mcp/            # authoritative D&D service
-  SagaSmith-coc-mcp/            # authoritative CoC service
-  SagaSmith-dnd-skills/         # D&D Agent procedures
-  SagaSmith-coc-skills/         # CoC Agent procedures
-  SagaSmith-module-gen-skills/  # current-schema Module Pack authoring
+  sagasmith-dnd/                # D&D Domain, MCP, Skills, UI, and module generator
+  sagasmith-coc/                # CoC Domain, MCP, Skills, UI, and module generator
+  sagasmith-narrative/          # Narrative Domain, MCP, Skills, and project generator
   SagaSmith-dnd-content-library/# redistributable public Pack catalog
-  SagaSmith-dnd-ui/             # D&D UI
-  sagasmith-coc-ui/             # CoC UI
 ```
 
 Install any combination from the Agent repository. Omitting `--mode` selects all three:

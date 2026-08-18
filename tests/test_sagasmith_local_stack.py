@@ -42,27 +42,26 @@ def test_modes_are_independently_selectable_and_default_to_all() -> None:
         InstallMode.DND,
     )
     repositories = {item.repository for item in selected_components((InstallMode.COC,))}
-    assert "SagaSmith-coc-mcp" in repositories
-    assert "sagasmith-coc-ui" in repositories
-    assert "SagaSmith-dnd-mcp" not in repositories
-    assert "SagaSmith-narrative-mcp" not in repositories
+    assert repositories == {"SagaSmith-agent", "sagasmith-core", "sagasmith-coc"}
 
 
 def test_release_lock_selects_exact_revisions_for_each_mode(tmp_path: Path) -> None:
     lock = tmp_path / "stack-lock.json"
-    components = {
-        component.repository: {"revision": "a" * 40}
-        for component in selected_components((InstallMode.COC,))
-        if component.repository != "SagaSmith-agent"
-    }
+    components = {"sagasmith-core", "sagasmith-coc"}
     lock.write_text(
-        json.dumps({"schema": "sagasmith.release-lock/v1", "components": components}),
+        json.dumps(
+            {
+                "schema": "sagasmith.release-lock/v2",
+                "shared": {"sagasmith-core": "a" * 40},
+                "profiles": {"coc": {"sagasmith-coc": "a" * 40}},
+            }
+        ),
         encoding="utf-8",
     )
 
     revisions = load_release_revisions(lock, (InstallMode.COC,))
 
-    assert set(revisions) == set(components)
+    assert set(revisions) == components
     assert set(revisions.values()) == {"a" * 40}
 
 
@@ -71,8 +70,9 @@ def test_release_lock_rejects_missing_or_moving_component_refs(tmp_path: Path) -
     lock.write_text(
         json.dumps(
             {
-                "schema": "sagasmith.release-lock/v1",
-                "components": {"sagasmith-core": {"revision": "main"}},
+                "schema": "sagasmith.release-lock/v2",
+                "shared": {"sagasmith-core": "main"},
+                "profiles": {"dnd": {}},
             }
         ),
         encoding="utf-8",
@@ -99,7 +99,7 @@ def test_config_reconciler_owns_only_sagasmith_entries(tmp_path: Path) -> None:
             "defaults": {
                 "externalSkillsDirs": [
                     str(unrelated_skill),
-                    str(layout.repo("SagaSmith-dnd-skills") / "old"),
+                    str(layout.repo("sagasmith-dnd") / "skills" / "old"),
                 ]
             }
         },

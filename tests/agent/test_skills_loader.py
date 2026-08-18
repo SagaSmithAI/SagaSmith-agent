@@ -379,7 +379,7 @@ def test_sagasmith_dnd_suite_is_not_a_bundled_skill(monkeypatch: pytest.MonkeyPa
 
 def test_external_directory_may_itself_be_a_skill(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
-    root_skill = tmp_path / "SagaSmith-module-gen-skills"
+    root_skill = tmp_path / "dnd-module-generator"
     workspace.mkdir()
     root_skill.mkdir()
     (root_skill / "SKILL.md").write_text(
@@ -396,12 +396,12 @@ def test_external_directory_may_itself_be_a_skill(tmp_path: Path) -> None:
     listed = loader.list_skills(filter_unavailable=False)
     assert listed == [
         {
-            "name": "SagaSmith-module-gen-skills",
+            "name": "dnd-module-generator",
             "path": str(root_skill / "SKILL.md"),
             "source": "external",
         }
     ]
-    assert loader.load_skill("SagaSmith-module-gen-skills") is not None
+    assert loader.load_skill("dnd-module-generator") is not None
 
 
 # -- multiline description tests (YAML folded > and literal |) -----------------
