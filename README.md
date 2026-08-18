@@ -38,7 +38,7 @@ SagaSmith Agent 负责：
 
 ## D&D：MCP-first 主路径
 
-[SagaSmith D&D MCP](https://github.com/SagaSmithAI/SagaSmith-dnd-mcp) 管理战役、规则、模组、角色、知识、分支、Snapshot 与战斗。每个聊天会话在服务端单独打开 exposure；服务端按当前 session、principal、campaign 与 phase 过滤原生工具列表，Agent 只选择当前任务所需的精确工具。
+[sagasmith-dnd](https://github.com/SagaSmithAI/sagasmith-dnd) 内的 D&D MCP 管理战役、规则、模组、角色、知识、分支、Snapshot 与战斗。每个聊天会话在服务端单独打开 exposure；服务端按当前 session、principal、campaign 与 phase 过滤原生工具列表，Agent 只选择当前任务所需的精确工具。
 
 ```text
 消息到达
@@ -82,16 +82,10 @@ workspace artifact 传递，但只有 MCP 校验、白名单读取和公开写�
 SagaSmith/
   SagaSmith-agent/              # Agent、渠道与 WebUI
   sagasmith-core/               # 通用持久化与 Pack 基础设施
-  sagasmith-dnd/                # D&D 规则运行时
-  sagasmith-coc/                # CoC 规则运行时
-  SagaSmith-dnd-mcp/            # D&D 权威服务
-  SagaSmith-coc-mcp/            # CoC 权威服务
-  SagaSmith-dnd-skills/         # D&D Agent 流程
-  SagaSmith-coc-skills/         # CoC Agent 流程
-  SagaSmith-module-gen-skills/  # 当前 schema 的 Module Pack 创作流程
+  sagasmith-dnd/                # D&D Domain、MCP、Skills、UI 与模组生成
+  sagasmith-coc/                # CoC Domain、MCP、Skills、UI 与模组生成
+  sagasmith-narrative/          # Narrative Domain、MCP、Skills 与项目生成
   SagaSmith-dnd-content-library/# 私有、许可受限的 Pack 归档（可选）
-  SagaSmith-dnd-ui/             # D&D UI
-  sagasmith-coc-ui/             # CoC UI
 ```
 
 从 Agent 仓库选择任意模式组合；不传 `--mode` 时安装三个模式：

@@ -19,7 +19,7 @@ class InstallMode(StrEnum):
 
 ALL_MODES = tuple(InstallMode)
 STACK_SCHEMA = "sagasmith.local-stack/v1"
-RELEASE_LOCK_SCHEMA = "sagasmith.release-lock/v1"
+RELEASE_LOCK_SCHEMA = "sagasmith.release-lock/v2"
 
 
 @dataclass(frozen=True)
@@ -32,29 +32,44 @@ class Component:
 
 COMPONENTS: tuple[Component, ...] = (
     Component(None, "SagaSmith-agent", "python", ("pyproject.toml",)),
-    Component(InstallMode.DND, "sagasmith-core", "source", ("pyproject.toml",)),
-    Component(InstallMode.DND, "sagasmith-dnd", "source", ("pyproject.toml",)),
-    Component(InstallMode.DND, "SagaSmith-dnd-mcp", "python", ("pyproject.toml",)),
-    Component(InstallMode.DND, "SagaSmith-dnd-skills", "skills", ("full/SKILL.md",)),
-    Component(InstallMode.DND, "SagaSmith-dnd-ui", "ui", ("package.json",)),
-    Component(InstallMode.COC, "sagasmith-core", "source", ("pyproject.toml",)),
-    Component(InstallMode.COC, "sagasmith-coc", "source", ("pyproject.toml",)),
-    Component(InstallMode.COC, "SagaSmith-coc-mcp", "python", ("pyproject.toml",)),
-    Component(InstallMode.COC, "SagaSmith-coc-skills", "skills", ("full/SKILL.md",)),
-    Component(InstallMode.COC, "sagasmith-coc-ui", "ui", ("package.json",)),
+    Component(None, "sagasmith-core", "source", ("pyproject.toml",)),
     Component(
-        InstallMode.NARRATIVE,
-        "SagaSmith-narrative-mcp",
-        "python",
-        ("pyproject.toml",),
+        InstallMode.DND,
+        "sagasmith-dnd",
+        "domain",
+        (
+            "pyproject.toml",
+            "packages/domain/pyproject.toml",
+            "packages/mcp/pyproject.toml",
+            "skills/full/SKILL.md",
+            "skills/dnd-module-generator/SKILL.md",
+            "apps/ui/package.json",
+        ),
+    ),
+    Component(
+        InstallMode.COC,
+        "sagasmith-coc",
+        "domain",
+        (
+            "pyproject.toml",
+            "packages/domain/pyproject.toml",
+            "packages/mcp/pyproject.toml",
+            "skills/full/SKILL.md",
+            "skills/coc-module-generator/SKILL.md",
+            "apps/ui/package.json",
+        ),
     ),
     Component(
         InstallMode.NARRATIVE,
-        "SagaSmith-narrative-skills",
-        "skills",
-        ("skills",),
+        "sagasmith-narrative",
+        "domain",
+        (
+            "pyproject.toml",
+            "packages/domain/pyproject.toml",
+            "packages/mcp/pyproject.toml",
+            "skills/narrative-project-generator/SKILL.md",
+        ),
     ),
-    Component(None, "SagaSmith-module-gen-skills", "skills", ("SKILL.md",)),
 )
 
 
@@ -224,9 +239,22 @@ def load_release_revisions(path: Path, modes: tuple[InstallMode, ...]) -> dict[s
         raise ValueError(f"cannot read SagaSmith release lock {path}: {exc}") from exc
     if not isinstance(value, dict) or value.get("schema") != RELEASE_LOCK_SCHEMA:
         raise ValueError(f"unsupported SagaSmith release lock: {path}")
-    raw_components = value.get("components")
-    if not isinstance(raw_components, dict):
-        raise ValueError("SagaSmith release lock components must be an object")
+    shared = value.get("shared")
+    profiles = value.get("profiles")
+    if not isinstance(shared, dict) or not isinstance(profiles, dict):
+        raise ValueError("SagaSmith release lock requires shared and profiles objects")
+    raw_components = dict(shared)
+    for mode in modes:
+        profile = profiles.get(mode.value)
+        if not isinstance(profile, dict):
+            raise ValueError(f"release lock is missing profile: {mode.value}")
+        overlap = set(raw_components) & set(profile)
+        if overlap:
+            raise ValueError(
+                "release lock duplicates shared components in profile: "
+                + ", ".join(sorted(overlap))
+            )
+        raw_components.update(profile)
     selected = {
         component.repository
         for component in selected_components(modes)
@@ -234,10 +262,9 @@ def load_release_revisions(path: Path, modes: tuple[InstallMode, ...]) -> dict[s
     }
     revisions: dict[str, str] = {}
     for repository in sorted(selected):
-        item = raw_components.get(repository)
-        if not isinstance(item, dict):
+        revision = str(raw_components.get(repository) or "").strip().casefold()
+        if not revision:
             raise ValueError(f"release lock is missing component: {repository}")
-        revision = str(item.get("revision") or "").strip().casefold()
         if len(revision) != 40 or any(character not in "0123456789abcdef" for character in revision):
             raise ValueError(f"release lock has invalid revision for {repository}")
         revisions[repository] = revision

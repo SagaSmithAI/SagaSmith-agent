@@ -94,8 +94,8 @@ inside this repository.
 ## Historical Note
 
 The D&D CLI and bundled skills documented below have been removed. Their current
-homes are the sibling SagaSmith D&D MCP and `SagaSmith-dnd-skills` repositories,
-not this Agent repository. Load the **full version** through
+home is the sibling `sagasmith-dnd` domain monorepo, not this Agent repository.
+Load the **full version** through
 `agents.defaults.externalSkillsDirs`; do not expect a bundled
 `nanobot/skills/sagasmith-dnd/` copy.
 
@@ -114,15 +114,15 @@ pip install -e ".[dev,sagasmith]"
 
 ### Skill Structure
 
-- `../SagaSmith-dnd-skills/full/SKILL.md` — Suite entry point
-- `../SagaSmith-dnd-skills/full/skills/dnd-dm/` — DM play/adjudication skill
-- `../SagaSmith-dnd-skills/full/skills/dnd-campaign-manager/` — Campaign management skill
-- `../SagaSmith-dnd-skills/full/references/` — Shared MCP contracts and workflows
-- `../SagaSmith-dnd-skills/full/templates/` — Agent identity and campaign templates
+- `../sagasmith-dnd/skills/full/SKILL.md` — Suite entry point
+- `../sagasmith-dnd/skills/full/skills/dnd-dm/` — DM play/adjudication skill
+- `../sagasmith-dnd/skills/full/skills/dnd-campaign-manager/` — Campaign management skill
+- `../sagasmith-dnd/skills/full/references/` — Shared MCP contracts and workflows
+- `../sagasmith-dnd/skills/full/templates/` — Agent identity and campaign templates
 
 ### Module Generation
 
-`../SagaSmith-module-gen-skills/` — External module-generation skills.
+`../sagasmith-dnd/skills/dnd-module-generator/` — D&D module-generation skill.
 
 ### CLI Verification
 

@@ -396,7 +396,7 @@ async def test_bridge_repairs_mcp_validation_failure_within_same_lease() -> None
 @pytest.mark.asyncio
 async def test_real_coc_stdio_host_dispatches_hidden_conversation_transport(tmp_path: Path) -> None:
     workspace = Path(__file__).resolve().parents[3]
-    coc_repo = workspace / "SagaSmith-coc-mcp"
+    coc_repo = workspace / "sagasmith-coc"
     executable = coc_repo / ".venv" / "Scripts" / "sagasmith-coc-mcp.exe"
     if not executable.exists():
         pytest.skip("the sibling CoC MCP development runtime is unavailable")
@@ -409,9 +409,9 @@ async def test_real_coc_stdio_host_dispatches_hidden_conversation_transport(tmp_
                 cwd=str(coc_repo),
                 env={
                     "SAGASMITH_COC_MCP_HOME": str(tmp_path / "coc-home"),
-                    "SAGASMITH_COC_SKILLS_DIR": str(workspace / "SagaSmith-coc-skills"),
+                    "SAGASMITH_COC_SKILLS_DIR": str(coc_repo / "skills"),
                     "SAGASMITH_MODULEGEN_SKILLS_DIR": str(
-                        workspace / "SagaSmith-module-gen-skills"
+                        coc_repo / "skills" / "coc-module-generator"
                     ),
                 },
                 enabled_tools=["*"],
@@ -565,7 +565,7 @@ async def test_real_coc_stdio_host_dispatches_hidden_conversation_transport(tmp_
 @pytest.mark.asyncio
 async def test_real_dnd_stdio_host_dispatches_hidden_conversation_transport(tmp_path: Path) -> None:
     workspace = Path(__file__).resolve().parents[3]
-    dnd_repo = workspace / "SagaSmith-dnd-mcp"
+    dnd_repo = workspace / "sagasmith-dnd"
     executable = dnd_repo / ".venv" / "Scripts" / "sagasmith-dnd-mcp.exe"
     if not executable.exists():
         pytest.skip("the sibling D&D MCP development runtime is unavailable")
@@ -578,9 +578,9 @@ async def test_real_dnd_stdio_host_dispatches_hidden_conversation_transport(tmp_
                 cwd=str(dnd_repo),
                 env={
                     "SAGASMITH_DND_MCP_HOME": str(tmp_path / "dnd-home"),
-                    "SAGASMITH_DND_SKILLS_DIR": str(workspace / "SagaSmith-dnd-skills"),
+                    "SAGASMITH_DND_SKILLS_DIR": str(dnd_repo / "skills"),
                     "SAGASMITH_MODULEGEN_SKILLS_DIR": str(
-                        workspace / "SagaSmith-module-gen-skills"
+                        dnd_repo / "skills" / "dnd-module-generator"
                     ),
                     "SAGASMITH_DND_MCP_AUTO_SEED": "0",
                 },

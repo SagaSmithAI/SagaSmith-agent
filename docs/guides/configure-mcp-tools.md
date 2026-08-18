@@ -46,7 +46,10 @@ tools and publishes selected domain tools after `exposure(set)`.
 {
   "agents": {
     "defaults": {
-      "externalSkillsDirs": ["..\\SagaSmith-dnd-skills\\full\\skills"]
+      "externalSkillsDirs": [
+        "..\\sagasmith-dnd\\skills\\full\\skills",
+        "..\\sagasmith-dnd\\skills\\dnd-module-generator"
+      ]
     }
   },
   "tools": {
