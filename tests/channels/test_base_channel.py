@@ -93,3 +93,20 @@ async def test_handle_message_group_ignores_unknown() -> None:
 
     assert channel._sent == []
 
+
+@pytest.mark.asyncio
+async def test_handle_message_preserves_trusted_shared_principal() -> None:
+    bus = MessageBus()
+    channel = _DummyChannel({"allowFrom": ["*"]}, bus)
+
+    await channel._handle_message(
+        sender_id="member-1",
+        chat_id="group-1",
+        content="hello",
+        principal_id="group:group-1",
+    )
+
+    msg = await bus.consume_inbound()
+    assert msg.sender_id == "member-1"
+    assert msg.principal_id == "group:group-1"
+

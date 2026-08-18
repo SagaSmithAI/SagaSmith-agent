@@ -34,8 +34,10 @@ uv run nanobot sagasmith install
 ```
 
 `--skip-ui` 用于仅后端开发安装，`--verify-only` 用于只读审计。
-`--source release --release-ref <tag-or-branch>` 会把发布检出放在独立目录，
-不修改开发工作区。
+`--source release` 默认按仓库内的 `sagasmith-stack-lock.json` 为每个组件检出独立的
+不可变 commit；`--release-manifest <path>` 可选择另一份已审计版本锁。只有同一 tag
+确实存在于所有所选仓库时，才使用 `--release-ref <coordinated-tag>`。发布检出不会修改
+开发工作区。
 
 配置器只维护 SagaSmith 自己的 MCP 与 Skills 字段；修改前备份现有配置，
 并保留 provider、secret、channel、无关 MCP 和无关 Skills 路径。

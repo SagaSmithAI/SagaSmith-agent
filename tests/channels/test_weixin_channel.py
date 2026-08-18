@@ -105,6 +105,26 @@ async def test_process_message_deduplicates_inbound_ids() -> None:
 
 
 @pytest.mark.asyncio
+async def test_process_group_message_uses_shared_group_principal() -> None:
+    channel, bus = _make_channel()
+    channel._start_typing = AsyncMock()
+
+    await channel._process_message(
+        {
+            "message_type": 1,
+            "message_id": "group-message-1",
+            "from_user_id": "room-1@chatroom",
+            "context_token": "ctx-group",
+            "item_list": [{"type": ITEM_TEXT, "text_item": {"text": "hello"}}],
+        }
+    )
+
+    msg = await bus.consume_inbound()
+    assert msg.session_key == "weixin:room-1@chatroom"
+    assert msg.principal_id == "group:room-1@chatroom"
+
+
+@pytest.mark.asyncio
 async def test_process_message_caches_context_token_and_send_uses_it() -> None:
     channel, _bus = _make_channel()
     channel._client = object()

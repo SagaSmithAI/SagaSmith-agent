@@ -84,7 +84,16 @@ def install_command(
     build_ui: bool = typer.Option(True, "--build-ui/--skip-ui"),
     verify_only: bool = typer.Option(False, "--verify-only"),
     source: str = typer.Option("workspace", "--source", help="workspace or release"),
-    release_ref: str = typer.Option("main", "--release-ref"),
+    release_ref: str | None = typer.Option(
+        None,
+        "--release-ref",
+        help="Override the per-component release lock with one coordinated tag or ref.",
+    ),
+    release_manifest: Path | None = typer.Option(
+        None,
+        "--release-manifest",
+        help="Immutable per-component release lock; defaults to sagasmith-stack-lock.json.",
+    ),
     as_json: bool = typer.Option(False, "--json"),
 ) -> None:
     """Install any selected combination; omission of --mode selects all three."""
@@ -94,14 +103,19 @@ def install_command(
         if source not in {"workspace", "release"}:
             raise ValueError("source must be workspace or release")
         if source == "release":
-            layout = materialize_release(layout, selected, ref=release_ref)
+            layout = materialize_release(
+                layout,
+                selected,
+                ref=release_ref,
+                manifest_path=release_manifest,
+            )
         state = install_workspace(
             layout,
             selected,
             build_ui=build_ui,
             verify_only=verify_only,
             source=source,
-            release_ref=release_ref,
+            release_ref=release_ref or "manifest",
         )
     except (StackError, ValueError, OSError) as exc:
         _fail(exc)

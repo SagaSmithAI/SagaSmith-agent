@@ -404,6 +404,41 @@ async def test_principal_injection_hides_and_overrides_model_argument() -> None:
     assert captured == {"campaign_id": "c1", "principal_id": "discord:user_42"}
 
 
+@pytest.mark.asyncio
+async def test_principal_injection_prefers_trusted_shared_principal() -> None:
+    captured: dict[str, object] = {}
+
+    async def call_tool(_name: str, arguments: dict) -> object:
+        captured.update(arguments)
+        return SimpleNamespace(content=[_FakeTextContent("ok")])
+
+    wrapper = MCPToolWrapper(
+        SimpleNamespace(call_tool=call_tool),
+        "sagasmith_dnd",
+        SimpleNamespace(
+            name="campaign_get",
+            description="campaign",
+            inputSchema={
+                "type": "object",
+                "properties": {"principal_id": {"type": "string"}},
+                "required": ["principal_id"],
+            },
+        ),
+        inject_principal=True,
+    )
+    ctx = RequestContext(
+        channel="discord",
+        chat_id="table-1",
+        sender_id="member-1",
+        principal_id="group:table-1",
+    )
+
+    with request_context(ctx):
+        assert await wrapper.execute() == "ok"
+
+    assert captured == {"principal_id": "discord:group:table-1"}
+
+
 def test_local_principal_comes_from_server_schema_default() -> None:
     advertised = SimpleNamespace(
         name="campaign_get",
@@ -521,6 +556,77 @@ async def test_mcp_exact_domain_binding_emits_a_one_time_context_barrier(
     stored = sessions.get_or_create("cli:direct")
     assert stored.metadata["_domain_context_binding"]["audience"] == "player"
     assert stored.last_consolidated == len(stored.messages)
+
+
+@pytest.mark.asyncio
+async def test_mcp_uses_host_binding_from_text_when_structured_output_is_redacted(
+    tmp_path: Path,
+) -> None:
+    trusted_principal = "discord:group:table-1"
+    binding = DomainContextBinding(
+        domain="sagasmith-coc",
+        campaign_id="campaign-1",
+        principal_fingerprint=mcp_mod.principal_fingerprint(trusted_principal),
+        authorization_fingerprint="b" * 64,
+        role="owner",
+        audience="dm",
+        branch_id="branch-1",
+    ).to_dict()
+
+    class Session:
+        async def call_tool(self, name, arguments):
+            del name, arguments
+            return SimpleNamespace(
+                content=[
+                    _FakeTextContent(
+                        json.dumps(
+                            {
+                                "campaign_id": "campaign-1",
+                                "host_context_binding": binding,
+                            }
+                        )
+                    )
+                ],
+                isError=False,
+                structuredContent={"campaign_id": "campaign-1"},
+            )
+
+    sessions = SessionManager(tmp_path)
+    wrapper = MCPToolWrapper(
+        Session(),
+        "sagasmith_coc",
+        SimpleNamespace(
+            name="campaign_query",
+            description="campaign",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string"},
+                    "campaign_id": {"type": "string"},
+                    "principal_id": {"type": "string"},
+                },
+                "required": ["action", "campaign_id", "principal_id"],
+            },
+            meta={"sagasmith_domain_context": "sagasmith-coc"},
+        ),
+        inject_principal=True,
+        session_store=sessions,
+    )
+    ctx = RequestContext(
+        channel="discord",
+        chat_id="table-1",
+        sender_id="member-1",
+        principal_id="group:table-1",
+        session_key="discord:table-1",
+    )
+
+    with request_context(ctx):
+        result = await wrapper.execute(action="get", campaign_id="campaign-1")
+
+    assert result.is_error is False
+    assert result.context_barrier is True
+    stored = sessions.get_or_create("discord:table-1")
+    assert stored.metadata["_domain_context_binding"] == binding
 
 
 def test_domain_binding_is_not_read_from_arbitrary_nested_content() -> None:

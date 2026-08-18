@@ -1404,6 +1404,9 @@ class TelegramChannel(BaseChannel):
             metadata=self._build_message_metadata(message, user),
             session_key=self._derive_topic_session_key(message),
             is_dm=message.chat.type == "private",
+            principal_id=(
+                f"group:{message.chat_id}" if message.chat.type != "private" else None
+            ),
         )
 
     async def _on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1486,6 +1489,9 @@ class TelegramChannel(BaseChannel):
                     "contents": [], "media": [],
                     "metadata": metadata,
                     "session_key": session_key,
+                    "principal_id": (
+                        f"group:{str_chat_id}" if message.chat.type != "private" else None
+                    ),
                 }
                 self._start_typing(str_chat_id)
                 await self._add_reaction(str_chat_id, message.message_id, self.config.react_emoji)
@@ -1509,6 +1515,9 @@ class TelegramChannel(BaseChannel):
             media=media_paths,
             metadata=metadata,
             session_key=session_key,
+            principal_id=(
+                f"group:{str_chat_id}" if message.chat.type != "private" else None
+            ),
         )
 
     async def _flush_media_group(self, key: str) -> None:
@@ -1523,6 +1532,7 @@ class TelegramChannel(BaseChannel):
                 content=content, media=list(dict.fromkeys(buf["media"])),
                 metadata=buf["metadata"],
                 session_key=buf.get("session_key"),
+                principal_id=buf.get("principal_id"),
             )
         finally:
             self._media_group_tasks.pop(key, None)
@@ -1688,4 +1698,9 @@ class TelegramChannel(BaseChannel):
                 "first_name": user.first_name,
                 "is_callback": True,
             },
+            principal_id=(
+                f"group:{chat_id}"
+                if query.message is not None and query.message.chat.type != "private"
+                else None
+            ),
         )

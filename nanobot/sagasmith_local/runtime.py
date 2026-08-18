@@ -32,6 +32,7 @@ from .model import (
     StackLayout,
     StackState,
     atomic_json_write,
+    load_release_revisions,
     selected_components,
 )
 
@@ -110,7 +111,7 @@ def install_workspace(
     build_ui: bool = True,
     verify_only: bool = False,
     source: str = "workspace",
-    release_ref: str = "main",
+    release_ref: str = "manifest",
 ) -> StackState:
     """Install selected source checkouts without importing or activating content Packs."""
     if not verify_only:
@@ -196,10 +197,20 @@ def materialize_release(
     layout: StackLayout,
     modes: tuple[InstallMode, ...],
     *,
-    ref: str = "main",
+    ref: str | None = None,
+    manifest_path: Path | None = None,
 ) -> StackLayout:
-    """Create/update a release checkout without mutating the developer workspace."""
+    """Create/update immutable release checkouts without mutating the developer workspace."""
+
     git = _which("git")
+    revisions = (
+        {component.repository: ref for component in selected_components(modes)}
+        if ref
+        else load_release_revisions(
+            manifest_path or layout.agent_root / "sagasmith-stack-lock.json",
+            modes,
+        )
+    )
     release_root = layout.state_root / "releases" / "current"
     release_root.mkdir(parents=True, exist_ok=True)
     for component in selected_components(modes):
@@ -212,7 +223,10 @@ def materialize_release(
         dirty = _run([git, "status", "--porcelain"], cwd=target, capture=True).stdout.strip()
         if dirty:
             raise StackError(f"release checkout is dirty: {target}")
-        _run([git, "fetch", "origin", ref], cwd=target)
+        revision = revisions.get(component.repository)
+        if not revision:
+            raise StackError(f"release lock is missing component: {component.repository}")
+        _run([git, "fetch", "origin", revision], cwd=target)
         _run([git, "checkout", "--detach", "FETCH_HEAD"], cwd=target)
     return StackLayout.discover(
         agent_root=layout.agent_root,
@@ -600,22 +614,25 @@ def upgrade(layout: StackLayout, *, build_ui: bool = True) -> StackState:
             raise StackError(f"cannot upgrade dirty repository: {component.repository}")
         previous[component.repository] = _git_revision(repo)
     backup(layout)
-    for component in selected_components(modes):
-        if state.source == "release" and component.repository == "SagaSmith-agent":
-            continue
-        repo = (
-            layout.agent_root
-            if component.repository == "SagaSmith-agent"
-            else layout.repo(component.repository)
+    if state.source == "release":
+        materialize_release(
+            layout,
+            modes,
+            ref=None if state.release_ref == "manifest" else state.release_ref,
         )
-        _run(["git", "fetch", "origin"], cwd=repo)
-        branch = _run(
-            ["git", "branch", "--show-current"], cwd=repo, capture=True
-        ).stdout.strip()
-        if state.source == "release":
-            _run(["git", "checkout", "--detach", f"origin/{state.release_ref}"], cwd=repo)
-        elif branch:
-            _run(["git", "merge", "--ff-only", f"origin/{branch}"], cwd=repo)
+    else:
+        for component in selected_components(modes):
+            repo = (
+                layout.agent_root
+                if component.repository == "SagaSmith-agent"
+                else layout.repo(component.repository)
+            )
+            _run(["git", "fetch", "origin"], cwd=repo)
+            branch = _run(
+                ["git", "branch", "--show-current"], cwd=repo, capture=True
+            ).stdout.strip()
+            if branch:
+                _run(["git", "merge", "--ff-only", f"origin/{branch}"], cwd=repo)
     result = install_workspace(
         layout,
         modes,

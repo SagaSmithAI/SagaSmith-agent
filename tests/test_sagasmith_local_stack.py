@@ -16,6 +16,7 @@ from nanobot.sagasmith_local.model import (
     ProcessRecord,
     StackLayout,
     StackState,
+    load_release_revisions,
     normalize_modes,
     selected_components,
 )
@@ -45,6 +46,40 @@ def test_modes_are_independently_selectable_and_default_to_all() -> None:
     assert "sagasmith-coc-ui" in repositories
     assert "SagaSmith-dnd-mcp" not in repositories
     assert "SagaSmith-narrative-mcp" not in repositories
+
+
+def test_release_lock_selects_exact_revisions_for_each_mode(tmp_path: Path) -> None:
+    lock = tmp_path / "stack-lock.json"
+    components = {
+        component.repository: {"revision": "a" * 40}
+        for component in selected_components((InstallMode.COC,))
+        if component.repository != "SagaSmith-agent"
+    }
+    lock.write_text(
+        json.dumps({"schema": "sagasmith.release-lock/v1", "components": components}),
+        encoding="utf-8",
+    )
+
+    revisions = load_release_revisions(lock, (InstallMode.COC,))
+
+    assert set(revisions) == set(components)
+    assert set(revisions.values()) == {"a" * 40}
+
+
+def test_release_lock_rejects_missing_or_moving_component_refs(tmp_path: Path) -> None:
+    lock = tmp_path / "stack-lock.json"
+    lock.write_text(
+        json.dumps(
+            {
+                "schema": "sagasmith.release-lock/v1",
+                "components": {"sagasmith-core": {"revision": "main"}},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="invalid revision|missing component"):
+        load_release_revisions(lock, (InstallMode.DND,))
 
 
 def test_config_reconciler_owns_only_sagasmith_entries(tmp_path: Path) -> None:

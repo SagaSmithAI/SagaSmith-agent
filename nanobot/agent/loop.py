@@ -825,6 +825,7 @@ class AgentLoop:
             runtime=ctx.runtime,
             metadata=dict(ctx.msg.metadata or {}),
             sender_id=ctx.msg.sender_id,
+            principal_id=ctx.msg.principal_id,
             turn_id=ctx.turn_id,
             workspace=scope.project_path,
         )
@@ -1898,14 +1899,29 @@ class AgentLoop:
                 f"one sync capability for {binding.domain!r}, found {len(matches)}."
             )
         assert ctx.request_context is not None
+        tool_name = matches[0][0]
+        sync_tool = tools.get(tool_name)
+        properties = dict((sync_tool.parameters if sync_tool is not None else {}).get("properties") or {})
+        if {"view", "payload"}.issubset(properties):
+            arguments = {
+                "view": "binding",
+                "payload": {"campaign_id": binding.campaign_id},
+            }
+        elif {"action", "campaign_id"}.issubset(properties):
+            arguments = {
+                "action": "get",
+                "campaign_id": binding.campaign_id,
+            }
+        else:
+            raise RuntimeError(
+                "Authoritative domain context synchronization capability has an "
+                "unsupported schema."
+            )
         token = bind_request_context(ctx.request_context)
         try:
             result = await tools.execute(
-                matches[0][0],
-                {
-                    "view": "binding",
-                    "payload": {"campaign_id": binding.campaign_id},
-                },
+                tool_name,
+                arguments,
             )
         finally:
             reset_request_context(token)

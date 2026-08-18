@@ -103,6 +103,7 @@ def test_discover_excludes_abstract_and_mcp():
     assert "MCPToolWrapper" not in class_names
     assert "MCPResourceWrapper" not in class_names
     assert "MCPPromptWrapper" not in class_names
+    assert "StructuredOutputTool" not in class_names
 
 
 def test_discover_skips_private_classes():

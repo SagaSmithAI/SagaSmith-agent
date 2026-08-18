@@ -2337,6 +2337,7 @@ class FeishuChannel(BaseChannel):
                 },
                 session_key=session_key,
                 is_dm=chat_type == "p2p",
+                principal_id=f"group:{reply_to}" if chat_type == "group" else None,
             )
 
         except Exception:

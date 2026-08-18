@@ -1,4 +1,8 @@
 __pycache__
+.venv/
+.pytest_cache/
+.ruff_cache/
+.test-tmp/
 *.pyc
 *.pyo
 *.pyd
@@ -12,3 +16,10 @@ nanobot/web/dist/
 node_modules/
 bridge/dist/
 workspace/
+tmp/
+case/
+config/
+docs/
+images/
+tests/
+webui/

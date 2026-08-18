@@ -542,6 +542,7 @@ class QQChannel(BaseChannel):
                     "attachments": att_meta,
                 },
                 is_dm=not is_group,
+                principal_id=f"group:{chat_id}" if is_group else None,
             )
         except Exception:
             self.logger.exception("Error handling inbound message id={}", getattr(data, "id", "?"))

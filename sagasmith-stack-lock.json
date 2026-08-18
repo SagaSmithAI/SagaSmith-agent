@@ -1,0 +1,18 @@
+{
+  "schema": "sagasmith.release-lock/v1",
+  "released_at": "2026-08-18T00:00:00+08:00",
+  "components": {
+    "sagasmith-core": {"revision": "7b36d3da232cd05ad0e36bde891f8bc2f532bf6f"},
+    "sagasmith-dnd": {"revision": "0dce1aad7ad7f7d442c39c0c8699ed957ff4fe12"},
+    "sagasmith-coc": {"revision": "bd95caae9ad19d23e48cf86e7bd3e9cec65d9338"},
+    "SagaSmith-dnd-mcp": {"revision": "740aa64aaabf8e2d6c28da59c12fb4e5fad4faed"},
+    "SagaSmith-coc-mcp": {"revision": "908fefa505ceacdc603e20eb20cf053e1d77b187"},
+    "SagaSmith-dnd-skills": {"revision": "a45a3b37147478f38493ccf07545920aa6a6c07a"},
+    "SagaSmith-coc-skills": {"revision": "8f547f371c47a6ef2f70b2174174e104d650a7c7"},
+    "SagaSmith-dnd-ui": {"revision": "051c155900fa76f0baf8d9289c40f6d55f63006f"},
+    "sagasmith-coc-ui": {"revision": "d6c52b9fa08a15f78a0e64aafde999b526beb472"},
+    "SagaSmith-narrative-mcp": {"revision": "81f7c9303e7c4cd45db59d86701361f2b569e0ca"},
+    "SagaSmith-narrative-skills": {"revision": "48d2621aebb62139436364ac9f7ecc1e24c91db1"},
+    "SagaSmith-module-gen-skills": {"revision": "6a6261f52a88dab7bb360df6dbfcd1443b500bbd"}
+  }
+}

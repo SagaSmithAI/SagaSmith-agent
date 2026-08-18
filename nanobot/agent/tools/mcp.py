@@ -102,6 +102,24 @@ def _host_context_binding(value: Any) -> Mapping[str, Any] | None:
     return None
 
 
+def _context_payload_from_result(content: Any, structured_content: Any) -> Any:
+    """Prefer a Host binding carried in MCP text over a redacted structured result."""
+
+    if _host_context_binding(structured_content) is not None:
+        return structured_content
+    for block in content or []:
+        text = getattr(block, "text", None)
+        if not isinstance(text, str):
+            continue
+        try:
+            decoded = json.loads(text)
+        except json.JSONDecodeError:
+            continue
+        if _host_context_binding(decoded) is not None:
+            return decoded
+    return structured_content
+
+
 def routing_context_provider(registry: ToolRegistry):
     """Return per-turn MCP routing context for the tools currently connected."""
 
@@ -662,7 +680,8 @@ class MCPToolWrapper(_MCPWrapperBase):
     def _trusted_principal(self) -> str:
         # Wrappers are shared across sessions, so identity must remain task-local.
         ctx = current_request_context()
-        if ctx is None or not ctx.sender_id:
+        principal_id = ctx.principal_id if ctx is not None else None
+        if ctx is None or not (principal_id or ctx.sender_id):
             # Local cron/CLI calls have no user identity. They remain explicitly
             # distinguishable from an inbound platform user and cannot be spoofed
             # by a model parameter. The capability server owns the local identity;
@@ -671,7 +690,7 @@ class MCPToolWrapper(_MCPWrapperBase):
                 raise RuntimeError("MCP tool does not advertise a local principal default")
             return self._local_principal_default
         channel = re.sub(r"[^a-zA-Z0-9_.:-]", "_", ctx.channel or "unknown")
-        sender = re.sub(r"[^a-zA-Z0-9_.:-]", "_", ctx.sender_id)
+        sender = re.sub(r"[^a-zA-Z0-9_.:-]", "_", principal_id or ctx.sender_id or "")
         return f"{channel}:{sender}"
 
     async def execute(self, **kwargs: Any) -> str:
@@ -768,6 +787,10 @@ class MCPToolWrapper(_MCPWrapperBase):
                         rendered,
                         kwargs,
                         trusted_principal=trusted_principal,
+                        authoritative_payload=_context_payload_from_result(
+                            result.content,
+                            structured_content,
+                        ),
                     )
                     return ToolResult(
                         rendered,
@@ -791,6 +814,7 @@ class MCPToolWrapper(_MCPWrapperBase):
         arguments: Mapping[str, Any],
         *,
         trusted_principal: str | None,
+        authoritative_payload: Any = None,
     ) -> bool:
         if self._domain_context is None or self._session_store is None:
             return False
@@ -810,7 +834,9 @@ class MCPToolWrapper(_MCPWrapperBase):
             if trusted_principal is not None
             else (previous.principal_fingerprint if previous is not None else "")
         )
-        exact = _host_context_binding(payload)
+        exact = _host_context_binding(authoritative_payload)
+        if exact is None:
+            exact = _host_context_binding(payload)
         if exact is not None:
             binding = DomainContextBinding.from_mapping(exact)
             if binding.domain != self._domain_context:

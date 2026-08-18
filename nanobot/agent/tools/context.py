@@ -29,6 +29,7 @@ class RequestContext:
     runtime: LLMRuntime | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     sender_id: str | None = None
+    principal_id: str | None = None
     turn_id: str | None = None
     workspace: Path | None = None
 

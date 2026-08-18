@@ -1196,6 +1196,7 @@ async def test_group_policy_open_accepts_plain_group_message() -> None:
 
     assert len(handled) == 1
     assert channel._app.bot.get_me_calls == 0
+    assert handled[0]["principal_id"] == "group:-100123"
 
 
 @pytest.mark.asyncio

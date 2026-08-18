@@ -36,8 +36,11 @@ uv run nanobot sagasmith install
 ```
 
 Use `--skip-ui` for a backend-only development install and `--verify-only` for
-a non-installing audit. Released checkouts may be materialized outside the
-developer workspace with `--source release --release-ref <tag-or-branch>`.
+a non-installing audit. `--source release` uses the bundled
+`sagasmith-stack-lock.json` to select one immutable commit per component.
+`--release-manifest <path>` accepts another audited lock; use
+`--release-ref <coordinated-tag>` only when the same tag exists in every selected
+repository.
 
 The installer reconciles only SagaSmith-owned MCP and Skill entries. It backs
 up an existing config before changing it and preserves providers, secrets,

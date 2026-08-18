@@ -19,6 +19,7 @@ class InstallMode(StrEnum):
 
 ALL_MODES = tuple(InstallMode)
 STACK_SCHEMA = "sagasmith.local-stack/v1"
+RELEASE_LOCK_SCHEMA = "sagasmith.release-lock/v1"
 
 
 @dataclass(frozen=True)
@@ -72,7 +73,7 @@ class StackState:
     schema: str = STACK_SCHEMA
     modes: list[str] = field(default_factory=list)
     source: str = "workspace"
-    release_ref: str = "main"
+    release_ref: str = "manifest"
     workspace_root: str = ""
     config_path: str = ""
     installed_at: str = ""
@@ -94,7 +95,7 @@ class StackState:
             schema=value["schema"],
             modes=list(value.get("modes", [])),
             source=str(value.get("source", "workspace")),
-            release_ref=str(value.get("release_ref", "main")),
+            release_ref=str(value.get("release_ref", "manifest")),
             workspace_root=str(value.get("workspace_root", "")),
             config_path=str(value.get("config_path", "")),
             installed_at=str(value.get("installed_at", "")),
@@ -212,6 +213,35 @@ def normalize_modes(values: list[str] | tuple[str, ...] | None) -> tuple[Install
         if mode not in result:
             result.append(mode)
     return tuple(result)
+
+
+def load_release_revisions(path: Path, modes: tuple[InstallMode, ...]) -> dict[str, str]:
+    """Load an immutable per-component release lock for the selected modes."""
+
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"cannot read SagaSmith release lock {path}: {exc}") from exc
+    if not isinstance(value, dict) or value.get("schema") != RELEASE_LOCK_SCHEMA:
+        raise ValueError(f"unsupported SagaSmith release lock: {path}")
+    raw_components = value.get("components")
+    if not isinstance(raw_components, dict):
+        raise ValueError("SagaSmith release lock components must be an object")
+    selected = {
+        component.repository
+        for component in selected_components(modes)
+        if component.repository != "SagaSmith-agent"
+    }
+    revisions: dict[str, str] = {}
+    for repository in sorted(selected):
+        item = raw_components.get(repository)
+        if not isinstance(item, dict):
+            raise ValueError(f"release lock is missing component: {repository}")
+        revision = str(item.get("revision") or "").strip().casefold()
+        if len(revision) != 40 or any(character not in "0123456789abcdef" for character in revision):
+            raise ValueError(f"release lock has invalid revision for {repository}")
+        revisions[repository] = revision
+    return revisions
 
 
 def atomic_json_write(path: Path, value: Any) -> None:

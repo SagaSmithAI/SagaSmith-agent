@@ -19,6 +19,10 @@ class StructuredOutputTool(Tool):
     Agent-to-host delivery channel, not an authoritative domain mutation.
     """
 
+    # The host constructs this tool from a caller-supplied schema.  It cannot be
+    # instantiated by the zero-argument built-in/plugin discovery path.
+    _plugin_discoverable = False
+
     def __init__(
         self,
         *,

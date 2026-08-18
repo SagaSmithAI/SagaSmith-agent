@@ -56,6 +56,7 @@ async def test_on_group_message_routes_to_group_chat_id() -> None:
     msg = await channel.bus.consume_inbound()
     assert msg.sender_id == "user1"
     assert msg.chat_id == "group123"
+    assert msg.principal_id == "group:group123"
 
 
 @pytest.mark.asyncio
@@ -101,6 +102,7 @@ async def test_on_group_message_passes_is_dm_false_to_base_handler() -> None:
     assert kwargs["chat_id"] == "group123"
     assert kwargs["content"] == "hello"
     assert kwargs["is_dm"] is False
+    assert kwargs["principal_id"] == "group:group123"
 
 
 @pytest.mark.asyncio

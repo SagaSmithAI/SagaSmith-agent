@@ -39,7 +39,7 @@ campaign, principal, phase, and `tools/list_changed` cannot leak between chats.
 ### D&D
 
 SagaSmith D&D uses one session-aware `exposure` protocol and a mutable native tool list. Configure
-the trusted D&D server with `enabledTools: ["*"]`; the server initially publishes only its six core
+the trusted D&D server with `enabledTools: ["*"]`; the server initially publishes only its seven core
 tools and publishes selected domain tools after `exposure(set)`.
 
 ```json
@@ -78,9 +78,9 @@ Its authenticated sticky-session Workbench gateway is on port 8768 and binds
 the principal server-side. Narrative remains an Agent-owned session-scoped
 stdio child because it currently has no independent browser client.
 
-The six always-available tools are `exposure`, `server_capabilities`, `storage_status`,
-`campaign_query`, `game_phase`, and `skill_query`. Do not configure retired exposure facades or a
-second host-side phase/profile filter.
+The seven always-available tools are `exposure`, `server_capabilities`, `storage_status`,
+`campaign_query`, `game_phase`, `resolution_presentation`, and `skill_query`. Do not configure
+retired exposure facades or a second host-side phase/profile filter.
 
 Use the protocol in this order:
 

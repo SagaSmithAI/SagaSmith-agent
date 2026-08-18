@@ -849,6 +849,9 @@ class WeixinChannel(BaseChannel):
             content=content,
             media=media_paths or None,
             metadata={"message_id": msg_id},
+            principal_id=(
+                f"group:{from_user_id}" if from_user_id.endswith("@chatroom") else None
+            ),
         )
 
     # ------------------------------------------------------------------

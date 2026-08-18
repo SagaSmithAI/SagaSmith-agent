@@ -89,7 +89,7 @@ SagaSmith/
   SagaSmith-dnd-skills/         # D&D Agent 流程
   SagaSmith-coc-skills/         # CoC Agent 流程
   SagaSmith-module-gen-skills/  # 当前 schema 的 Module Pack 创作流程
-  SagaSmith-dnd-content-library/# 可再分发的公开 Pack 目录
+  SagaSmith-dnd-content-library/# 私有、许可受限的 Pack 归档（可选）
   SagaSmith-dnd-ui/             # D&D UI
   sagasmith-coc-ui/             # CoC UI
 ```

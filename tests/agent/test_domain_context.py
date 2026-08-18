@@ -209,7 +209,13 @@ async def test_pre_turn_sync_advances_branch_barrier_before_history_replay() -> 
 
         @property
         def parameters(self) -> dict[str, object]:
-            return {"type": "object", "additionalProperties": True}
+            return {
+                "type": "object",
+                "properties": {
+                    "view": {"type": "string"},
+                    "payload": {"type": "object"},
+                },
+            }
 
         async def execute(self, **kwargs: object) -> ToolResult:
             seen.update(kwargs)
@@ -240,6 +246,61 @@ async def test_pre_turn_sync_advances_branch_barrier_before_history_replay() -> 
     }
     assert session.get_history() == []
     assert session.metadata[DOMAIN_CONTEXT_BINDING_KEY]["branch_id"] == "branch-b"
+
+
+@pytest.mark.asyncio
+async def test_pre_turn_sync_supports_action_campaign_query_schema() -> None:
+    session = Session(key="telegram:table")
+    bind_session_context(session, _binding())
+    seen: dict[str, object] = {}
+
+    class SyncTool(Tool):
+        _context_sync = True
+        _domain_context = "sagasmith-dnd"
+
+        @property
+        def name(self) -> str:
+            return "mcp_sagasmith_coc_campaign_query"
+
+        @property
+        def description(self) -> str:
+            return "sync"
+
+        @property
+        def parameters(self) -> dict[str, object]:
+            return {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string"},
+                    "campaign_id": {"type": "string"},
+                },
+            }
+
+        async def execute(self, **kwargs: object) -> ToolResult:
+            seen.update(kwargs)
+            bind_session_context(session, _binding())
+            return ToolResult("ok")
+
+    tools = ToolRegistry()
+    tools.register(SyncTool())
+    ctx = SimpleNamespace(
+        session=session,
+        tools=tools,
+        request_context=RequestContext(
+            channel="telegram",
+            chat_id="table",
+            sender_id="member-2",
+            principal_id="group:table",
+            session_key=session.key,
+        ),
+    )
+
+    await AgentLoop._synchronize_authoritative_domain_context(
+        SimpleNamespace(tools=tools),
+        ctx,
+    )
+
+    assert seen == {"action": "get", "campaign_id": "campaign-1"}
 
 
 @pytest.mark.asyncio
