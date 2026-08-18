@@ -7,13 +7,13 @@
   },
   "profiles": {
     "dnd": {
-      "sagasmith-dnd": "b6c0f8d1c5468e288f3d75640ef180debf5f9a5d"
+      "sagasmith-dnd": "33b13e17b4facbee8ebaa59915c3e4bd6fe41dd7"
     },
     "coc": {
-      "sagasmith-coc": "16785173e507a2e611db5d4198b81c4d25d3e949"
+      "sagasmith-coc": "eb2af2d6e2eb99df18625f8b5f041ab1fef57351"
     },
     "narrative": {
-      "sagasmith-narrative": "74419c37cf524c1f28ad73a29fad72adbbb07612"
+      "sagasmith-narrative": "62a9adc1bdb9090376e2ee4f3e70edc343f2d948"
     }
   }
 }
