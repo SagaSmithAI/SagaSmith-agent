@@ -750,6 +750,14 @@ class MCPToolWrapper(_MCPWrapperBase):
         authorization_epoch = 0
         if self._session_store is not None:
             session = self._session_store.get_or_create(session_id)
+            binding = binding_from_metadata(session.metadata)
+            if (
+                not campaign_id
+                and binding is not None
+                and binding.domain == self._domain_context
+                and binding.principal_fingerprint == principal_fingerprint(trusted_principal)
+            ):
+                campaign_id = binding.campaign_id
             epochs = session.metadata.get(_MCP_AUTHORIZATION_EPOCHS_KEY)
             stored_epoch = epochs.get(self._server_name) if isinstance(epochs, Mapping) else None
             if (
@@ -758,7 +766,7 @@ class MCPToolWrapper(_MCPWrapperBase):
                 and stored_epoch >= 0
             ):
                 authorization_epoch = stored_epoch
-            elif (binding := binding_from_metadata(session.metadata)) is not None:
+            elif binding is not None:
                 authorization_epoch = binding.authorization_epoch
         if self._original_name == "exposure" and arguments.get("action") == "open":
             authorization_epoch = 0

@@ -557,6 +557,77 @@ async def test_signed_auth_context_reads_campaign_from_nested_data_envelope() ->
 
 
 @pytest.mark.asyncio
+async def test_signed_auth_context_inherits_matching_session_campaign_for_actor_tool(
+    tmp_path: Path,
+) -> None:
+    captured: list[dict[str, object]] = []
+
+    async def call_tool(_name: str, arguments: dict, *, meta: dict) -> object:
+        captured.append(meta["sagasmith_auth_context"])
+        return SimpleNamespace(content=[_FakeTextContent("ok")])
+
+    sessions = SessionManager(tmp_path)
+    stored = sessions.get_or_create("discord:table-1")
+    stored.metadata["_domain_context_binding"] = DomainContextBinding(
+        domain="sagasmith-dnd",
+        campaign_id="campaign-1",
+        principal_fingerprint=mcp_mod.principal_fingerprint("discord:user:member-1"),
+        authorization_fingerprint="b" * 64,
+        role="owner",
+        audience="dm",
+        branch_id="branch-1",
+        authorization_epoch=7,
+    ).to_dict()
+    sessions.save(stored)
+    wrapper = MCPToolWrapper(
+        SimpleNamespace(call_tool=call_tool),
+        "sagasmith_dnd",
+        SimpleNamespace(
+            name="character_ability_apply",
+            description="abilities",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "character_id": {"type": "string"},
+                    "principal_id": {"type": "string"},
+                },
+            },
+            meta={"sagasmith_domain_context": "sagasmith-dnd"},
+        ),
+        inject_principal=True,
+        auth_context_secret="s" * 32,
+        session_store=sessions,
+    )
+
+    with request_context(
+        RequestContext(
+            channel="discord",
+            chat_id="table-1",
+            sender_id="member-1",
+            actor_principal="user:member-1",
+            conversation_principal="group:table-1",
+            session_key="discord:table-1",
+        )
+    ):
+        await wrapper.execute(character_id="character-1")
+    with request_context(
+        RequestContext(
+            channel="discord",
+            chat_id="table-1",
+            sender_id="member-2",
+            actor_principal="user:member-2",
+            conversation_principal="group:table-1",
+            session_key="discord:table-1",
+        )
+    ):
+        await wrapper.execute(character_id="character-1")
+
+    assert captured[0]["campaign_id"] == "campaign-1"
+    assert captured[0]["authorization_epoch"] == 7
+    assert captured[1]["campaign_id"] == ""
+
+
+@pytest.mark.asyncio
 async def test_auth_context_tracks_pre_campaign_exposure_epoch_across_calls(
     tmp_path: Path,
 ) -> None:
