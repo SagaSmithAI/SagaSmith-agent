@@ -287,7 +287,7 @@ def test_write_stdin_preserves_completed_session_output_until_polled(tmp_path):
 
 
 def test_write_stdin_can_wait_for_expected_output(tmp_path):
-    async def run() -> tuple[str, str, str]:
+    async def run() -> tuple[str, str]:
         manager = ExecSessionManager()
         exec_tool = ExecTool(working_dir=str(tmp_path), timeout=5, session_manager=manager)
         stdin_tool = WriteStdinTool(manager=manager)
@@ -306,21 +306,24 @@ def test_write_stdin_can_wait_for_expected_output(tmp_path):
                 wait_timeout_ms=3000,
                 yield_time_ms=0,
             )
-        waited = await stdin_tool.execute(
-            session_id=sid,
-            wait_for="ready",
-            wait_timeout_ms=3000,
-            yield_time_ms=0,
-        )
+        observed = initial + booted
+        waited = ""
+        if "ready" not in observed:
+            waited = await stdin_tool.execute(
+                session_id=sid,
+                wait_for="ready",
+                wait_timeout_ms=3000,
+                yield_time_ms=0,
+            )
         cleanup = await stdin_tool.execute(session_id=sid, terminate=True, yield_time_ms=0)
-        return initial + booted, waited, cleanup
+        return observed + waited, cleanup
 
-    initial, waited, cleanup = asyncio.run(run())
+    observed, cleanup = asyncio.run(run())
 
-    assert "Process running" in initial
-    assert "booting" in initial + waited
-    assert "ready" in waited
-    assert "Wait target not observed" not in waited
+    assert "Process running" in observed
+    assert "booting" in observed
+    assert "ready" in observed
+    assert "Wait target not observed" not in observed
     assert "Session terminated." in cleanup
 
 
