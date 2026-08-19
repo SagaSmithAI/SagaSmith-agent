@@ -37,8 +37,9 @@ _PROXY_ENV_VARS = (
 
 
 class _FakeTextContent:
-    def __init__(self, text: str) -> None:
+    def __init__(self, text: str, meta: dict | None = None) -> None:
         self.text = text
+        self.meta = meta
 
 
 class _FakeTextResourceContents:
@@ -405,7 +406,7 @@ async def test_principal_injection_hides_and_overrides_model_argument() -> None:
 
 
 @pytest.mark.asyncio
-async def test_principal_injection_prefers_trusted_shared_principal() -> None:
+async def test_principal_injection_uses_actor_not_shared_conversation() -> None:
     captured: dict[str, object] = {}
 
     async def call_tool(_name: str, arguments: dict) -> object:
@@ -430,13 +431,181 @@ async def test_principal_injection_prefers_trusted_shared_principal() -> None:
         channel="discord",
         chat_id="table-1",
         sender_id="member-1",
-        principal_id="group:table-1",
+        actor_principal="user:member-1",
+        conversation_principal="group:table-1",
     )
 
     with request_context(ctx):
         assert await wrapper.execute() == "ok"
 
-    assert captured == {"principal_id": "discord:group:table-1"}
+    assert captured == {"principal_id": "discord:user:member-1"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "conversation_principal",
+    ["group:table-1", "discord:group:table-1"],
+)
+async def test_signed_auth_context_is_model_invisible_and_separates_actor_from_group(
+    conversation_principal: str,
+) -> None:
+    captured: dict[str, object] = {}
+
+    async def call_tool(_name: str, arguments: dict, *, meta: dict) -> object:
+        captured.update({"arguments": arguments, "meta": meta})
+        return SimpleNamespace(
+            content=[
+                _FakeTextContent(
+                    "ok",
+                    {
+                        "sagasmith_auth_context_receipt": {
+                            "actor_principal": "discord:user:member-1",
+                            "conversation_principal": "discord:group:table-1",
+                            "tool": "campaign_get",
+                        }
+                    },
+                )
+            ]
+        )
+
+    wrapper = MCPToolWrapper(
+        SimpleNamespace(call_tool=call_tool),
+        "sagasmith_dnd",
+        SimpleNamespace(
+            name="campaign_get",
+            description="campaign",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "campaign_id": {"type": "string"},
+                    "principal_id": {"type": "string"},
+                },
+                "required": ["campaign_id", "principal_id"],
+            },
+        ),
+        inject_principal=True,
+        auth_context_secret="s" * 32,
+    )
+    ctx = RequestContext(
+        channel="discord",
+        chat_id="table-1",
+        sender_id="member-1",
+        actor_principal="user:member-1",
+        conversation_principal=conversation_principal,
+        session_key="discord:table-1",
+    )
+
+    with request_context(ctx):
+        result = await wrapper.execute(campaign_id="campaign-1", principal_id="forged")
+
+    assert captured["arguments"] == {
+        "campaign_id": "campaign-1",
+        "principal_id": "discord:user:member-1",
+    }
+    auth = captured["meta"]["sagasmith_auth_context"]
+    assert auth["schema"] == "sagasmith.auth-context/v1"
+    assert auth["actor_principal"] == "discord:user:member-1"
+    assert auth["conversation_principal"] == "discord:group:table-1"
+    assert auth["session_id"] == "discord:table-1"
+    assert len(auth["signature"]) == 64
+    assert str(result) == "ok"
+    assert result.audit_receipt == {
+        "actor_principal": "discord:user:member-1",
+        "conversation_principal": "discord:group:table-1",
+        "tool": "campaign_get",
+    }
+
+
+@pytest.mark.asyncio
+async def test_signed_auth_context_reads_campaign_from_nested_data_envelope() -> None:
+    captured: dict[str, object] = {}
+
+    async def call_tool(_name: str, arguments: dict, *, meta: dict) -> object:
+        captured.update(meta)
+        return SimpleNamespace(content=[_FakeTextContent("ok")])
+
+    wrapper = MCPToolWrapper(
+        SimpleNamespace(call_tool=call_tool),
+        "sagasmith_coc",
+        SimpleNamespace(
+            name="campaign_change",
+            description="campaign",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "data": {"type": "object"},
+                    "principal_id": {"type": "string"},
+                },
+            },
+        ),
+        inject_principal=True,
+        auth_context_secret="s" * 32,
+    )
+    with request_context(
+        RequestContext(
+            channel="discord",
+            chat_id="table-1",
+            sender_id="member-1",
+            actor_principal="user:member-1",
+            conversation_principal="group:table-1",
+            session_key="discord:table-1",
+        )
+    ):
+        await wrapper.execute(data={"campaign_id": "campaign-1"})
+
+    assert captured["sagasmith_auth_context"]["campaign_id"] == "campaign-1"
+
+
+@pytest.mark.asyncio
+async def test_auth_context_tracks_pre_campaign_exposure_epoch_across_calls(
+    tmp_path: Path,
+) -> None:
+    epochs: list[int] = []
+
+    async def call_tool(_name: str, arguments: dict, *, meta: dict) -> object:
+        epochs.append(meta["sagasmith_auth_context"]["authorization_epoch"])
+        revision = 1 if arguments["action"] == "set" else 0
+        return SimpleNamespace(
+            content=[_FakeTextContent(json.dumps({"revision": revision}))],
+            structuredContent={"revision": revision},
+            isError=False,
+        )
+
+    sessions = SessionManager(tmp_path)
+    wrapper = MCPToolWrapper(
+        SimpleNamespace(call_tool=call_tool),
+        "sagasmith_dnd",
+        SimpleNamespace(
+            name="exposure",
+            description="exposure",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string"},
+                    "principal_id": {"type": "string"},
+                },
+            },
+        ),
+        inject_principal=True,
+        auth_context_secret="s" * 32,
+        session_store=sessions,
+    )
+    with request_context(
+        RequestContext(
+            channel="discord",
+            chat_id="table-1",
+            sender_id="member-1",
+            actor_principal="user:member-1",
+            conversation_principal="group:table-1",
+            session_key="discord:table-1",
+        )
+    ):
+        await wrapper.execute(action="open")
+        await wrapper.execute(action="set")
+        await wrapper.execute(action="search")
+        await wrapper.execute(action="open")
+
+    assert epochs == [0, 0, 1, 0]
 
 
 def test_local_principal_comes_from_server_schema_default() -> None:
@@ -562,7 +731,7 @@ async def test_mcp_exact_domain_binding_emits_a_one_time_context_barrier(
 async def test_mcp_uses_host_binding_from_text_when_structured_output_is_redacted(
     tmp_path: Path,
 ) -> None:
-    trusted_principal = "discord:group:table-1"
+    trusted_principal = "discord:user:member-1"
     binding = DomainContextBinding(
         domain="sagasmith-coc",
         campaign_id="campaign-1",
@@ -616,7 +785,8 @@ async def test_mcp_uses_host_binding_from_text_when_structured_output_is_redacte
         channel="discord",
         chat_id="table-1",
         sender_id="member-1",
-        principal_id="group:table-1",
+        actor_principal="user:member-1",
+        conversation_principal="group:table-1",
         session_key="discord:table-1",
     )
 

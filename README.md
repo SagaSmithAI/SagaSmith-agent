@@ -36,6 +36,23 @@ SagaSmith Agent 负责：
 - 用 `player_name` 或模型文本推断权限；
 - 在存在匹配 MCP 能力时绕过 MCP 调 CLI/临时脚本。
 
+## Local 与 Hosted 双发行物
+
+仓库共享同一套 Agent loop、MCP client、Skills runtime 和 Auth Context 实现，但提供两个
+明确的应用边界：
+
+- `sagasmith-agent-local` / `Dockerfile`：用户直接运行的完整 Local Agent，包含 Channels、
+  WebUI、本地栈管理以及按配置启用的 shell/filesystem/web/cron 能力。
+- `sagasmith-agent-worker` / `Dockerfile.hosted`：Service 内部的每会话 Hosted Worker；配置
+  必须声明 `tools.distribution="hosted"`，只装载会话 MCP 与 Service 注入的结构化输出/活动工具。
+
+Hosted 镜像构建时会删除 Channel、WebUI、本地安装器和 Local CLI 表面，拒绝 Channel SDK，
+并以非 root 用户运行。两个镜像由同一 CI 分别构建和审计，不维护第二份 Agent core。
+
+Codex、Claude Code、上游 Nanobot、OpenClaw、Hermes 通过同一签名身份桥接协议连接三套
+SagaSmith MCP；适配方式、信任边界和配置形状见
+[外部 Host Auth Adapter](docs/sagasmith-host-adapters.md)。
+
 ## D&D：MCP-first 主路径
 
 [sagasmith-dnd](https://github.com/SagaSmithAI/sagasmith-dnd) 内的 D&D MCP 管理战役、规则、模组、角色、知识、分支、Snapshot 与战斗。每个聊天会话在服务端单独打开 exposure；服务端按当前 session、principal、campaign 与 phase 过滤原生工具列表，Agent 只选择当前任务所需的精确工具。

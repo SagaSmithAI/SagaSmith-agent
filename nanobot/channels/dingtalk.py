@@ -758,7 +758,7 @@ class DingTalkChannel(BaseChannel):
                     "conversation_type": conversation_type,
                 },
                 session_key=session_key,
-                principal_id=f"group:{conversation_id}" if is_group else None,
+                conversation_principal=f"group:{conversation_id}" if is_group else None,
             )
         except Exception:
             self.logger.exception("Error publishing message")

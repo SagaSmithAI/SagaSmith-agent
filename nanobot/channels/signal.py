@@ -430,6 +430,10 @@ class SignalChannel(BaseChannel):
                 media=media or [],
                 metadata=meta,
                 session_key_override=session_key,
+                actor_principal=f"user:{sender_id}",
+                conversation_principal=(
+                    f"group:{chat_id}" if not is_dm else f"dm:{chat_id}"
+                ),
             )
         )
 

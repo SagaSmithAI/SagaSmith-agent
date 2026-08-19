@@ -79,3 +79,26 @@ jobs:
       - name: Build WebUI
         working-directory: webui
         run: bun run build
+
+  distribution-images:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Local Agent image
+        run: docker build --tag sagasmith-agent-local:ci .
+
+      - name: Verify Local distribution label
+        run: >-
+          test "$(docker inspect --format '{{ index .Config.Labels "org.sagasmith.distribution" }}'
+          sagasmith-agent-local:ci)" = "local-agent"
+
+      - name: Build Hosted Worker image
+        run: docker build --file Dockerfile.hosted --tag sagasmith-agent-worker:ci .
+
+      - name: Verify Hosted image boundary and entrypoint
+        run: |
+          docker run --rm --entrypoint python sagasmith-agent-worker:ci -m nanobot.apps.hosted_audit
+          docker run --rm sagasmith-agent-worker:ci --help

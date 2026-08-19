@@ -224,7 +224,8 @@ class BaseChannel(ABC):
         metadata: dict[str, Any] | None = None,
         session_key: str | None = None,
         is_dm: bool = False,
-        principal_id: str | None = None,
+        actor_principal: str | None = None,
+        conversation_principal: str | None = None,
     ) -> None:
         """Handle an incoming message: check permissions, issue pairing codes in DMs, or forward to bus."""
         if not self.is_allowed(sender_id):
@@ -262,7 +263,8 @@ class BaseChannel(ABC):
             media=media or [],
             metadata=meta,
             session_key_override=session_key,
-            principal_id=principal_id,
+            actor_principal=actor_principal or f"user:{sender_id}",
+            conversation_principal=conversation_principal or str(chat_id),
         )
 
         await self.bus.publish_inbound(msg)

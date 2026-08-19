@@ -97,6 +97,12 @@ class ToolLoader:
         return plugins
 
     def load(self, ctx: Any, registry: ToolRegistry, *, scope: str = "core") -> list[str]:
+        if getattr(ctx.config, "distribution", "local") == "hosted":
+            # Hosted workers receive only session-scoped MCP tools plus explicit
+            # response/activity tools registered by the Service.  Do not expose
+            # shell, filesystem, web, cron, messaging, subagent, or installer
+            # capabilities merely because their shared implementation is importable.
+            return []
         registered: list[str] = []
         builtin_names: set[str] = set()
         sources = [(self.discover(), False), (self._discover_plugins().values(), True)]

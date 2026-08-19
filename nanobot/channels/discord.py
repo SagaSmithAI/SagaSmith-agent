@@ -192,7 +192,7 @@ if DISCORD_AVAILABLE:
                 content=command_text,
                 metadata=metadata,
                 session_key=session_key,
-                principal_id=(
+                conversation_principal=(
                     f"group:{channel_id}" if interaction.guild_id is not None else None
                 ),
             )
@@ -614,7 +614,9 @@ class DiscordChannel(BaseChannel):
                 metadata=metadata,
                 session_key=session_key,
                 is_dm=message.guild is None,
-                principal_id=f"group:{channel_id}" if message.guild is not None else None,
+                conversation_principal=(
+                    f"group:{channel_id}" if message.guild is not None else None
+                ),
             )
         except Exception:
             await self._clear_reactions(channel_id)

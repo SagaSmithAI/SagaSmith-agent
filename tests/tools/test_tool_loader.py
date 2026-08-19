@@ -138,6 +138,20 @@ def test_loader_registers_exec_with_real_tools_config(tmp_path):
     assert registry.has("exec")
 
 
+def test_hosted_distribution_registers_no_local_or_privileged_tools(tmp_path):
+    from nanobot.agent.tools.registry import ToolRegistry
+    from nanobot.config.schema import ToolsConfig
+
+    ctx = ToolContext(
+        config=ToolsConfig(distribution="hosted"),
+        workspace=str(tmp_path),
+    )
+    registry = ToolRegistry()
+
+    assert ToolLoader().load(ctx, registry) == []
+    assert registry.tool_names == []
+
+
 # --- Task 4: _FsTool.create() ---
 
 

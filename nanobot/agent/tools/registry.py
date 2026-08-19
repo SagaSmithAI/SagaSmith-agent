@@ -66,6 +66,16 @@ class ToolRegistry:
             and getattr(tool, "_domain_context", None) == domain
         ]
 
+    def domain_exposure_tools(self, domain: str) -> list[tuple[str, Tool]]:
+        """Return server-advertised exposure controls for one domain."""
+
+        return [
+            (name, tool)
+            for name, tool in self._tools.items()
+            if getattr(tool, "_original_name", None) == "exposure"
+            and getattr(tool, "_domain_context", None) == domain
+        ]
+
     @staticmethod
     def _lookup_key(name: str) -> str:
         """Normalize names for suggestions only; never for execution."""

@@ -9,6 +9,8 @@ RUN mkdir -p /app/nanobot/web && npm run build
 
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 
+LABEL org.sagasmith.distribution="local-agent"
+
 RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates git bubblewrap openssh-client libmagic1 && \
     rm -rf /var/lib/apt/lists/*

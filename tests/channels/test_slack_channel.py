@@ -582,7 +582,9 @@ async def test_slack_slash_command_skips_thread_context() -> None:
     channel._with_thread_context.assert_not_awaited()
     channel._handle_message.assert_awaited_once()
     assert channel._handle_message.await_args.kwargs["content"] == "/restart"
-    assert channel._handle_message.await_args.kwargs["principal_id"] == "group:C123"
+    assert (
+        channel._handle_message.await_args.kwargs["conversation_principal"] == "group:C123"
+    )
 
 
 @pytest.mark.asyncio

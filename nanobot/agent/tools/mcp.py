@@ -16,6 +16,11 @@ from weakref import WeakKeyDictionary
 import httpx
 from loguru import logger
 
+from nanobot.agent.auth_context import (
+    AUTH_CONTEXT_META_KEY,
+    AUTH_CONTEXT_RECEIPT_META_KEY,
+    sign_auth_context,
+)
 from nanobot.agent.domain_context import (
     DomainContextBinding,
     bind_session_context,
@@ -39,6 +44,8 @@ from nanobot.security.network import (
     resolve_url_target,
     validate_url_target,
 )
+
+_MCP_AUTHORIZATION_EPOCHS_KEY = "_mcp_authorization_epochs"
 
 # Transient connection errors that warrant a single retry.
 # These typically happen when an MCP server restarts or a network
@@ -75,7 +82,7 @@ def _first_string_field(value: Any, names: frozenset[str]) -> str | None:
             candidate = value.get(name)
             if isinstance(candidate, str) and candidate.strip():
                 return candidate.strip()
-        for key in ("authority", "branch", "payload", "result"):
+        for key in ("authority", "branch", "payload", "data", "result"):
             nested = value.get(key)
             if not isinstance(nested, Mapping):
                 continue
@@ -118,6 +125,19 @@ def _context_payload_from_result(content: Any, structured_content: Any) -> Any:
         if _host_context_binding(decoded) is not None:
             return decoded
     return structured_content
+
+
+def _auth_context_receipt_from_result(content: Any) -> dict[str, Any] | None:
+    """Read code-owned audit metadata without rendering it into model content."""
+
+    for block in content or []:
+        metadata = getattr(block, "meta", None)
+        if not isinstance(metadata, Mapping):
+            continue
+        receipt = metadata.get(AUTH_CONTEXT_RECEIPT_META_KEY)
+        if isinstance(receipt, Mapping):
+            return dict(receipt)
+    return None
 
 
 def routing_context_provider(registry: ToolRegistry):
@@ -604,6 +624,7 @@ class MCPToolWrapper(_MCPWrapperBase):
         tool_timeout: int = 30,
         *,
         inject_principal: bool = False,
+        auth_context_secret: str = "",
         session_store: Any | None = None,
         post_call_sync: _PostCallSyncCallback | None = None,
         call_lock: asyncio.Lock | None = None,
@@ -616,6 +637,7 @@ class MCPToolWrapper(_MCPWrapperBase):
         self._parameters = _normalize_schema_for_openai(raw_schema)
         self._tool_timeout = tool_timeout
         self._inject_principal = inject_principal
+        self._auth_context_secret = auth_context_secret
         self._session_store = session_store
         self._post_call_sync = post_call_sync
         self._call_lock = call_lock
@@ -680,8 +702,8 @@ class MCPToolWrapper(_MCPWrapperBase):
     def _trusted_principal(self) -> str:
         # Wrappers are shared across sessions, so identity must remain task-local.
         ctx = current_request_context()
-        principal_id = ctx.principal_id if ctx is not None else None
-        if ctx is None or not (principal_id or ctx.sender_id):
+        actor_principal = ctx.actor_principal if ctx is not None else None
+        if ctx is None or not (actor_principal or ctx.sender_id):
             # Local cron/CLI calls have no user identity. They remain explicitly
             # distinguishable from an inbound platform user and cannot be spoofed
             # by a model parameter. The capability server owns the local identity;
@@ -690,8 +712,94 @@ class MCPToolWrapper(_MCPWrapperBase):
                 raise RuntimeError("MCP tool does not advertise a local principal default")
             return self._local_principal_default
         channel = re.sub(r"[^a-zA-Z0-9_.:-]", "_", ctx.channel or "unknown")
-        sender = re.sub(r"[^a-zA-Z0-9_.:-]", "_", principal_id or ctx.sender_id or "")
+        sender = re.sub(
+            r"[^a-zA-Z0-9_.:-]",
+            "_",
+            actor_principal or ctx.sender_id,
+        )
+        if actor_principal and sender.startswith(f"{channel}:"):
+            return sender
         return f"{channel}:{sender}"
+
+    def _auth_context_meta(
+        self,
+        arguments: Mapping[str, Any],
+        *,
+        trusted_principal: str | None,
+    ) -> dict[str, Any] | None:
+        if not self._auth_context_secret or trusted_principal is None:
+            return None
+        request = current_request_context()
+        channel = request.channel if request is not None else "local"
+        safe_channel = re.sub(r"[^a-zA-Z0-9_.:-]", "_", channel or "unknown")
+        session_id = (
+            request.session_key
+            if request is not None and request.session_key
+            else f"{safe_channel}:local"
+        )
+        if request is not None and request.conversation_principal:
+            conversation_fragment = request.conversation_principal
+            conversation_principal = (
+                conversation_fragment
+                if conversation_fragment.startswith(f"{safe_channel}:")
+                else f"{safe_channel}:{conversation_fragment}"
+            )
+        else:
+            conversation_principal = f"{safe_channel}:session:{session_id}"
+        campaign_id = _first_string_field(arguments, frozenset({"campaign_id"})) or ""
+        authorization_epoch = 0
+        if self._session_store is not None:
+            session = self._session_store.get_or_create(session_id)
+            epochs = session.metadata.get(_MCP_AUTHORIZATION_EPOCHS_KEY)
+            stored_epoch = epochs.get(self._server_name) if isinstance(epochs, Mapping) else None
+            if (
+                isinstance(stored_epoch, int)
+                and not isinstance(stored_epoch, bool)
+                and stored_epoch >= 0
+            ):
+                authorization_epoch = stored_epoch
+            elif (binding := binding_from_metadata(session.metadata)) is not None:
+                authorization_epoch = binding.authorization_epoch
+        if self._original_name == "exposure" and arguments.get("action") == "open":
+            authorization_epoch = 0
+        metadata = request.metadata if request is not None else {}
+        return {
+            AUTH_CONTEXT_META_KEY: sign_auth_context(
+                secret=self._auth_context_secret,
+                host="sagasmith-agent",
+                channel=safe_channel,
+                actor_principal=trusted_principal,
+                conversation_principal=conversation_principal,
+                tenant_id=str(metadata.get("tenant_id") or ""),
+                campaign_id=campaign_id,
+                session_id=session_id,
+                authorization_epoch=authorization_epoch,
+            )
+        }
+
+    def _remember_authorization_epoch(self, payload: Any) -> None:
+        """Retain server-owned exposure state even before a campaign is bound."""
+
+        if self._session_store is None or not isinstance(payload, Mapping):
+            return
+        epoch = None
+        if (binding := _host_context_binding(payload)) is not None:
+            epoch = binding.get("authorization_epoch")
+        if epoch is None and self._original_name == "exposure":
+            current = payload.get("result", payload)
+            if isinstance(current, Mapping):
+                epoch = current.get("revision")
+        if isinstance(epoch, bool) or not isinstance(epoch, int) or epoch < 0:
+            return
+        request = current_request_context()
+        if request is None:
+            return
+        session_id = request.session_key or f"{request.channel}:{request.chat_id}"
+        session = self._session_store.get_or_create(session_id)
+        epochs = session.metadata.get(_MCP_AUTHORIZATION_EPOCHS_KEY)
+        updated = dict(epochs) if isinstance(epochs, Mapping) else {}
+        updated[self._server_name] = epoch
+        session.metadata[_MCP_AUTHORIZATION_EPOCHS_KEY] = updated
 
     async def execute(self, **kwargs: Any) -> str:
         trusted_principal: str | None = None
@@ -717,10 +825,21 @@ class MCPToolWrapper(_MCPWrapperBase):
                 # creates a child task, which can break AnyIO session ownership
                 # across a tools/call -> tools/list_changed -> tools/list handoff.
                 async with asyncio.timeout(self._tool_timeout):
-                    result = await self._session.call_tool(
-                        self._original_name,
-                        arguments=kwargs,
+                    meta = self._auth_context_meta(
+                        kwargs,
+                        trusted_principal=trusted_principal,
                     )
+                    if meta is None:
+                        result = await self._session.call_tool(
+                            self._original_name,
+                            arguments=kwargs,
+                        )
+                    else:
+                        result = await self._session.call_tool(
+                            self._original_name,
+                            arguments=kwargs,
+                            meta=meta,
+                        )
             except asyncio.TimeoutError:
                 logger.warning("MCP tool '{}' timed out after {}s", self._name, self._tool_timeout)
                 return ToolResult.error(f"(MCP tool call timed out after {self._tool_timeout}s)")
@@ -776,6 +895,11 @@ class MCPToolWrapper(_MCPWrapperBase):
                         if getattr(result, "isError", False)
                         else getattr(result, "structuredContent", None)
                     )
+                    authoritative_payload = _context_payload_from_result(
+                        result.content,
+                        structured_content,
+                    )
+                    self._remember_authorization_epoch(authoritative_payload)
                     rendered = self._render_call_result(
                         result.content,
                         kwargs,
@@ -787,15 +911,13 @@ class MCPToolWrapper(_MCPWrapperBase):
                         rendered,
                         kwargs,
                         trusted_principal=trusted_principal,
-                        authoritative_payload=_context_payload_from_result(
-                            result.content,
-                            structured_content,
-                        ),
+                        authoritative_payload=authoritative_payload,
                     )
                     return ToolResult(
                         rendered,
                         context_barrier=context_changed,
                         structured_content=structured_content,
+                        audit_receipt=_auth_context_receipt_from_result(result.content),
                     )
                 except Exception as exc:
                     logger.exception(
@@ -1385,6 +1507,7 @@ async def connect_mcp_servers(
                             tool_def,
                             tool_timeout=cfg.tool_timeout,
                             inject_principal=cfg.inject_principal,
+                            auth_context_secret=cfg.auth_context_secret,
                             session_store=session_store,
                             post_call_sync=wait_for_pending_tool_refresh,
                             call_lock=call_lock,
@@ -1516,6 +1639,7 @@ async def connect_mcp_servers(
                         private_def,
                         tool_timeout=cfg.tool_timeout,
                         inject_principal=cfg.inject_principal,
+                        auth_context_secret=cfg.auth_context_secret,
                         session_store=session_store,
                         host_token=host_token,
                     )

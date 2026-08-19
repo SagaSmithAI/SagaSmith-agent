@@ -240,7 +240,11 @@ def test_write_stdin_accepts_max_output_chars(tmp_path):
         sid = _session_id(initial)
         poll = await stdin_tool.execute(
             session_id=sid,
-            yield_time_ms=500,
+            # A cold Windows Python process can take more than 500 ms to emit
+            # its first byte. The assertion is about truncation, not startup
+            # latency, so keep the process alive and give output a bounded
+            # cross-platform arrival window.
+            yield_time_ms=3000,
             max_output_chars=1000,
         )
         cleanup = await stdin_tool.execute(session_id=sid, terminate=True, yield_time_ms=0)
@@ -263,9 +267,17 @@ def test_write_stdin_preserves_completed_session_output_until_polled(tmp_path):
 
         initial = await exec_tool.execute(command=command, yield_time_ms=300)
         sid = _session_id(initial)
+        ready = ""
+        if "ready" not in initial:
+            ready = await stdin_tool.execute(
+                session_id=sid,
+                wait_for="ready",
+                wait_timeout_ms=3000,
+                yield_time_ms=0,
+            )
         await asyncio.sleep(1.2)
-        final = await stdin_tool.execute(session_id=sid, chars="", yield_time_ms=0)
-        return initial, final
+        final = await stdin_tool.execute(session_id=sid, chars="", yield_time_ms=3000)
+        return initial + ready, final
 
     initial, final = asyncio.run(run())
 
@@ -286,6 +298,14 @@ def test_write_stdin_can_wait_for_expected_output(tmp_path):
 
         initial = await exec_tool.execute(command=command, yield_time_ms=100)
         sid = _session_id(initial)
+        booted = ""
+        if "booting" not in initial:
+            booted = await stdin_tool.execute(
+                session_id=sid,
+                wait_for="booting",
+                wait_timeout_ms=3000,
+                yield_time_ms=0,
+            )
         waited = await stdin_tool.execute(
             session_id=sid,
             wait_for="ready",
@@ -293,7 +313,7 @@ def test_write_stdin_can_wait_for_expected_output(tmp_path):
             yield_time_ms=0,
         )
         cleanup = await stdin_tool.execute(session_id=sid, terminate=True, yield_time_ms=0)
-        return initial, waited, cleanup
+        return initial + booted, waited, cleanup
 
     initial, waited, cleanup = asyncio.run(run())
 
@@ -313,6 +333,14 @@ def test_write_stdin_wait_for_reports_timeout_without_killing_session(tmp_path):
 
         initial = await exec_tool.execute(command=command, yield_time_ms=100)
         sid = _session_id(initial)
+        booted = ""
+        if "booting" not in initial:
+            booted = await stdin_tool.execute(
+                session_id=sid,
+                wait_for="booting",
+                wait_timeout_ms=3000,
+                yield_time_ms=0,
+            )
         waited = await stdin_tool.execute(
             session_id=sid,
             wait_for="never-ready",
@@ -320,7 +348,7 @@ def test_write_stdin_wait_for_reports_timeout_without_killing_session(tmp_path):
             yield_time_ms=0,
         )
         cleanup = await stdin_tool.execute(session_id=sid, terminate=True, yield_time_ms=0)
-        return initial, waited, cleanup
+        return initial + booted, waited, cleanup
 
     initial, waited, cleanup = asyncio.run(run())
 
