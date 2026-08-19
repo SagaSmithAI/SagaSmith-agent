@@ -22,4 +22,5 @@ config/
 docs/
 images/
 tests/
-webui/
+webui/node_modules/
+webui/dist/

@@ -105,7 +105,7 @@ async def test_process_message_deduplicates_inbound_ids() -> None:
 
 
 @pytest.mark.asyncio
-async def test_process_group_message_uses_shared_group_principal() -> None:
+async def test_process_group_message_separates_actor_and_group_principals() -> None:
     channel, bus = _make_channel()
     channel._start_typing = AsyncMock()
 
@@ -121,7 +121,8 @@ async def test_process_group_message_uses_shared_group_principal() -> None:
 
     msg = await bus.consume_inbound()
     assert msg.session_key == "weixin:room-1@chatroom"
-    assert msg.principal_id == "group:room-1@chatroom"
+    assert msg.actor_principal == "user:room-1@chatroom"
+    assert msg.conversation_principal == "group:room-1@chatroom"
 
 
 @pytest.mark.asyncio

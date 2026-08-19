@@ -59,6 +59,7 @@ class DomainContextBinding:
     audience: str = ""
     branch_id: str = ""
     context_epoch: str = ""
+    authorization_epoch: int = 0
     memory_policy: str = MEMORY_POLICY_DOMAIN_AUTHORITATIVE
 
     @classmethod
@@ -83,6 +84,13 @@ class DomainContextBinding:
             raise ValueError(
                 "authorization_fingerprint must be a lowercase SHA-256 digest"
             )
+        authorization_epoch = value.get("authorization_epoch", 0)
+        if (
+            isinstance(authorization_epoch, bool)
+            or not isinstance(authorization_epoch, int)
+            or authorization_epoch < 0
+        ):
+            raise ValueError("authorization_epoch must be a non-negative integer")
         binding = cls(
             domain=_text(value.get("domain"), "domain", required=True),
             campaign_id=_text(value.get("campaign_id"), "campaign_id", required=True),
@@ -92,6 +100,7 @@ class DomainContextBinding:
             audience=_text(value.get("audience"), "audience"),
             branch_id=_text(value.get("branch_id"), "branch_id"),
             context_epoch=_text(value.get("context_epoch"), "context_epoch"),
+            authorization_epoch=authorization_epoch,
             memory_policy=policy,
         )
         expected_epoch = binding.derived_epoch()
@@ -118,7 +127,7 @@ class DomainContextBinding:
             ).encode("utf-8")
         ).hexdigest()
 
-    def to_dict(self) -> dict[str, str]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "domain": self.domain,
             "campaign_id": self.campaign_id,
@@ -128,6 +137,7 @@ class DomainContextBinding:
             "audience": self.audience,
             "branch_id": self.branch_id,
             "context_epoch": self.context_epoch or self.derived_epoch(),
+            "authorization_epoch": self.authorization_epoch,
             "memory_policy": self.memory_policy,
         }
 

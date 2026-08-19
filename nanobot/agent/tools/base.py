@@ -204,6 +204,7 @@ class ToolResult(str):
     is_error: bool
     context_barrier: bool
     structured_content: Any
+    audit_receipt: dict[str, Any] | None
 
     def __new__(
         cls,
@@ -212,11 +213,13 @@ class ToolResult(str):
         is_error: bool = False,
         context_barrier: bool = False,
         structured_content: Any = None,
+        audit_receipt: dict[str, Any] | None = None,
     ) -> ToolResult:
         obj = str.__new__(cls, content)
         obj.is_error = is_error
         obj.context_barrier = context_barrier
         obj.structured_content = deepcopy(structured_content)
+        obj.audit_receipt = deepcopy(audit_receipt)
         return obj
 
     @classmethod

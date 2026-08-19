@@ -31,7 +31,8 @@ class InboundMessage:
     media: list[str] = field(default_factory=list)  # Media URLs
     metadata: dict[str, Any] = field(default_factory=dict)  # Channel-specific data
     session_key_override: str | None = None  # Optional override for thread-scoped sessions
-    principal_id: str | None = None  # Trusted shared identity for authorization/tool calls
+    actor_principal: str | None = None  # Trusted sender identity for authorization/tool calls
+    conversation_principal: str | None = None  # Trusted room/group identity for routing/audit
 
     @property
     def session_key(self) -> str:

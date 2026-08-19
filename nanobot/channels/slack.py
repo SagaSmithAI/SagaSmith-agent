@@ -450,7 +450,7 @@ class SlackChannel(BaseChannel):
                     },
                 },
                 session_key=session_key,
-                principal_id=f"group:{chat_id}" if channel_type != "im" else None,
+                conversation_principal=f"group:{chat_id}" if channel_type != "im" else None,
             )
         except Exception:
             self.logger.exception("Error handling message from {}", sender_id)
@@ -531,7 +531,7 @@ class SlackChannel(BaseChannel):
                 content=value,
                 metadata={"slack": {"thread_ts": thread_ts, "channel_type": channel_type}},
                 session_key=session_key,
-                principal_id=f"group:{chat_id}" if channel_type != "im" else None,
+                conversation_principal=f"group:{chat_id}" if channel_type != "im" else None,
             )
         except Exception:
             self.logger.exception("Error handling button click from {}", sender_id)

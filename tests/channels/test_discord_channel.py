@@ -590,7 +590,7 @@ async def test_on_message_accepts_mentioned_guild_message() -> None:
 
     assert len(handled) == 1
     assert handled[0]["metadata"]["reply_to"] == "321"
-    assert handled[0]["principal_id"] == "group:456"
+    assert handled[0]["conversation_principal"] == "group:456"
 
 
 @pytest.mark.asyncio

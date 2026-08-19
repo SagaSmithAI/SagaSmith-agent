@@ -593,7 +593,7 @@ class AgentLoop:
         registered = loader.load(ctx, self.tools)
 
         # MyTool needs runtime state reference — manual registration
-        if self.tools_config.my.enable:
+        if self.tools_config.distribution != "hosted" and self.tools_config.my.enable:
             self.tools.register(
                 MyTool(runtime_state=self, modify_allowed=self.tools_config.my.allow_set)
             )
@@ -825,7 +825,8 @@ class AgentLoop:
             runtime=ctx.runtime,
             metadata=dict(ctx.msg.metadata or {}),
             sender_id=ctx.msg.sender_id,
-            principal_id=ctx.msg.principal_id,
+            actor_principal=ctx.msg.actor_principal,
+            conversation_principal=ctx.msg.conversation_principal,
             turn_id=ctx.turn_id,
             workspace=scope.project_path,
         )
@@ -1917,14 +1918,28 @@ class AgentLoop:
                 "Authoritative domain context synchronization capability has an "
                 "unsupported schema."
             )
-        token = bind_request_context(ctx.request_context)
-        try:
-            result = await tools.execute(
-                tool_name,
-                arguments,
-            )
-        finally:
-            reset_request_context(token)
+        async def execute_bound(name: str, params: dict[str, Any]):
+            token = bind_request_context(ctx.request_context)
+            try:
+                return await tools.execute(name, params)
+            finally:
+                reset_request_context(token)
+
+        result = await execute_bound(tool_name, arguments)
+        if bool(getattr(result, "is_error", False)):
+            # A server restart deliberately loses session-local exposure state.
+            # Re-open through the authoritative access check (which is signed at
+            # epoch 0), then retry the binding read at the server-issued epoch.
+            exposure_matches = tools.domain_exposure_tools(binding.domain)
+            if len(exposure_matches) == 1:
+                exposure_result = await execute_bound(
+                    exposure_matches[0][0],
+                    {"action": "open", "campaign_id": binding.campaign_id},
+                )
+                if not bool(getattr(exposure_result, "is_error", False)):
+                    refreshed_matches = tools.domain_context_sync_tools(binding.domain)
+                    if len(refreshed_matches) == 1:
+                        result = await execute_bound(refreshed_matches[0][0], arguments)
         if bool(getattr(result, "is_error", False)):
             raise RuntimeError(
                 "Authoritative domain context synchronization failed; refusing "
@@ -2280,6 +2295,8 @@ class AgentLoop:
         channel: str = "cli",
         chat_id: str = "direct",
         sender_id: str = "user",
+        actor_principal: str | None = None,
+        conversation_principal: str | None = None,
         media: list[str] | None = None,
         on_progress: Callable[..., Awaitable[None]] | None = None,
         on_stream: Callable[[str], Awaitable[None]] | None = None,
@@ -2304,6 +2321,8 @@ class AgentLoop:
             content=content,
             media=media or [],
             metadata=metadata,
+            actor_principal=actor_principal,
+            conversation_principal=conversation_principal,
         )
         # Share the dispatch lock so direct calls serialize with bus turns.
         lock = self._session_locks.setdefault(session_key, asyncio.Lock())

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import shutil
 from pathlib import Path
 from typing import Any
@@ -19,7 +20,12 @@ def _python_executable(repo: Path) -> Path:
     return windows if os.name == "nt" else repo / ".venv" / "bin" / "python"
 
 
-def desired_servers(layout: StackLayout, modes: tuple[InstallMode, ...]) -> dict[str, Any]:
+def desired_servers(
+    layout: StackLayout,
+    modes: tuple[InstallMode, ...],
+    *,
+    auth_context_secret: str = "",
+) -> dict[str, Any]:
     selected = set(modes)
     result: dict[str, Any] = {}
     if InstallMode.DND in selected:
@@ -32,6 +38,7 @@ def desired_servers(layout: StackLayout, modes: tuple[InstallMode, ...]) -> dict
             "exposeResourcesAndPrompts": True,
             "injectPrincipal": True,
             "sessionScoped": True,
+            **({"authContextSecret": auth_context_secret} if auth_context_secret else {}),
         }
     if InstallMode.COC in selected:
         result["sagasmith_coc"] = {
@@ -43,6 +50,7 @@ def desired_servers(layout: StackLayout, modes: tuple[InstallMode, ...]) -> dict
             "exposeResourcesAndPrompts": True,
             "injectPrincipal": True,
             "sessionScoped": True,
+            **({"authContextSecret": auth_context_secret} if auth_context_secret else {}),
         }
     if InstallMode.NARRATIVE in selected:
         repo = layout.repo("sagasmith-narrative")
@@ -51,12 +59,13 @@ def desired_servers(layout: StackLayout, modes: tuple[InstallMode, ...]) -> dict
             "command": str(_python_executable(repo)),
             "args": ["-m", "sagasmith_narrative_mcp.server"],
             "cwd": str(repo),
-            "env": narrative_environment(layout),
+            "env": narrative_environment(layout, auth_context_secret=auth_context_secret),
             "toolTimeout": 900,
             "enabledTools": ["*"],
             "exposeResourcesAndPrompts": True,
             "injectPrincipal": True,
             "sessionScoped": True,
+            **({"authContextSecret": auth_context_secret} if auth_context_secret else {}),
         }
     return result
 
@@ -100,9 +109,20 @@ def reconcile_agent_config(
     result = dict(config)
     tools = dict(result.get("tools") or {})
     servers = dict(tools.get("mcpServers") or {})
+    auth_context_secret = next(
+        (
+            str(servers[name].get("authContextSecret") or "").strip()
+            for name in sorted(OWNED_SERVERS)
+            if isinstance(servers.get(name), dict)
+            and len(str(servers[name].get("authContextSecret") or "").encode("utf-8")) >= 32
+        ),
+        "",
+    ) or secrets.token_urlsafe(32)
     for name in OWNED_SERVERS:
         servers.pop(name, None)
-    servers.update(desired_servers(layout, modes))
+    servers.update(
+        desired_servers(layout, modes, auth_context_secret=auth_context_secret)
+    )
     tools["mcpServers"] = servers
     whitelist = [str(item) for item in tools.get("ssrfWhitelist") or []]
     if LOOPBACK_CIDR not in whitelist:
@@ -186,6 +206,8 @@ def dnd_environment(layout: StackLayout) -> dict[str, str]:
         ("SAGASMITH_DND_MCP_MODULE_OCR_SCALE", "2.0"),
     ):
         values[name] = os.environ.get(name, default)
+    if secret := _configured_auth_context_secret(layout):
+        values["SAGASMITH_AUTH_CONTEXT_SECRET"] = secret
     return values
 
 
@@ -206,13 +228,40 @@ def coc_environment(layout: StackLayout) -> dict[str, str]:
     }
     if configured := os.environ.get("SAGASMITH_COC_MCP_MODULE_IMPORT_ROOTS"):
         values["SAGASMITH_COC_MCP_MODULE_IMPORT_ROOTS"] = configured
+    if secret := _configured_auth_context_secret(layout):
+        values["SAGASMITH_AUTH_CONTEXT_SECRET"] = secret
     return values
 
 
-def narrative_environment(layout: StackLayout) -> dict[str, str]:
-    return {
+def narrative_environment(
+    layout: StackLayout, *, auth_context_secret: str = ""
+) -> dict[str, str]:
+    values = {
         "SAGASMITH_NARRATIVE_MCP_HOME": str(layout.data_dir / "narrative"),
         "SAGASMITH_NARRATIVE_SKILLS_DIR": str(
             layout.repo("sagasmith-narrative") / "skills"
         ),
     }
+    secret = auth_context_secret or _configured_auth_context_secret(layout)
+    if secret:
+        values["SAGASMITH_AUTH_CONTEXT_SECRET"] = secret
+    return values
+
+
+def _configured_auth_context_secret(layout: StackLayout) -> str:
+    if not layout.config_path.is_file():
+        return ""
+    try:
+        config = json.loads(layout.config_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return ""
+    servers = config.get("tools", {}).get("mcpServers", {})
+    if not isinstance(servers, dict):
+        return ""
+    for name in sorted(OWNED_SERVERS):
+        server = servers.get(name)
+        if isinstance(server, dict):
+            value = str(server.get("authContextSecret") or "").strip()
+            if len(value.encode("utf-8")) >= 32:
+                return value
+    return ""

@@ -1404,7 +1404,7 @@ class TelegramChannel(BaseChannel):
             metadata=self._build_message_metadata(message, user),
             session_key=self._derive_topic_session_key(message),
             is_dm=message.chat.type == "private",
-            principal_id=(
+            conversation_principal=(
                 f"group:{message.chat_id}" if message.chat.type != "private" else None
             ),
         )
@@ -1489,7 +1489,7 @@ class TelegramChannel(BaseChannel):
                     "contents": [], "media": [],
                     "metadata": metadata,
                     "session_key": session_key,
-                    "principal_id": (
+                    "conversation_principal": (
                         f"group:{str_chat_id}" if message.chat.type != "private" else None
                     ),
                 }
@@ -1515,7 +1515,7 @@ class TelegramChannel(BaseChannel):
             media=media_paths,
             metadata=metadata,
             session_key=session_key,
-            principal_id=(
+            conversation_principal=(
                 f"group:{str_chat_id}" if message.chat.type != "private" else None
             ),
         )
@@ -1532,7 +1532,7 @@ class TelegramChannel(BaseChannel):
                 content=content, media=list(dict.fromkeys(buf["media"])),
                 metadata=buf["metadata"],
                 session_key=buf.get("session_key"),
-                principal_id=buf.get("principal_id"),
+                conversation_principal=buf.get("conversation_principal"),
             )
         finally:
             self._media_group_tasks.pop(key, None)
@@ -1698,7 +1698,7 @@ class TelegramChannel(BaseChannel):
                 "first_name": user.first_name,
                 "is_callback": True,
             },
-            principal_id=(
+            conversation_principal=(
                 f"group:{chat_id}"
                 if query.message is not None and query.message.chat.type != "private"
                 else None

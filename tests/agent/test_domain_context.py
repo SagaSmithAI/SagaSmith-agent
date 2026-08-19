@@ -290,7 +290,8 @@ async def test_pre_turn_sync_supports_action_campaign_query_schema() -> None:
             channel="telegram",
             chat_id="table",
             sender_id="member-2",
-            principal_id="group:table",
+            actor_principal="user:member-2",
+            conversation_principal="group:table",
             session_key=session.key,
         ),
     )
@@ -301,6 +302,160 @@ async def test_pre_turn_sync_supports_action_campaign_query_schema() -> None:
     )
 
     assert seen == {"action": "get", "campaign_id": "campaign-1"}
+
+
+@pytest.mark.asyncio
+async def test_pre_turn_sync_reopens_authorized_exposure_after_server_restart() -> None:
+    session = Session(key="discord:table")
+    bind_session_context(session, _binding())
+    calls: list[tuple[str, dict[str, object]]] = []
+    exposure_open = False
+
+    class SyncTool(Tool):
+        _context_sync = True
+        _domain_context = "sagasmith-dnd"
+
+        @property
+        def name(self) -> str:
+            return "mcp_sagasmith_dnd_campaign_query"
+
+        @property
+        def description(self) -> str:
+            return "sync"
+
+        @property
+        def parameters(self) -> dict[str, object]:
+            return {
+                "type": "object",
+                "properties": {
+                    "view": {"type": "string"},
+                    "payload": {"type": "object"},
+                },
+            }
+
+        async def execute(self, **kwargs: object) -> ToolResult:
+            calls.append(("sync", kwargs))
+            if not exposure_open:
+                return ToolResult.error("authorization_epoch is stale")
+            bind_session_context(session, _binding())
+            return ToolResult("ok")
+
+    class ExposureTool(Tool):
+        _original_name = "exposure"
+        _domain_context = "sagasmith-dnd"
+
+        @property
+        def name(self) -> str:
+            return "mcp_sagasmith_dnd_exposure"
+
+        @property
+        def description(self) -> str:
+            return "exposure"
+
+        @property
+        def parameters(self) -> dict[str, object]:
+            return {"type": "object", "properties": {}}
+
+        async def execute(self, **kwargs: object) -> ToolResult:
+            nonlocal exposure_open
+            calls.append(("exposure", kwargs))
+            exposure_open = True
+            return ToolResult("ok")
+
+    tools = ToolRegistry()
+    tools.register(SyncTool())
+    tools.register(ExposureTool())
+    ctx = SimpleNamespace(
+        session=session,
+        tools=tools,
+        request_context=RequestContext(
+            channel="discord",
+            chat_id="table",
+            sender_id="user-1",
+            session_key=session.key,
+        ),
+    )
+
+    await AgentLoop._synchronize_authoritative_domain_context(
+        SimpleNamespace(tools=tools),
+        ctx,
+    )
+
+    assert calls == [
+        ("sync", {"view": "binding", "payload": {"campaign_id": "campaign-1"}}),
+        ("exposure", {"action": "open", "campaign_id": "campaign-1"}),
+        ("sync", {"view": "binding", "payload": {"campaign_id": "campaign-1"}}),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_pre_turn_sync_stays_closed_when_exposure_reopen_is_rejected() -> None:
+    session = Session(key="discord:table")
+    bind_session_context(session, _binding())
+
+    class FailingTool(Tool):
+        _context_sync = True
+        _domain_context = "sagasmith-dnd"
+
+        @property
+        def name(self) -> str:
+            return "mcp_sagasmith_dnd_campaign_query"
+
+        @property
+        def description(self) -> str:
+            return "sync"
+
+        @property
+        def parameters(self) -> dict[str, object]:
+            return {
+                "type": "object",
+                "properties": {
+                    "view": {"type": "string"},
+                    "payload": {"type": "object"},
+                },
+            }
+
+        async def execute(self, **_kwargs: object) -> ToolResult:
+            return ToolResult.error("stale")
+
+    class RejectedExposure(Tool):
+        _original_name = "exposure"
+        _domain_context = "sagasmith-dnd"
+
+        @property
+        def name(self) -> str:
+            return "mcp_sagasmith_dnd_exposure"
+
+        @property
+        def description(self) -> str:
+            return "exposure"
+
+        @property
+        def parameters(self) -> dict[str, object]:
+            return {"type": "object", "properties": {}}
+
+        async def execute(self, **_kwargs: object) -> ToolResult:
+            return ToolResult.error("access revoked")
+
+    tools = ToolRegistry()
+    tools.register(FailingTool())
+    tools.register(RejectedExposure())
+    ctx = SimpleNamespace(
+        session=session,
+        tools=tools,
+        request_context=RequestContext(
+            channel="discord",
+            chat_id="table",
+            sender_id="user-1",
+            session_key=session.key,
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="synchronization failed"):
+        await AgentLoop._synchronize_authoritative_domain_context(
+            SimpleNamespace(tools=tools),
+            ctx,
+        )
 
 
 @pytest.mark.asyncio

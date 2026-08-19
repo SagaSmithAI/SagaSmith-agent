@@ -1,0 +1,23 @@
+FROM python:3.12-slim@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a
+
+LABEL org.sagasmith.distribution="hosted-worker"
+
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 \
+    NANOBOT_SKIP_WEBUI_BUILD=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY pyproject.toml README.md LICENSE THIRD_PARTY_NOTICES.md hatch_build.py ./
+COPY nanobot/ nanobot/
+RUN pip install --no-cache-dir uv==0.11.25 && \
+    uv pip install --system --no-cache ".[hosted]"
+RUN cd / && python -m nanobot.apps.hosted_audit --prune && rm -rf /app/nanobot
+
+RUN useradd -m -u 10002 worker && mkdir -p /workspace /config && \
+    chown -R worker:worker /workspace /config /app
+USER worker
+
+ENTRYPOINT ["sagasmith-agent-worker"]
+CMD ["--help"]

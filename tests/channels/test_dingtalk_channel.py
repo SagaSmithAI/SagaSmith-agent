@@ -120,7 +120,9 @@ async def test_group_user_isolation_false_uses_shared_session() -> None:
     msg2 = await bus.consume_inbound()
     assert msg1.session_key == msg2.session_key == "dingtalk:group:conv123"
     assert msg1.chat_id == msg2.chat_id == "group:conv123"
-    assert msg1.principal_id == msg2.principal_id == "group:conv123"
+    assert msg1.actor_principal == "user:user1"
+    assert msg2.actor_principal == "user:user2"
+    assert msg1.conversation_principal == msg2.conversation_principal == "group:conv123"
 
 
 @pytest.mark.asyncio

@@ -36,6 +36,34 @@ SagaSmith Agent 负责：
 - 用 `player_name` 或模型文本推断权限；
 - 在存在匹配 MCP 能力时绕过 MCP 调 CLI/临时脚本。
 
+## Local 与 Hosted 双发行物
+
+仓库共享同一套 Agent loop、MCP client、Skills runtime 和 Auth Context 实现，但提供两个
+明确的应用边界：
+
+- `sagasmith-agent-local` / `Dockerfile`：用户直接运行的完整 Local Agent，包含 Channels、
+  WebUI、本地栈管理以及按配置启用的 shell/filesystem/web/cron 能力。
+- `sagasmith-agent-worker` / `Dockerfile.hosted`：Service 内部的每会话 Hosted Worker；配置
+  必须声明 `tools.distribution="hosted"`，只装载会话 MCP 与 Service 注入的结构化输出/活动工具。
+
+Hosted 镜像构建时会删除 Channel、WebUI、本地安装器和 Local CLI 表面，拒绝 Channel SDK，
+并以非 root 用户运行。两个镜像由同一 CI 分别构建和审计，不维护第二份 Agent core。
+
+Codex、Claude Code、上游 Nanobot、OpenClaw、Hermes 通过同一签名身份桥接协议连接三套
+SagaSmith MCP；适配方式、信任边界和配置形状见
+[外部 Host Auth Adapter](docs/sagasmith-host-adapters.md)。
+
+## 2026-08-20 验证基线
+
+当前主线使用 `sagasmith.auth-context/v1` 传递带时效签名的 principal context；
+只给出 campaign id 的会话工具会从相同 principal 的持久绑定继承 campaign，领域 MCP
+仍在每次调用时校验 role、actor、phase 与 revision。最新 Local Agent 和 Hosted Worker
+镜像均已构建并执行发行边界审计，Hosted 镜像不再依赖未提交的本地 lockfile。
+
+同一最新托管栈中的 D&D 与 CoC 参考战役已通过隔离客户端并发完成，未记录到回归
+缺口；D&D 路径记录了一个合法结局。目录 runner 会把发现的全部模组、实际运行项和
+exclusion 写入机器可读结果，因此这条证据不被扩张为所有 Pack 与剧情分支均已通关。
+
 ## D&D：MCP-first 主路径
 
 [sagasmith-dnd](https://github.com/SagaSmithAI/sagasmith-dnd) 内的 D&D MCP 管理战役、规则、模组、角色、知识、分支、Snapshot 与战斗。每个聊天会话在服务端单独打开 exposure；服务端按当前 session、principal、campaign 与 phase 过滤原生工具列表，Agent 只选择当前任务所需的精确工具。
@@ -85,8 +113,12 @@ SagaSmith/
   sagasmith-dnd/                # D&D Domain、MCP、Skills、UI 与模组生成
   sagasmith-coc/                # CoC Domain、MCP、Skills、UI 与模组生成
   sagasmith-narrative/          # Narrative Domain、MCP、Skills 与项目生成
-  SagaSmith-dnd-content-library/# 私有、许可受限的 Pack 归档（可选）
+  SagaSmith-dnd-content-library/# 公开、逐包许可约束的 Pack 目录（可选）
 ```
+
+三个领域仓库是当前 Domain、MCP、Skills、UI（如有）和生成流程的唯一源码入口。
+原独立 MCP、Skills、UI 与通用 Module Generator 仓库已归档；安装器不会读取它们，
+也不会把它们作为兼容回退。
 
 从 Agent 仓库选择任意模式组合；不传 `--mode` 时安装三个模式：
 

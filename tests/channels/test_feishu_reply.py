@@ -756,7 +756,7 @@ async def test_session_key_group_with_root_id_is_thread_scoped() -> None:
 
     assert len(bus_spy) == 1
     assert bus_spy[0].session_key == "feishu:oc_abc:om_root123"
-    assert bus_spy[0].principal_id == "group:oc_abc"
+    assert bus_spy[0].conversation_principal == "group:oc_abc"
 
 
 @pytest.mark.asyncio

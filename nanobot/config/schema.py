@@ -12,7 +12,6 @@ from nanobot.config_base import Base
 from nanobot.cron.types import CronSchedule
 
 if TYPE_CHECKING:
-    from nanobot.agent.tools.cli_apps import CliAppsToolConfig
     from nanobot.agent.tools.filesystem import FileToolsConfig
     from nanobot.agent.tools.image_generation import ImageGenerationToolConfig
     from nanobot.agent.tools.self import MyToolConfig
@@ -376,6 +375,10 @@ class MCPServerConfig(Base):
     inject_principal: bool = (
         False  # Replace MCP principal_id arguments with the trusted inbound sender identity.
     )
+    auth_context_secret: str = Field(
+        default="",
+        min_length=0,
+    )  # Shared HMAC secret for model-invisible sagasmith.auth-context/v1 request metadata.
     session_scoped: bool = Field(
         default=False,
         validation_alias=AliasChoices("sessionScoped", "session_scoped"),
@@ -391,6 +394,15 @@ def _lazy_default(module_path: str, class_name: str) -> Any:
     return getattr(module, class_name)()
 
 
+class CliAppsToolConfig(Base):
+    """CLI Apps configuration kept separate from the optional local runtime."""
+
+    enable: bool = True
+    install_timeout: int = Field(default=300, ge=1, le=3600)
+    run_timeout: int = Field(default=60, ge=1, le=600)
+    catalog_ttl_seconds: int = Field(default=3600, ge=60, le=86_400)
+
+
 class ToolsConfig(Base):
     """Tools configuration.
 
@@ -399,6 +411,7 @@ class ToolsConfig(Base):
     tool implementations.
     """
 
+    distribution: Literal["local", "hosted"] = "local"
     web: WebToolsConfig = Field(
         default_factory=lambda: _lazy_default("nanobot.agent.tools.web", "WebToolsConfig")
     )
@@ -408,9 +421,7 @@ class ToolsConfig(Base):
     file: FileToolsConfig = Field(
         default_factory=lambda: _lazy_default("nanobot.agent.tools.filesystem", "FileToolsConfig")
     )
-    cli_apps: CliAppsToolConfig = Field(
-        default_factory=lambda: _lazy_default("nanobot.agent.tools.cli_apps", "CliAppsToolConfig")
-    )
+    cli_apps: CliAppsToolConfig = Field(default_factory=CliAppsToolConfig)
     my: MyToolConfig = Field(
         default_factory=lambda: _lazy_default("nanobot.agent.tools.self", "MyToolConfig")
     )
@@ -670,7 +681,6 @@ def _resolve_tool_config_refs() -> None:
     """
     import sys
 
-    from nanobot.agent.tools.cli_apps import CliAppsToolConfig
     from nanobot.agent.tools.filesystem import FileToolsConfig
     from nanobot.agent.tools.image_generation import ImageGenerationToolConfig
     from nanobot.agent.tools.self import MyToolConfig
@@ -681,7 +691,6 @@ def _resolve_tool_config_refs() -> None:
     mod = sys.modules[__name__]
     mod.ExecToolConfig = ExecToolConfig  # type: ignore[attr-defined]
     mod.FileToolsConfig = FileToolsConfig  # type: ignore[attr-defined]
-    mod.CliAppsToolConfig = CliAppsToolConfig  # type: ignore[attr-defined]
     mod.WebToolsConfig = WebToolsConfig  # type: ignore[attr-defined]
     mod.WebSearchConfig = WebSearchConfig  # type: ignore[attr-defined]
     mod.WebFetchConfig = WebFetchConfig  # type: ignore[attr-defined]

@@ -41,7 +41,10 @@ jobs:
 
       - name: Install system dependencies (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libolm-dev build-essential
+        run: |
+          sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu/|https://archive.ubuntu.com/ubuntu/|g; s|http://archive.ubuntu.com/ubuntu/|https://archive.ubuntu.com/ubuntu/|g' /etc/apt/apt-mirrors.txt
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends libolm-dev build-essential
 
       - name: Install dependencies
         run: uv sync --all-extras --dev
@@ -79,3 +82,26 @@ jobs:
       - name: Build WebUI
         working-directory: webui
         run: bun run build
+
+  distribution-images:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Local Agent image
+        run: docker build --tag sagasmith-agent-local:ci .
+
+      - name: Verify Local distribution label
+        run: >-
+          test "$(docker inspect --format '{{ index .Config.Labels "org.sagasmith.distribution" }}'
+          sagasmith-agent-local:ci)" = "local-agent"
+
+      - name: Build Hosted Worker image
+        run: docker build --file Dockerfile.hosted --tag sagasmith-agent-worker:ci .
+
+      - name: Verify Hosted image boundary and entrypoint
+        run: |
+          docker run --rm --entrypoint python sagasmith-agent-worker:ci -m nanobot.apps.hosted_audit
+          docker run --rm sagasmith-agent-worker:ci --help
