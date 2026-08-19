@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY pyproject.toml uv.lock README.md LICENSE THIRD_PARTY_NOTICES.md hatch_build.py ./
+COPY pyproject.toml README.md LICENSE THIRD_PARTY_NOTICES.md hatch_build.py ./
 COPY nanobot/ nanobot/
 RUN pip install --no-cache-dir uv==0.11.25 && \
     uv pip install --system --no-cache ".[hosted]"
