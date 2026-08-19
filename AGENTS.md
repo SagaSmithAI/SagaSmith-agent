@@ -84,8 +84,10 @@ NapCat and SnowLuma integrations working, preserve workspace `SOUL.md` and
 `IDENTITY.md`, and improve MCP selection rather than recreating domain runtimes
 inside this repository.
 
-- Domain tools, databases, retrieval, skills, prompts, and resources belong to
-  independently versioned MCP servers.
+- Domain tools, databases, retrieval, Skills, prompts, resources, and UIs belong
+  to the current D&D, CoC, and Narrative vertical repositories. Each repository
+  versions its Domain package and MCP server together with those surfaces while
+  preserving their runtime authority boundaries.
 - When an `mcp_*` tool matches a request, use it before a CLI, direct database
   access, or a temporary script.
 - Do not add D&D CLI/runtime dependencies or bundled copies of MCP-owned skills
@@ -93,8 +95,11 @@ inside this repository.
 
 ## Historical Note
 
-The D&D CLI and bundled skills documented below have been removed. Their current
-home is the sibling `sagasmith-dnd` domain monorepo, not this Agent repository.
+The old bundled D&D CLI/Skills and the former standalone D&D, CoC, and Narrative
+MCP/Skills/UI repositories have been removed from the current topology. Their
+current source lives in the sibling `sagasmith-dnd`, `sagasmith-coc`, and
+`sagasmith-narrative` vertical repositories. Archived split repositories are
+read-only history and must never be installer inputs or compatibility fallbacks.
 Load the **full version** through
 `agents.defaults.externalSkillsDirs`; do not expect a bundled
 `nanobot/skills/sagasmith-dnd/` copy.

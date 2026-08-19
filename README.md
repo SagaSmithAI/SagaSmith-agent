@@ -85,8 +85,12 @@ SagaSmith/
   sagasmith-dnd/                # D&D Domain、MCP、Skills、UI 与模组生成
   sagasmith-coc/                # CoC Domain、MCP、Skills、UI 与模组生成
   sagasmith-narrative/          # Narrative Domain、MCP、Skills 与项目生成
-  SagaSmith-dnd-content-library/# 私有、许可受限的 Pack 归档（可选）
+  SagaSmith-dnd-content-library/# 公开、逐包许可约束的 Pack 目录（可选）
 ```
+
+三个领域仓库是当前 Domain、MCP、Skills、UI（如有）和生成流程的唯一源码入口。
+原独立 MCP、Skills、UI 与通用 Module Generator 仓库已归档；安装器不会读取它们，
+也不会把它们作为兼容回退。
 
 从 Agent 仓库选择任意模式组合；不传 `--mode` 时安装三个模式：
 

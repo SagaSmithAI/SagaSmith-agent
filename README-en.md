@@ -75,8 +75,13 @@ SagaSmith/
   sagasmith-dnd/                # D&D Domain, MCP, Skills, UI, and module generator
   sagasmith-coc/                # CoC Domain, MCP, Skills, UI, and module generator
   sagasmith-narrative/          # Narrative Domain, MCP, Skills, and project generator
-  SagaSmith-dnd-content-library/# redistributable public Pack catalog
+  SagaSmith-dnd-content-library/# public catalog with per-Pack rights (optional)
 ```
+
+The three domain repositories are the only current source entry points for
+Domain, MCP, Skills, UI where present, and authoring workflows. The former
+standalone MCP, Skills, UI, and generic Module Generator repositories are
+archived; the installer neither reads them nor treats them as fallbacks.
 
 Install any combination from the Agent repository. Omitting `--mode` selects all three:
 
