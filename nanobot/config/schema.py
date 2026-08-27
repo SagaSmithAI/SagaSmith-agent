@@ -180,7 +180,7 @@ class ProviderConfig(Base):
     extra_query: dict[str, str] | None = (
         None  # Extra query params (e.g. api-version for Azure-style gateways)
     )
-    proxy: str | None = None  # OpenAI-compatible/Codex HTTP proxy URL
+    proxy: str | None = None  # Explicit HTTP proxy; image downloads trust its DNS and egress
     thinking_style: str | None = None  # Thinking/reasoning style for custom providers
 
     # Valid values mirror the keys of _THINKING_STYLE_MAP in
