@@ -1,6 +1,6 @@
 # SagaSmith Agent
 
-[中文](README.md) · [English](README-en.md) · [官网](https://sagasmithai.github.io) · [平台总览](https://github.com/SagaSmithAI/.github/blob/main/profile/README.md) · [托管服务](https://github.com/SagaSmithAI/SagaSmith-service) · [内容目录](https://github.com/SagaSmithAI/SagaSmith-dnd-content-library)
+[中文](README.md) · [English](README-en.md) · [官网](https://sagasmithai.github.io) · [平台总览](https://github.com/SagaSmithAI/.github/blob/main/profile/README.md) · [SagaSmith Web](https://github.com/SagaSmithAI/SagaSmith-service) · [内容目录](https://github.com/SagaSmithAI/SagaSmith-dnd-content-library)
 
 <p align="center"><img src="images/Sagasmith.png" alt="SagaSmith Agent" width="168"></p>
 
@@ -120,16 +120,26 @@ SagaSmith/
 原独立 MCP、Skills、UI 与通用 Module Generator 仓库已归档；安装器不会读取它们，
 也不会把它们作为兼容回退。
 
-从 Agent 仓库选择任意模式组合；不传 `--mode` 时安装三个模式：
+从 Agent 仓库选择正式发行 profile；`--mode` 仍可自由组合，不传两者时等同
+`multi-system`：
 
 ```powershell
 cd SagaSmith-agent
-uv run nanobot sagasmith install --mode dnd
+uv run nanobot sagasmith install --profile dnd-only
+uv run nanobot sagasmith install --profile coc-only
+uv run nanobot sagasmith install --profile narrative-only
+uv run nanobot sagasmith install --profile multi-system
 uv run nanobot sagasmith install --mode coc --mode narrative
 uv run nanobot sagasmith install
 ```
 
-Python 安装器让 D&D、CoC、Narrative 保持独立可选，只维护 SagaSmith 自己的配置字段并仅构建所选 UI。它不会导入或激活 Pack。
+`sagasmith-local-kit.json` 固定 profile、组件、端口、模板与公共
+`sagasmith.authoritative-mcp/v1` 契约。每个 profile 都可选择 `--transport stdio`
+（一个客户端独占进程）、`--transport streamable-http`（多个本机客户端共享常驻进程）
+或默认 `mixed`。两种 transport 使用相同 handlers、schemas、错误、revision、
+idempotency 与 authority 语义。HTTP 只监听 loopback。
+
+Python 安装器让 D&D、CoC、Narrative 保持独立可选，只维护 SagaSmith 自己的配置字段并仅构建所选 UI。它不会导入或激活 Pack，也不依赖 SagaSmith Web、PostgreSQL、Redis、对象存储、账户、quota 或 Forge。
 
 安装后配置 repo-local Agent：
 
@@ -141,7 +151,22 @@ uv run nanobot onboard --wizard --config config\config.json --workspace workspac
 
 ```powershell
 uv run nanobot sagasmith install --verify-only
+uv run nanobot sagasmith doctor --json
 ```
+
+doctor 分别报告 MCP/config、领域数据库、Skills、provider 与所选 transport；provider
+未配置时是 readiness 警告，不会伪装成安装损坏。Discord、QQ、Telegram Bot 以及
+Codex、Claude Code、OpenClaw/通用 Agent 的无凭证模板位于
+[`examples/local-agent-kit`](examples/local-agent-kit/README.md)。
+
+D&D 与 CoC 的用户友好 embedding cache 路径会分别映射到 Core 使用的
+`DND5E_EMBEDDING_CACHE_DIR` 与 `COC7_EMBEDDING_CACHE_DIR`。Narrative 模板中的 cache
+路径只是预留项；当前 Narrative runtime 不使用 Core embedder，不能据此认为缓存已启用。
+
+安装器只同步 Agent base 与所选 MCP；D&D/CoC 仅在 HTTP profile 中增加 `gateway` extra，
+不会安装所有 Agent channel extra。需要 Bot 时在安装后显式选择，例如
+`uv sync --extra discord`、`--extra qq` 或 `--extra telegram`。领域 MCP 当前声明的
+documents/OCR 依赖仍按各自 package contract 安装。
 
 配置通过后，启动所选权威服务、Workbench 与 Agent：
 

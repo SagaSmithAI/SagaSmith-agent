@@ -1,0 +1,97 @@
+{
+  "schema": "sagasmith.local-agent-kit/v1",
+  "product": "SagaSmith Local Agent Kit",
+  "authoritative_contract": "sagasmith.authoritative-mcp/v1",
+  "profiles": {
+    "dnd-only": {
+      "modes": ["dnd"],
+      "repositories": ["SagaSmith-agent", "sagasmith-core", "sagasmith-dnd"]
+    },
+    "coc-only": {
+      "modes": ["coc"],
+      "repositories": ["SagaSmith-agent", "sagasmith-core", "sagasmith-coc"]
+    },
+    "narrative-only": {
+      "modes": ["narrative"],
+      "repositories": ["SagaSmith-agent", "sagasmith-core", "sagasmith-narrative"]
+    },
+    "multi-system": {
+      "modes": ["dnd", "coc", "narrative"],
+      "repositories": [
+        "SagaSmith-agent",
+        "sagasmith-core",
+        "sagasmith-dnd",
+        "sagasmith-coc",
+        "sagasmith-narrative"
+      ]
+    }
+  },
+  "transports": {
+    "stdio": {
+      "scope": "one local client owns each MCP process",
+      "network": false
+    },
+    "streamable-http": {
+      "scope": "multiple local clients share long-lived MCP processes",
+      "network": "loopback-only"
+    },
+    "mixed": {
+      "scope": "D&D and CoC use loopback HTTP; Narrative uses stdio",
+      "network": "loopback-only"
+    }
+  },
+  "domain_ports": {
+    "dnd": 8767,
+    "coc": 8769,
+    "narrative": 8770
+  },
+  "templates": {
+    "bot": "examples/local-agent-kit/bot-config.template.json",
+    "stdio": "examples/local-agent-kit/mcp-stdio.template.json",
+    "streamable-http": "examples/local-agent-kit/mcp-http.template.json",
+    "domain-runtime": "examples/local-agent-kit/domain-runtime.template.json",
+    "host-launch": "examples/local-agent-kit/host-launch.template.json",
+    "trusted-context": "examples/local-agent-kit/trusted-context.template.json"
+  },
+  "embedding_cache": {
+    "dnd": {
+      "user_variable": "SAGASMITH_DND_EMBEDDING_CACHE_DIR",
+      "core_variable": "DND5E_EMBEDDING_CACHE_DIR",
+      "status": "supported"
+    },
+    "coc": {
+      "user_variable": "SAGASMITH_COC_EMBEDDING_CACHE_DIR",
+      "core_variable": "COC7_EMBEDDING_CACHE_DIR",
+      "status": "supported"
+    },
+    "narrative": {
+      "user_variable": "SAGASMITH_NARRATIVE_EMBEDDING_CACHE_DIR",
+      "core_variable": null,
+      "status": "reserved-not-consumed"
+    }
+  },
+  "dependency_policy": {
+    "agent": "base; channel extras are opt-in",
+    "domain_mcp": "selected package only; D&D/CoC add gateway for HTTP",
+    "heavy_extras": ["documents", "embedding", "vector", "ocr", "images"],
+    "heavy_extra_rule": "install only when required by the selected domain package or user workflow"
+  },
+  "contract_suite": {
+    "command": "python -m pytest -q tests/host_conformance",
+    "hosted_network_adapter": "sagasmith-auth-bridge",
+    "dimensions": [
+      "schema",
+      "capability",
+      "error",
+      "revision",
+      "idempotency",
+      "authority"
+    ]
+  },
+  "hosted_dependencies": [],
+  "forbidden_authority_paths": [
+    "direct domain database writes",
+    "CLI compatibility fallbacks",
+    "fixed tool supersets"
+  ]
+}

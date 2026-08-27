@@ -199,6 +199,11 @@ packages = ["nanobot"]
 [tool.hatch.build.targets.wheel.sources]
 "nanobot" = "nanobot"
 
+[tool.hatch.build.targets.wheel.force-include]
+"sagasmith-local-kit.json" = "nanobot/sagasmith_local/assets/sagasmith-local-kit.json"
+"sagasmith-stack-lock.json" = "nanobot/sagasmith_local/assets/sagasmith-stack-lock.json"
+"examples/local-agent-kit" = "nanobot/sagasmith_local/assets/local-agent-kit"
+
 [tool.hatch.build.targets.sdist]
 include = [
     "nanobot/",
@@ -207,6 +212,9 @@ include = [
     "README.md",
     "LICENSE",
     "THIRD_PARTY_NOTICES.md",
+    "sagasmith-local-kit.json",
+    "sagasmith-stack-lock.json",
+    "examples/local-agent-kit/**/*",
     "pyproject.toml",
 ]
 

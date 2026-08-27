@@ -1,0 +1,11 @@
+{
+  "dnd": {
+    "SAGASMITH_DND_EMBEDDING_CACHE_DIR": "replace-with-local-cache-directory"
+  },
+  "coc": {
+    "SAGASMITH_COC_EMBEDDING_CACHE_DIR": "replace-with-local-cache-directory"
+  },
+  "narrative": {
+    "SAGASMITH_NARRATIVE_EMBEDDING_CACHE_DIR": "reserved-not-yet-consumed"
+  }
+}

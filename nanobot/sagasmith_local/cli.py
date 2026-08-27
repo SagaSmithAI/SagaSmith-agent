@@ -11,7 +11,14 @@ from rich.console import Console
 from rich.table import Table
 
 from .configuration import configure_agent
-from .model import InstallMode, StackLayout, normalize_modes
+from .model import (
+    InstallMode,
+    McpTransport,
+    StackLayout,
+    normalize_modes,
+    normalize_profile,
+    normalize_transport,
+)
 from .runtime import (
     StackError,
     backup,
@@ -42,6 +49,20 @@ ModeOption = Annotated[
         help="Mode to include (dnd, coc, narrative). Repeat the option; omitted means all three.",
     ),
 ]
+ProfileOption = Annotated[
+    str | None,
+    typer.Option(
+        "--profile",
+        help="Named profile: dnd-only, coc-only, narrative-only, or multi-system.",
+    ),
+]
+TransportOption = Annotated[
+    str | None,
+    typer.Option(
+        "--transport",
+        help="MCP transport: mixed, stdio, or streamable-http.",
+    ),
+]
 
 
 def _layout(
@@ -56,11 +77,31 @@ def _layout(
     )
 
 
-def _modes(values: list[str] | None) -> tuple[InstallMode, ...]:
+def _modes(
+    values: list[str] | None,
+    profile: str | None = None,
+) -> tuple[InstallMode, ...]:
     try:
+        selected_profile = normalize_profile(profile)
+        if selected_profile is not None:
+            if values:
+                raise ValueError("profile and mode are mutually exclusive")
+            return selected_profile
         return normalize_modes(values)
     except ValueError as exc:
-        raise typer.BadParameter("mode must be dnd, coc, or narrative") from exc
+        raise typer.BadParameter(
+            "use dnd/coc/narrative modes or a dnd-only/coc-only/"
+            "narrative-only/multi-system profile"
+        ) from exc
+
+
+def _transport(value: str | None, *, fallback: McpTransport | None = None) -> McpTransport:
+    try:
+        return normalize_transport(value) if value is not None else fallback or McpTransport.MIXED
+    except ValueError as exc:
+        raise typer.BadParameter(
+            "transport must be mixed, stdio, or streamable-http"
+        ) from exc
 
 
 def _emit(value: object, *, as_json: bool) -> None:
@@ -78,6 +119,8 @@ def _fail(exc: BaseException) -> None:
 @app.command("install")
 def install_command(
     mode: ModeOption = None,
+    profile: ProfileOption = None,
+    transport: TransportOption = None,
     workspace_root: Path | None = typer.Option(None, "--workspace-root"),
     state_root: Path | None = typer.Option(None, "--state-root"),
     config: Path | None = typer.Option(None, "--config", "-c"),
@@ -96,10 +139,19 @@ def install_command(
     ),
     as_json: bool = typer.Option(False, "--json"),
 ) -> None:
-    """Install any selected combination; omission of --mode selects all three."""
+    """Install one named profile or any selected domain combination."""
     layout = _layout(workspace_root, state_root, config)
     try:
-        selected = _modes(mode)
+        existing = layout.load_state()
+        selected = (
+            existing.selected_modes
+            if verify_only and not mode and not profile and existing.selected_modes
+            else _modes(mode, profile)
+        )
+        selected_transport = _transport(
+            transport,
+            fallback=existing.selected_transport if verify_only else None,
+        )
         if source not in {"workspace", "release"}:
             raise ValueError("source must be workspace or release")
         if source == "release":
@@ -116,6 +168,7 @@ def install_command(
             verify_only=verify_only,
             source=source,
             release_ref=release_ref or "manifest",
+            transport=selected_transport,
         )
     except (StackError, ValueError, OSError) as exc:
         _fail(exc)
@@ -123,6 +176,7 @@ def install_command(
         {
             "ok": True,
             "modes": state.modes,
+            "mcp_transport": state.mcp_transport,
             "state_root": str(layout.state_root),
             "config": str(layout.config_path),
             "next": "nanobot sagasmith start",
@@ -134,6 +188,8 @@ def install_command(
 @app.command("configure")
 def configure_command(
     mode: ModeOption = None,
+    profile: ProfileOption = None,
+    transport: TransportOption = None,
     workspace_root: Path | None = typer.Option(None, "--workspace-root"),
     state_root: Path | None = typer.Option(None, "--state-root"),
     config: Path | None = typer.Option(None, "--config", "-c"),
@@ -142,17 +198,27 @@ def configure_command(
     """Reconcile only SagaSmith-owned Agent config fields."""
     layout = _layout(workspace_root, state_root, config)
     try:
-        selected = _modes(mode)
-        changed = configure_agent(layout, selected)
         state = layout.load_state()
+        selected = _modes(mode, profile)
+        selected_transport = _transport(transport, fallback=state.selected_transport)
+        changed = configure_agent(layout, selected, transport=selected_transport)
         state.modes = [item.value for item in selected]
+        state.mcp_transport = selected_transport.value
         state.workspace_root = str(layout.workspace_root)
         state.config_path = str(layout.config_path)
         state.revision += 1
         layout.save_state(state)
     except (StackError, ValueError, OSError) as exc:
         _fail(exc)
-    _emit({"ok": True, "changed": changed, "modes": state.modes}, as_json=as_json)
+    _emit(
+        {
+            "ok": True,
+            "changed": changed,
+            "modes": state.modes,
+            "mcp_transport": state.mcp_transport,
+        },
+        as_json=as_json,
+    )
 
 
 @app.command("start")
@@ -204,6 +270,7 @@ def status_command(
         table.add_row(item.value, "yes" if item.value in selected else "no")
     console.print(table)
     console.print(f"Running: {payload['running']}")
+    console.print(f"MCP transport: {payload['mcp_transport']}")
     for name, url in payload["workbenches"].items():
         console.print(f"{name}: {url}")
 
@@ -211,21 +278,26 @@ def status_command(
 @app.command("doctor")
 def doctor_command(
     mode: ModeOption = None,
+    profile: ProfileOption = None,
+    transport: TransportOption = None,
     state_root: Path | None = typer.Option(None, "--state-root"),
     as_json: bool = typer.Option(False, "--json"),
 ) -> None:
     """Validate paths, imports, configuration, Skills, and live ports."""
     layout = _layout(None, state_root, None)
     try:
-        selected = _modes(mode) if mode else None
-        payload = doctor(layout, modes=selected)
+        selected = _modes(mode, profile) if mode or profile else None
+        selected_transport = _transport(transport) if transport else None
+        payload = doctor(layout, modes=selected, transport=selected_transport)
     except (StackError, ValueError, OSError) as exc:
         _fail(exc)
     if as_json:
         _emit(payload, as_json=True)
     else:
         for item in payload["checks"]:
-            marker = "[green]OK[/green]" if item["ok"] else "[red]FAIL[/red]"
+            marker = "[green]OK[/green]" if item["ok"] else (
+                "[red]FAIL[/red]" if item["required"] else "[yellow]WARN[/yellow]"
+            )
             console.print(f"{marker} {item['name']}: {item['detail']}")
     if not payload["ok"]:
         raise typer.Exit(1)

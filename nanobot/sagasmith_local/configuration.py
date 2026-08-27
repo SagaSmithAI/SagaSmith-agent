@@ -9,7 +9,13 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from .model import InstallMode, StackLayout, atomic_json_write
+from .model import (
+    InstallMode,
+    McpTransport,
+    StackLayout,
+    atomic_json_write,
+    transport_for_mode,
+)
 
 LOOPBACK_CIDR = "127.0.0.1/32"
 OWNED_SERVERS = frozenset({"sagasmith_dnd", "sagasmith_coc", "sagasmith_narrative"})
@@ -24,50 +30,102 @@ def desired_servers(
     layout: StackLayout,
     modes: tuple[InstallMode, ...],
     *,
+    transport: McpTransport = McpTransport.MIXED,
     auth_context_secret: str = "",
 ) -> dict[str, Any]:
     selected = set(modes)
     result: dict[str, Any] = {}
     if InstallMode.DND in selected:
-        result["sagasmith_dnd"] = {
-            "type": "streamableHttp",
-            "url": "http://127.0.0.1:8767/mcp",
-            "headers": {},
-            "toolTimeout": 900,
-            "enabledTools": ["*"],
-            "exposeResourcesAndPrompts": True,
-            "injectPrincipal": True,
-            "sessionScoped": True,
-            **({"authContextSecret": auth_context_secret} if auth_context_secret else {}),
-        }
+        domain_transport = transport_for_mode(transport, InstallMode.DND)
+        if domain_transport == McpTransport.STDIO:
+            repo = layout.repo("sagasmith-dnd")
+            result["sagasmith_dnd"] = _stdio_server(
+                repo,
+                "sagasmith_dnd_mcp.server",
+                dnd_environment(
+                    layout,
+                    transport=domain_transport,
+                    auth_context_secret=auth_context_secret,
+                ),
+                auth_context_secret,
+            )
+        else:
+            result["sagasmith_dnd"] = _http_server(
+                "http://127.0.0.1:8767/mcp", auth_context_secret
+            )
     if InstallMode.COC in selected:
-        result["sagasmith_coc"] = {
-            "type": "streamableHttp",
-            "url": "http://127.0.0.1:8769/mcp",
-            "headers": {},
-            "toolTimeout": 900,
-            "enabledTools": ["*"],
-            "exposeResourcesAndPrompts": True,
-            "injectPrincipal": True,
-            "sessionScoped": True,
-            **({"authContextSecret": auth_context_secret} if auth_context_secret else {}),
-        }
+        domain_transport = transport_for_mode(transport, InstallMode.COC)
+        if domain_transport == McpTransport.STDIO:
+            repo = layout.repo("sagasmith-coc")
+            result["sagasmith_coc"] = _stdio_server(
+                repo,
+                "sagasmith_coc_mcp.server",
+                coc_environment(
+                    layout,
+                    transport=domain_transport,
+                    auth_context_secret=auth_context_secret,
+                ),
+                auth_context_secret,
+            )
+        else:
+            result["sagasmith_coc"] = _http_server(
+                "http://127.0.0.1:8769/mcp", auth_context_secret
+            )
     if InstallMode.NARRATIVE in selected:
-        repo = layout.repo("sagasmith-narrative")
-        result["sagasmith_narrative"] = {
-            "type": "stdio",
-            "command": str(_python_executable(repo)),
-            "args": ["-m", "sagasmith_narrative_mcp.server"],
-            "cwd": str(repo),
-            "env": narrative_environment(layout, auth_context_secret=auth_context_secret),
-            "toolTimeout": 900,
-            "enabledTools": ["*"],
-            "exposeResourcesAndPrompts": True,
-            "injectPrincipal": True,
-            "sessionScoped": True,
-            **({"authContextSecret": auth_context_secret} if auth_context_secret else {}),
-        }
+        domain_transport = transport_for_mode(transport, InstallMode.NARRATIVE)
+        if domain_transport == McpTransport.STDIO:
+            repo = layout.repo("sagasmith-narrative")
+            result["sagasmith_narrative"] = _stdio_server(
+                repo,
+                "sagasmith_narrative_mcp.server",
+                narrative_environment(
+                    layout,
+                    transport=domain_transport,
+                    auth_context_secret=auth_context_secret,
+                ),
+                auth_context_secret,
+            )
+        else:
+            result["sagasmith_narrative"] = _http_server(
+                "http://127.0.0.1:8770/mcp", auth_context_secret
+            )
     return result
+
+
+def _common_server(auth_context_secret: str) -> dict[str, Any]:
+    return {
+        "toolTimeout": 900,
+        "enabledTools": ["*"],
+        "exposeResourcesAndPrompts": True,
+        "injectPrincipal": True,
+        "sessionScoped": True,
+        **({"authContextSecret": auth_context_secret} if auth_context_secret else {}),
+    }
+
+
+def _http_server(url: str, auth_context_secret: str) -> dict[str, Any]:
+    return {
+        "type": "streamableHttp",
+        "url": url,
+        "headers": {},
+        **_common_server(auth_context_secret),
+    }
+
+
+def _stdio_server(
+    repo: Path,
+    module: str,
+    environment: dict[str, str],
+    auth_context_secret: str,
+) -> dict[str, Any]:
+    return {
+        "type": "stdio",
+        "command": str(_python_executable(repo)),
+        "args": ["-m", module],
+        "cwd": str(repo),
+        "env": environment,
+        **_common_server(auth_context_secret),
+    }
 
 
 def desired_skill_roots(layout: StackLayout, modes: tuple[InstallMode, ...]) -> list[str]:
@@ -105,6 +163,8 @@ def reconcile_agent_config(
     config: dict[str, Any],
     layout: StackLayout,
     modes: tuple[InstallMode, ...],
+    *,
+    transport: McpTransport = McpTransport.MIXED,
 ) -> dict[str, Any]:
     result = dict(config)
     tools = dict(result.get("tools") or {})
@@ -121,7 +181,12 @@ def reconcile_agent_config(
     for name in OWNED_SERVERS:
         servers.pop(name, None)
     servers.update(
-        desired_servers(layout, modes, auth_context_secret=auth_context_secret)
+        desired_servers(
+            layout,
+            modes,
+            transport=transport,
+            auth_context_secret=auth_context_secret,
+        )
     )
     tools["mcpServers"] = servers
     whitelist = [str(item) for item in tools.get("ssrfWhitelist") or []]
@@ -140,7 +205,12 @@ def reconcile_agent_config(
     return result
 
 
-def configure_agent(layout: StackLayout, modes: tuple[InstallMode, ...]) -> bool:
+def configure_agent(
+    layout: StackLayout,
+    modes: tuple[InstallMode, ...],
+    *,
+    transport: McpTransport = McpTransport.MIXED,
+) -> bool:
     if layout.config_path.exists():
         try:
             current = json.loads(layout.config_path.read_text(encoding="utf-8"))
@@ -150,7 +220,7 @@ def configure_agent(layout: StackLayout, modes: tuple[InstallMode, ...]) -> bool
             raise ValueError("Agent config root must be an object")
     else:
         current = {}
-    desired = reconcile_agent_config(current, layout, modes)
+    desired = reconcile_agent_config(current, layout, modes, transport=transport)
     if desired == current:
         return False
     if layout.config_path.exists():
@@ -173,17 +243,28 @@ def agent_webui_url(layout: StackLayout) -> str:
     return f"http://127.0.0.1:{port}/"
 
 
-def dnd_environment(layout: StackLayout) -> dict[str, str]:
+def dnd_environment(
+    layout: StackLayout,
+    *,
+    transport: McpTransport = McpTransport.STREAMABLE_HTTP,
+    auth_context_secret: str = "",
+) -> dict[str, str]:
+    embedding_cache = os.environ.get(
+        "SAGASMITH_DND_EMBEDDING_CACHE_DIR",
+        str(layout.data_dir / "dnd" / "embedding-cache"),
+    )
     values = {
         "SAGASMITH_DND_MCP_HOME": str(layout.data_dir / "dnd"),
         "SAGASMITH_DND_SKILLS_DIR": str(layout.repo("sagasmith-dnd") / "skills"),
         "SAGASMITH_MODULEGEN_SKILLS_DIR": str(
             layout.repo("sagasmith-dnd") / "skills" / "dnd-module-generator"
         ),
-        "SAGASMITH_DND_MCP_TRANSPORT": "streamable-http",
+        "SAGASMITH_DND_MCP_TRANSPORT": transport.value,
         "SAGASMITH_DND_MCP_HTTP_HOST": "127.0.0.1",
         "SAGASMITH_DND_MCP_HTTP_PORT": "8767",
         "SAGASMITH_DND_MCP_URL": "http://127.0.0.1:8767/mcp",
+        # sagasmith-core reads the domain prefix selected by the D&D runtime.
+        "DND5E_EMBEDDING_CACHE_DIR": embedding_cache,
         "SAGASMITH_DND_GATEWAY_HOST": "127.0.0.1",
         "SAGASMITH_DND_GATEWAY_PORT": "8766",
         "SAGASMITH_DND_UI_DIST": str(layout.repo("sagasmith-dnd") / "apps" / "ui" / "dist"),
@@ -206,41 +287,59 @@ def dnd_environment(layout: StackLayout) -> dict[str, str]:
         ("SAGASMITH_DND_MCP_MODULE_OCR_SCALE", "2.0"),
     ):
         values[name] = os.environ.get(name, default)
-    if secret := _configured_auth_context_secret(layout):
+    if secret := auth_context_secret or _configured_auth_context_secret(layout):
         values["SAGASMITH_AUTH_CONTEXT_SECRET"] = secret
     return values
 
 
-def coc_environment(layout: StackLayout) -> dict[str, str]:
+def coc_environment(
+    layout: StackLayout,
+    *,
+    transport: McpTransport = McpTransport.STREAMABLE_HTTP,
+    auth_context_secret: str = "",
+) -> dict[str, str]:
+    embedding_cache = os.environ.get(
+        "SAGASMITH_COC_EMBEDDING_CACHE_DIR",
+        str(layout.data_dir / "coc" / "embedding-cache"),
+    )
     values = {
         "SAGASMITH_COC_MCP_HOME": str(layout.data_dir / "coc"),
         "SAGASMITH_COC_SKILLS_DIR": str(layout.repo("sagasmith-coc") / "skills"),
         "SAGASMITH_MODULEGEN_SKILLS_DIR": str(
             layout.repo("sagasmith-coc") / "skills" / "coc-module-generator"
         ),
-        "SAGASMITH_COC_MCP_TRANSPORT": "streamable-http",
+        "SAGASMITH_COC_MCP_TRANSPORT": transport.value,
         "SAGASMITH_COC_MCP_HTTP_HOST": "127.0.0.1",
         "SAGASMITH_COC_MCP_HTTP_PORT": "8769",
         "SAGASMITH_COC_MCP_URL": "http://127.0.0.1:8769/mcp",
+        # sagasmith-core reads the domain prefix selected by the CoC runtime.
+        "COC7_EMBEDDING_CACHE_DIR": embedding_cache,
         "SAGASMITH_COC_GATEWAY_HOST": "127.0.0.1",
         "SAGASMITH_COC_GATEWAY_PORT": "8768",
         "SAGASMITH_COC_UI_DIST": str(layout.repo("sagasmith-coc") / "apps" / "ui" / "dist"),
     }
     if configured := os.environ.get("SAGASMITH_COC_MCP_MODULE_IMPORT_ROOTS"):
         values["SAGASMITH_COC_MCP_MODULE_IMPORT_ROOTS"] = configured
-    if secret := _configured_auth_context_secret(layout):
+    if secret := auth_context_secret or _configured_auth_context_secret(layout):
         values["SAGASMITH_AUTH_CONTEXT_SECRET"] = secret
     return values
 
 
 def narrative_environment(
-    layout: StackLayout, *, auth_context_secret: str = ""
+    layout: StackLayout,
+    *,
+    transport: McpTransport = McpTransport.STDIO,
+    auth_context_secret: str = "",
 ) -> dict[str, str]:
     values = {
         "SAGASMITH_NARRATIVE_MCP_HOME": str(layout.data_dir / "narrative"),
         "SAGASMITH_NARRATIVE_SKILLS_DIR": str(
             layout.repo("sagasmith-narrative") / "skills"
         ),
+        "SAGASMITH_NARRATIVE_MCP_TRANSPORT": transport.value,
+        "SAGASMITH_NARRATIVE_MCP_HTTP_HOST": "127.0.0.1",
+        "SAGASMITH_NARRATIVE_MCP_HTTP_PORT": "8770",
+        "SAGASMITH_NARRATIVE_MCP_URL": "http://127.0.0.1:8770/mcp",
     }
     secret = auth_context_secret or _configured_auth_context_secret(layout)
     if secret:

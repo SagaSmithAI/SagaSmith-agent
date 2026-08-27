@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -12,15 +13,28 @@ from nanobot.sagasmith_local.configuration import (
     reconcile_agent_config,
 )
 from nanobot.sagasmith_local.model import (
+    PROFILE_MODES,
     InstallMode,
+    InstallProfile,
+    McpTransport,
     ProcessRecord,
     StackLayout,
     StackState,
     load_release_revisions,
     normalize_modes,
+    normalize_profile,
+    normalize_transport,
     selected_components,
+    transport_for_mode,
 )
-from nanobot.sagasmith_local.runtime import backup, restore, status, verify_backup
+from nanobot.sagasmith_local.runtime import (
+    _domain_sync_command,
+    backup,
+    doctor,
+    restore,
+    status,
+    verify_backup,
+)
 
 
 def layout_for(tmp_path: Path) -> StackLayout:
@@ -43,6 +57,49 @@ def test_modes_are_independently_selectable_and_default_to_all() -> None:
     )
     repositories = {item.repository for item in selected_components((InstallMode.COC,))}
     assert repositories == {"SagaSmith-agent", "sagasmith-core", "sagasmith-coc"}
+
+
+def test_named_profiles_and_transports_are_stable() -> None:
+    assert normalize_profile("dnd-only") == (InstallMode.DND,)
+    assert normalize_profile("multi-system") == tuple(InstallMode)
+    assert PROFILE_MODES[InstallProfile.COC_ONLY] == (InstallMode.COC,)
+    assert normalize_transport("stdio") == McpTransport.STDIO
+    assert (
+        transport_for_mode(McpTransport.MIXED, InstallMode.NARRATIVE)
+        == McpTransport.STDIO
+    )
+    assert (
+        transport_for_mode(McpTransport.MIXED, InstallMode.DND)
+        == McpTransport.STREAMABLE_HTTP
+    )
+
+
+def test_domain_sync_installs_only_the_selected_mcp_and_required_gateway() -> None:
+    assert _domain_sync_command("uv", InstallMode.DND, McpTransport.STDIO) == [
+        "uv",
+        "sync",
+        "--package",
+        "sagasmith-dnd-mcp",
+        "--frozen",
+    ]
+    assert _domain_sync_command("uv", InstallMode.COC, McpTransport.MIXED) == [
+        "uv",
+        "sync",
+        "--package",
+        "sagasmith-coc-mcp",
+        "--extra",
+        "gateway",
+        "--frozen",
+    ]
+    assert _domain_sync_command(
+        "uv", InstallMode.NARRATIVE, McpTransport.STREAMABLE_HTTP
+    ) == [
+        "uv",
+        "sync",
+        "--package",
+        "sagasmith-narrative-mcp",
+        "--frozen",
+    ]
 
 
 def test_release_lock_selects_exact_revisions_for_each_mode(tmp_path: Path) -> None:
@@ -144,6 +201,95 @@ def test_each_mode_has_an_explicit_transport(
         assert servers["sagasmith_coc"]["url"].endswith(":8769/mcp")
     if "sagasmith_narrative" in servers:
         assert servers["sagasmith_narrative"]["type"] == "stdio"
+
+
+@pytest.mark.parametrize(
+    ("transport", "expected_type"),
+    [
+        (McpTransport.STDIO, "stdio"),
+        (McpTransport.STREAMABLE_HTTP, "streamableHttp"),
+    ],
+)
+def test_every_domain_supports_each_local_transport(
+    tmp_path: Path,
+    transport: McpTransport,
+    expected_type: str,
+) -> None:
+    servers = desired_servers(layout_for(tmp_path), tuple(InstallMode), transport=transport)
+    assert {item["type"] for item in servers.values()} == {expected_type}
+    if transport == McpTransport.STREAMABLE_HTTP:
+        assert servers["sagasmith_narrative"]["url"].endswith(":8770/mcp")
+    else:
+        assert servers["sagasmith_dnd"]["args"] == ["-m", "sagasmith_dnd_mcp.server"]
+        assert servers["sagasmith_coc"]["args"] == ["-m", "sagasmith_coc_mcp.server"]
+
+
+def test_distribution_manifest_declares_all_profiles_and_templates() -> None:
+    root = Path(__file__).parents[1]
+    manifest = json.loads((root / "sagasmith-local-kit.json").read_text(encoding="utf-8"))
+    assert manifest["schema"] == "sagasmith.local-agent-kit/v1"
+    assert manifest["authoritative_contract"] == "sagasmith.authoritative-mcp/v1"
+    assert set(manifest["profiles"]) == {
+        "dnd-only",
+        "coc-only",
+        "narrative-only",
+        "multi-system",
+    }
+    assert set(manifest["transports"]) == {"mixed", "stdio", "streamable-http"}
+    for relative in manifest["templates"].values():
+        assert (root / relative).is_file()
+
+
+def test_wheel_build_maps_distribution_assets_into_the_python_package() -> None:
+    pyproject = (Path(__file__).parents[1] / "pyproject.toml").read_text(encoding="utf-8")
+    assert '"sagasmith-local-kit.json" = "nanobot/sagasmith_local/assets/' in pyproject
+    assert '"examples/local-agent-kit" = "nanobot/sagasmith_local/assets/' in pyproject
+
+
+def test_doctor_checks_provider_database_skills_and_transport(
+    tmp_path: Path, monkeypatch
+) -> None:
+    layout = layout_for(tmp_path)
+    (layout.agent_root / "pyproject.toml").write_text("", encoding="utf-8")
+    narrative = layout.repo("sagasmith-narrative")
+    (narrative / "skills" / "narrative-project-generator").mkdir(parents=True)
+    (narrative / "skills" / "narrative-project-generator" / "SKILL.md").write_text(
+        "# Skill\n", encoding="utf-8"
+    )
+    (narrative / "pyproject.toml").write_text("", encoding="utf-8")
+    (narrative / "packages" / "domain").mkdir(parents=True)
+    (narrative / "packages" / "domain" / "pyproject.toml").write_text("", encoding="utf-8")
+    (narrative / "packages" / "mcp").mkdir(parents=True)
+    (narrative / "packages" / "mcp" / "pyproject.toml").write_text("", encoding="utf-8")
+    monkeypatch.setattr(
+        "nanobot.sagasmith_local.runtime._venv_python", lambda repo: Path("python")
+    )
+    monkeypatch.setattr(
+        "nanobot.sagasmith_local.runtime._run",
+        lambda *args, **kwargs: SimpleNamespace(stdout=""),
+    )
+    monkeypatch.setenv("OPENAI_API_KEY", "test-provider-key")
+    config = reconcile_agent_config(
+        {"providers": {"openai": {"apiKey": "${OPENAI_API_KEY}"}}},
+        layout,
+        (InstallMode.NARRATIVE,),
+        transport=McpTransport.STREAMABLE_HTTP,
+    )
+    layout.config_path.write_text(json.dumps(config), encoding="utf-8")
+    report = doctor(
+        layout,
+        modes=(InstallMode.NARRATIVE,),
+        transport=McpTransport.STREAMABLE_HTTP,
+        include_runtime=False,
+    )
+    checks = {item["name"]: item for item in report["checks"]}
+    assert checks["provider"]["ok"] is True
+    assert checks["provider"]["required"] is False
+    assert checks["database-narrative"]["ok"] is True
+    skill_checks = [item for name, item in checks.items() if name.startswith("skills-")]
+    assert len(skill_checks) == 1
+    assert skill_checks[0]["ok"] is True
+    assert report["mcp_transport"] == "streamable-http"
 
 
 def test_state_round_trip_and_status_never_invents_processes(tmp_path: Path) -> None:

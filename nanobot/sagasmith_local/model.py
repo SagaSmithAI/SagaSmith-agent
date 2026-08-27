@@ -17,7 +17,26 @@ class InstallMode(StrEnum):
     NARRATIVE = "narrative"
 
 
+class InstallProfile(StrEnum):
+    DND_ONLY = "dnd-only"
+    COC_ONLY = "coc-only"
+    NARRATIVE_ONLY = "narrative-only"
+    MULTI_SYSTEM = "multi-system"
+
+
+class McpTransport(StrEnum):
+    MIXED = "mixed"
+    STDIO = "stdio"
+    STREAMABLE_HTTP = "streamable-http"
+
+
 ALL_MODES = tuple(InstallMode)
+PROFILE_MODES: dict[InstallProfile, tuple[InstallMode, ...]] = {
+    InstallProfile.DND_ONLY: (InstallMode.DND,),
+    InstallProfile.COC_ONLY: (InstallMode.COC,),
+    InstallProfile.NARRATIVE_ONLY: (InstallMode.NARRATIVE,),
+    InstallProfile.MULTI_SYSTEM: ALL_MODES,
+}
 STACK_SCHEMA = "sagasmith.local-stack/v1"
 RELEASE_LOCK_SCHEMA = "sagasmith.release-lock/v2"
 
@@ -89,6 +108,7 @@ class StackState:
     modes: list[str] = field(default_factory=list)
     source: str = "workspace"
     release_ref: str = "manifest"
+    mcp_transport: str = McpTransport.MIXED.value
     workspace_root: str = ""
     config_path: str = ""
     installed_at: str = ""
@@ -101,6 +121,10 @@ class StackState:
     def selected_modes(self) -> tuple[InstallMode, ...]:
         return tuple(InstallMode(value) for value in self.modes)
 
+    @property
+    def selected_transport(self) -> McpTransport:
+        return McpTransport(self.mcp_transport)
+
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "StackState":
         if value.get("schema") != STACK_SCHEMA:
@@ -111,6 +135,7 @@ class StackState:
             modes=list(value.get("modes", [])),
             source=str(value.get("source", "workspace")),
             release_ref=str(value.get("release_ref", "manifest")),
+            mcp_transport=str(value.get("mcp_transport", McpTransport.MIXED.value)),
             workspace_root=str(value.get("workspace_root", "")),
             config_path=str(value.get("config_path", "")),
             installed_at=str(value.get("installed_at", "")),
@@ -228,6 +253,26 @@ def normalize_modes(values: list[str] | tuple[str, ...] | None) -> tuple[Install
         if mode not in result:
             result.append(mode)
     return tuple(result)
+
+
+def normalize_profile(value: str | None) -> tuple[InstallMode, ...] | None:
+    if value is None:
+        return None
+    return PROFILE_MODES[InstallProfile(value.casefold())]
+
+
+def normalize_transport(value: str | McpTransport | None) -> McpTransport:
+    if value is None:
+        return McpTransport.MIXED
+    return McpTransport(value)
+
+
+def transport_for_mode(transport: McpTransport, mode: InstallMode) -> McpTransport:
+    if transport != McpTransport.MIXED:
+        return transport
+    if mode in {InstallMode.DND, InstallMode.COC}:
+        return McpTransport.STREAMABLE_HTTP
+    return McpTransport.STDIO
 
 
 def load_release_revisions(path: Path, modes: tuple[InstallMode, ...]) -> dict[str, str]:

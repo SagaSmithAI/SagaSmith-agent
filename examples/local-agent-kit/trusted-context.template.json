@@ -1,0 +1,8 @@
+{
+  "host": "codex",
+  "channel": "local",
+  "actor_principal": "codex:user:replace-with-profile-id",
+  "conversation_principal": "codex:project:replace-with-project-id",
+  "session_id": "codex:replace-with-project-id",
+  "tenant_id": null
+}
