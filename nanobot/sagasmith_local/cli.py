@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 from typing import Annotated
 
@@ -10,6 +11,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from .benchmark import benchmark_local_kit
 from .configuration import configure_agent
 from .model import (
     InstallMode,
@@ -301,6 +303,30 @@ def doctor_command(
             console.print(f"{marker} {item['name']}: {item['detail']}")
     if not payload["ok"]:
         raise typer.Exit(1)
+
+
+@app.command("benchmark")
+def benchmark_command(
+    mode: ModeOption = None,
+    profile: ProfileOption = None,
+    iterations: int = typer.Option(5, "--iterations", min=1, max=100),
+    timeout: float = typer.Option(30.0, "--timeout", min=1.0, max=300.0),
+    state_root: Path | None = typer.Option(None, "--state-root"),
+    as_json: bool = typer.Option(False, "--json"),
+) -> None:
+    """Measure local MCP cold start, warm capability calls, and idle RSS."""
+    layout = _layout(None, state_root, None)
+    try:
+        selected = _modes(mode, profile) if mode or profile else None
+        payload = benchmark_local_kit(
+            layout,
+            modes=selected,
+            iterations=iterations,
+            timeout=timeout,
+        )
+    except (StackError, ValueError, OSError, subprocess.SubprocessError) as exc:
+        _fail(exc)
+    _emit(payload, as_json=as_json)
 
 
 @app.command("logs")
