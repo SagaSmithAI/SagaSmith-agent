@@ -70,7 +70,7 @@ _WINDOWS_SHELL_LAUNCHERS: frozenset[str] = frozenset(("npx", "npm", "pnpm", "yar
 _SANITIZE_RE = re.compile(r"_+")
 _RELOAD_LOCKS: WeakKeyDictionary[Any, asyncio.Lock] = WeakKeyDictionary()
 _ReconnectCallback = Callable[[str, str, Tool], Awaitable[Tool | None]]
-_PostCallSyncCallback = Callable[[], Awaitable[None]]
+_PostCallSyncCallback = Callable[[bool], Awaitable[None]]
 _MCP_CONTEXT_TOOL_LIMIT = 48
 
 
@@ -895,7 +895,15 @@ class MCPToolWrapper(_MCPWrapperBase):
                 return ToolResult.error(f"(MCP tool call failed: {type(exc).__name__})")
             else:
                 if self._post_call_sync is not None:
-                    await self._post_call_sync()
+                    # A remote tools/list_changed notification can arrive after
+                    # tools/call has returned. Exposure mutations are the one
+                    # protocol operation for which the next model iteration must
+                    # see the new native schema, so refresh them deterministically
+                    # instead of racing the notification transport.
+                    force_tool_refresh = self._original_name == "exposure" and kwargs.get(
+                        "action"
+                    ) in {"open", "set"}
+                    await self._post_call_sync(force_tool_refresh)
                 # Success — extract text and persist any image content as artifacts.
                 try:
                     structured_content = (
@@ -1446,12 +1454,31 @@ async def connect_mcp_servers(
                 await server_stack.aclose()
                 return name, None
 
-            async def wait_for_pending_tool_refresh() -> None:
+            async def wait_for_pending_tool_refresh(force: bool = False) -> None:
+                nonlocal synced_generation
                 # The receive loop dispatches list_changed independently of the
                 # tool-call task. Run tools/list in its own task after tools/call
                 # has fully unwound; MCP SDK transports may reject a request made
                 # inline from the outer task during that response handoff.
                 await asyncio.sleep(0)
+                if force:
+                    # Streamable HTTP may deliver list_changed later than the
+                    # single event-loop handoff above. A direct post-mutation
+                    # list keeps the model-facing registry authoritative even in
+                    # that case; a genuinely later notification is harmlessly
+                    # reconciled by the normal generation path.
+                    target_generation = refresh_generation
+                    task = asyncio.create_task(
+                        sync_tools(),
+                        name=f"mcp-tools-post-exposure-refresh:{name}",
+                    )
+                    await asyncio.shield(task)
+                    synced_generation = max(synced_generation, target_generation)
+                    logger.info(
+                        "MCP server '{}': refreshed tools after exposure mutation",
+                        name,
+                    )
+                    return
                 if synced_generation >= refresh_generation:
                     return
                 task = asyncio.create_task(
