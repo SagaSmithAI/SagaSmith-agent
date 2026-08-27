@@ -440,6 +440,7 @@ class ExecTool(Tool):
         guard_error = self._guard_command(
             command,
             cwd,
+            shell=shell,
             restrict_to_workspace=access.restrict_to_workspace,
             workspace_root=workspace_root,
         )
@@ -704,6 +705,7 @@ class ExecTool(Tool):
         command: str,
         cwd: str,
         *,
+        shell: str | None = None,
         restrict_to_workspace: bool | None = None,
         workspace_root: str | None = None,
     ) -> str | None:
@@ -713,9 +715,17 @@ class ExecTool(Tool):
 
         # allow_patterns take priority over deny_patterns so that users can
         # exempt specific commands (e.g. "rm -rf" inside a build directory)
-        # from the hardcoded deny list via configuration.
-        explicitly_allowed = bool(self.allow_patterns) and any(
-            re.fullmatch(p, lower) for p in self.allow_patterns
+        # from the hardcoded deny list via configuration. A chained command is
+        # only explicitly allowed when every top-level shell segment matches.
+        segments = self._split_shell_segments(lower, dialect=self._shell_dialect(shell))
+        explicitly_allowed = (
+            bool(self.allow_patterns)
+            and segments is not None
+            and bool(segments)
+            and all(
+                any(re.fullmatch(pattern, segment) for pattern in self.allow_patterns)
+                for segment in segments
+            )
         )
         if not explicitly_allowed:
             for pattern in self.deny_patterns:
@@ -781,6 +791,119 @@ class ExecTool(Tool):
                     )
 
         return None
+
+    @staticmethod
+    def _shell_dialect(shell: str | None) -> str:
+        """Return the operator/escape dialect used by the selected shell."""
+        if shell:
+            name = shell.replace("\\", "/").rsplit("/", 1)[-1].lower()
+            if name in {"sh", "bash", "zsh", "sh.exe", "bash.exe", "zsh.exe"}:
+                return "posix"
+            if name in {"cmd", "cmd.exe"}:
+                return "cmd"
+            if name in {"powershell", "powershell.exe", "pwsh", "pwsh.exe"}:
+                return "powershell"
+        return "powershell" if _IS_WINDOWS else "posix"
+
+    @staticmethod
+    def _split_shell_segments(
+        command: str,
+        *,
+        dialect: str = "posix",
+    ) -> list[str] | None:
+        """Split top-level commands, or return ``None`` for nested execution.
+
+        Command and process substitutions execute nested shell text that cannot
+        safely inherit an outer allow-pattern match. Keep those constructs
+        fail-closed until each shell dialect has a complete recursive parser.
+        """
+        segments: list[str] = []
+        current: list[str] = []
+        quote: str | None = None
+        escaped = False
+        paren_depth = 0
+        escape_char = {"posix": "\\", "powershell": "`", "cmd": "^"}[dialect]
+        quote_chars = {'"'} if dialect == "cmd" else {"'", '"'}
+        i = 0
+
+        while i < len(command):
+            ch = command[i]
+
+            if escaped:
+                current.append(ch)
+                escaped = False
+                i += 1
+                continue
+
+            escape_is_active = (
+                quote is None if dialect == "cmd" else quote != "'"
+            )
+            if ch == escape_char and escape_is_active:
+                current.append(ch)
+                escaped = True
+                i += 1
+                continue
+
+            substitution_allowed_by_quote = quote != "'"
+            if substitution_allowed_by_quote and (
+                (dialect in {"posix", "powershell"} and command.startswith("$(", i))
+                or (dialect == "posix" and ch == "`")
+                or (dialect == "posix" and command.startswith(("<(", ">("), i))
+            ):
+                return None
+
+            if quote is not None:
+                current.append(ch)
+                if ch == quote:
+                    quote = None
+                i += 1
+                continue
+
+            if ch in quote_chars:
+                current.append(ch)
+                quote = ch
+                i += 1
+                continue
+
+            if ch == "(":
+                paren_depth += 1
+                current.append(ch)
+                i += 1
+                continue
+
+            if ch == ")" and paren_depth > 0:
+                paren_depth -= 1
+                current.append(ch)
+                i += 1
+                continue
+
+            operator_len = 0
+            if paren_depth == 0:
+                if command.startswith(("&&", "||", "|&"), i):
+                    operator_len = 2
+                elif ch == "&" and not (
+                    (i > 0 and command[i - 1] in "<>") or command.startswith("&>", i)
+                ):
+                    current.append(ch)
+                    operator_len = 1
+                elif ch in {";", "|", "\n", "\r"}:
+                    operator_len = 1
+
+            if operator_len:
+                segment = "".join(current).strip()
+                if segment:
+                    segments.append(segment)
+                current = []
+                i += operator_len
+                continue
+
+            current.append(ch)
+            i += 1
+
+        segment = "".join(current).strip()
+        if segment:
+            segments.append(segment)
+        return segments
 
     @classmethod
     def _is_benign_device_path(cls, path: str) -> bool:
