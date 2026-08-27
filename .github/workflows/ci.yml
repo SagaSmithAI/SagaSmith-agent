@@ -90,6 +90,30 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Build and verify wheel contents
+        env:
+          NANOBOT_SKIP_WEBUI_BUILD: "1"
+        run: |
+          uv build --wheel
+          python scripts/verify_wheel.py dist
+
+      - name: Verify installed Hosted wheel boundary and entrypoint
+        run: |
+          wheel="$(find dist -maxdepth 1 -name '*.whl' -print -quit)"
+          uv venv .wheel-venv --python 3.12
+          uv pip install --python .wheel-venv/bin/python "${wheel}[hosted]"
+          .wheel-venv/bin/python -m nanobot.apps.hosted_audit --prune
+          .wheel-venv/bin/python -m nanobot.apps.hosted_audit
+          .wheel-venv/bin/sagasmith-agent-worker --help
+
       - name: Build Local Agent image
         run: docker build --tag sagasmith-agent-local:ci .
 
