@@ -10,11 +10,17 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urljoin
 
 import httpx
 from loguru import logger
 
 from nanobot.providers.registry import find_by_name
+from nanobot.security.network import (
+    PinnedDNSAsyncTransport,
+    UnsafeURLRequestError,
+    resolve_url_target,
+)
 from nanobot.utils.helpers import detect_image_mime
 
 _OPENROUTER_ATTRIBUTION_HEADERS = {
@@ -23,6 +29,8 @@ _OPENROUTER_ATTRIBUTION_HEADERS = {
     "X-OpenRouter-Categories": "cli-agent,personal-agent",
 }
 _DEFAULT_TIMEOUT_S = 120.0
+_IMAGE_DOWNLOAD_MAX_BYTES = 32 * 1024 * 1024
+_IMAGE_DOWNLOAD_MAX_REDIRECTS = 5
 _AIHUBMIX_TIMEOUT_S = 300.0
 _AIHUBMIX_ASPECT_RATIO_SIZES = {
     "1:1": "1024x1024",
@@ -114,16 +122,81 @@ def _aihubmix_model_path(model: str) -> str:
 
 
 async def _download_image_data_url(
-    client: httpx.AsyncClient,
     url: str,
+    *,
+    proxy: str | None = None,
+    transport: httpx.AsyncBaseTransport | None = None,
 ) -> str:
-    response = await client.get(url)
     try:
-        response.raise_for_status()
-    except httpx.HTTPStatusError as exc:
-        detail = response.text[:500]
-        raise ImageGenerationError(f"failed to download generated image: {detail}") from exc
-    raw = response.content
+        client_kwargs: dict[str, Any] = {
+            "follow_redirects": False,
+            "timeout": _DEFAULT_TIMEOUT_S,
+            "trust_env": False,
+        }
+        if proxy:
+            # An explicit provider proxy is a user-selected trusted egress boundary.
+            # Validate each URL locally, while the proxy owns final DNS resolution.
+            client_kwargs["proxy"] = proxy
+        else:
+            client_kwargs["transport"] = PinnedDNSAsyncTransport(inner=transport)
+
+        async with httpx.AsyncClient(**client_kwargs) as client:
+            current_url = url
+            for _ in range(_IMAGE_DOWNLOAD_MAX_REDIRECTS + 1):
+                if proxy:
+                    ok, error, _ = resolve_url_target(
+                        current_url,
+                        trust_remote_dns=True,
+                    )
+                    if not ok:
+                        raise ImageGenerationError(
+                            f"blocked unsafe generated image URL: {error}"
+                        )
+                async with client.stream("GET", current_url) as response:
+                    if response.is_redirect:
+                        location = response.headers.get("location")
+                        if not location:
+                            raise ImageGenerationError(
+                                "generated image URL redirected without a location"
+                            )
+                        current_url = urljoin(str(response.url), location)
+                        continue
+
+                    try:
+                        response.raise_for_status()
+                    except httpx.HTTPStatusError as exc:
+                        raise ImageGenerationError(
+                            f"failed to download generated image (HTTP {response.status_code})"
+                        ) from exc
+
+                    declared_size = response.headers.get("content-length")
+                    if declared_size:
+                        try:
+                            if int(declared_size) > _IMAGE_DOWNLOAD_MAX_BYTES:
+                                raise ImageGenerationError(
+                                    "generated image exceeded the 32 MiB download limit"
+                                )
+                        except ValueError:
+                            pass
+
+                    chunks: list[bytes] = []
+                    total = 0
+                    async for chunk in response.aiter_bytes():
+                        total += len(chunk)
+                        if total > _IMAGE_DOWNLOAD_MAX_BYTES:
+                            raise ImageGenerationError(
+                                "generated image exceeded the 32 MiB download limit"
+                            )
+                        chunks.append(chunk)
+                    raw = b"".join(chunks)
+                    break
+            else:
+                raise ImageGenerationError("generated image URL exceeded the redirect limit")
+    except UnsafeURLRequestError as exc:
+        raise ImageGenerationError(f"blocked unsafe generated image URL: {exc}") from exc
+    except httpx.RequestError as exc:
+        raise ImageGenerationError(f"failed to download generated image: {exc}") from exc
+
     mime = detect_image_mime(raw)
     if mime is None:
         raise ImageGenerationError("generated image URL did not return a supported image")
@@ -187,6 +260,7 @@ class ImageGenerationProvider(ABC):
         api_base: str | None = None,
         extra_headers: dict[str, str] | None = None,
         extra_body: dict[str, Any] | None = None,
+        proxy: str | None = None,
         timeout: float | None = None,
         client: httpx.AsyncClient | None = None,
     ) -> None:
@@ -194,6 +268,7 @@ class ImageGenerationProvider(ABC):
         self.api_base = self._resolve_base_url(api_base)
         self.extra_headers = extra_headers or {}
         self.extra_body = extra_body or {}
+        self.proxy = proxy or None
         self.timeout = timeout if timeout is not None else self.default_timeout
         self._client = client
 
@@ -228,6 +303,13 @@ class ImageGenerationProvider(ABC):
             raise ImageGenerationError(f"{label} returned no images: {provider_error}")
         raise ImageGenerationError(f"{label} returned no images for this request")
 
+    def _http_client_kwargs(self) -> dict[str, Any]:
+        kwargs: dict[str, Any] = {"timeout": self.timeout}
+        if self.proxy:
+            kwargs["proxy"] = self.proxy
+            kwargs["trust_env"] = False
+        return kwargs
+
     async def _http_post(
         self,
         url: str,
@@ -240,7 +322,7 @@ class ImageGenerationProvider(ABC):
             return await client.post(url, headers=headers, json=body)
         if self._client is not None:
             return await self._client.post(url, headers=headers, json=body)
-        async with httpx.AsyncClient(timeout=self.timeout) as c:
+        async with httpx.AsyncClient(**self._http_client_kwargs()) as c:
             return await c.post(url, headers=headers, json=body)
 
 
@@ -366,7 +448,7 @@ class AIHubMixImageGenerationClient(ImageGenerationProvider):
         }
         size = _aihubmix_size(aspect_ratio, image_size)
 
-        client = self._client or httpx.AsyncClient(timeout=self.timeout)
+        client = self._client or httpx.AsyncClient(**self._http_client_kwargs())
         try:
             return await self._generate_with_client(
                 client,
@@ -426,7 +508,7 @@ class AIHubMixImageGenerationClient(ImageGenerationProvider):
             raise ImageGenerationError(f"AIHubMix image generation failed: {detail}") from exc
 
         payload = response.json()
-        images = await _aihubmix_images_from_payload(client, payload)
+        images = await _aihubmix_images_from_payload(payload, proxy=self.proxy)
 
         self._require_images(images, payload)
 
@@ -738,8 +820,9 @@ class GeminiImageGenerationClient(ImageGenerationProvider):
 
 
 async def _aihubmix_images_from_payload(
-    client: httpx.AsyncClient,
     payload: dict[str, Any],
+    *,
+    proxy: str | None = None,
 ) -> list[str]:
     images: list[str] = []
     candidates: list[Any] = []
@@ -757,7 +840,7 @@ async def _aihubmix_images_from_payload(
             if value.startswith("data:image/"):
                 images.append(value)
             elif value.startswith(("http://", "https://")):
-                images.append(await _download_image_data_url(client, value))
+                images.append(await _download_image_data_url(value, proxy=proxy))
             return
         if not isinstance(value, dict):
             return
@@ -956,15 +1039,7 @@ class OpenAIImageGenerationClient(ImageGenerationProvider):
         return model
 
     async def _parse_images_response(self, payload: dict[str, Any]) -> list[str]:
-        client = self._client
-        owns_client = client is None
-        if owns_client:
-            client = httpx.AsyncClient(timeout=self.timeout)
-        try:
-            return await _openai_images_from_payload(client, payload)
-        finally:
-            if owns_client:
-                await client.aclose()
+        return await _openai_images_from_payload(payload, proxy=self.proxy)
 
     async def _post_image_edit(
         self,
@@ -994,7 +1069,7 @@ class OpenAIImageGenerationClient(ImageGenerationProvider):
                     data=body,
                     files=files,
                 )
-            async with httpx.AsyncClient(timeout=self.timeout) as c:
+            async with httpx.AsyncClient(**self._http_client_kwargs()) as c:
                 return await c.post(
                     f"{self.api_base}/images/edits",
                     headers=headers,
@@ -1175,15 +1250,7 @@ class CustomImageGenerationClient(ImageGenerationProvider):
         logger.info("Custom Images API response ({}): {}", response.status_code,
                        {k: v for k, v in payload.items() if k != "data"})
 
-        client = self._client
-        owns_client = client is None
-        if owns_client:
-            client = httpx.AsyncClient(timeout=self.timeout)
-        try:
-            images = await _openai_images_from_payload(client, payload)
-        finally:
-            if owns_client:
-                await client.aclose()
+        images = await _openai_images_from_payload(payload, proxy=self.proxy)
 
         self._require_images(images, payload)
 
@@ -1233,7 +1300,8 @@ class CodexImageGenerationClient(ImageGenerationProvider):
             raise ImageGenerationError(self.missing_key_message)
 
         try:
-            token = await asyncio.to_thread(get_codex_token)
+            token_kwargs = {"proxy": self.proxy} if self.proxy else {}
+            token = await asyncio.to_thread(get_codex_token, **token_kwargs)
         except Exception as exc:
             raise ImageGenerationError(self.missing_key_message) from exc
         if not token or not token.access:
@@ -1374,8 +1442,9 @@ def _openai_explicit_size_supported(
 
 
 async def _openai_images_from_payload(
-    client: httpx.AsyncClient,
     payload: dict[str, Any],
+    *,
+    proxy: str | None = None,
 ) -> list[str]:
     """Extract images from OpenAI Images API response.
 
@@ -1391,7 +1460,7 @@ async def _openai_images_from_payload(
             continue
         url = item.get("url")
         if isinstance(url, str) and url:
-            images.append(await _download_image_data_url(client, url))
+            images.append(await _download_image_data_url(url, proxy=proxy))
     return images
 
 
@@ -1669,7 +1738,7 @@ class ZhipuImageGenerationClient(ImageGenerationProvider):
 
         url = f"{self.api_base}/images/generations"
 
-        client = self._client or httpx.AsyncClient(timeout=self.timeout)
+        client = self._client or httpx.AsyncClient(**self._http_client_kwargs())
         try:
             return await self._generate_with_client(
                 client,
@@ -1703,7 +1772,7 @@ class ZhipuImageGenerationClient(ImageGenerationProvider):
             raise ImageGenerationError(f"Zhipu image generation failed: {detail}") from exc
 
         payload = response.json()
-        images = await _zhipu_images_from_payload(client, payload)
+        images = await _zhipu_images_from_payload(payload, proxy=self.proxy)
 
         self._require_images(images, payload)
 
@@ -1727,8 +1796,9 @@ def _zhipu_size(
 
 
 async def _zhipu_images_from_payload(
-    client: httpx.AsyncClient,
     payload: dict[str, Any],
+    *,
+    proxy: str | None = None,
 ) -> list[str]:
     """Extract image data URLs from Zhipu API response.
 
@@ -1741,7 +1811,7 @@ async def _zhipu_images_from_payload(
             continue
         url = item.get("url")
         if isinstance(url, str) and url:
-            images.append(await _download_image_data_url(client, url))
+            images.append(await _download_image_data_url(url, proxy=proxy))
     return images
 
 

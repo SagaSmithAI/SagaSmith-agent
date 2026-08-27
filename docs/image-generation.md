@@ -61,6 +61,11 @@ Provider settings reuse normal provider config fields:
 | `providers.<name>.apiBase` | Optional custom base URL |
 | `providers.<name>.extraHeaders` | Headers merged into provider requests |
 | `providers.<name>.extraBody` | Extra JSON fields merged into provider request bodies |
+| `providers.<name>.proxy` | Explicit trusted HTTP proxy for provider requests and returned image URL downloads |
+
+For providers that return image URLs, direct downloads use DNS pinning. When an explicit provider `proxy` is configured, nanobot rejects malformed URLs and locally identifiable private/internal targets on the initial URL and every redirect. Hostnames unavailable to local DNS are delegated to that trusted proxy, which owns final DNS resolution and network egress. Process-wide proxy environment variables are not used for these downloads.
+
+For a private Custom provider, prefer `b64_json` responses. If it returns URLs instead, the image host must use a public address, an intentional private address already covered by `tools.ssrfWhitelist`, or a hostname resolvable only through an explicit trusted provider `proxy`. Literal private, loopback, link-local, and metadata targets are never delegated merely because a proxy is configured.
 
 Both camelCase and snake_case config keys are accepted, but docs use camelCase to match `config.json`.
 
