@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,9 +22,19 @@ from nanobot.sagasmith_hosts.contract import (
     adapt_sagasmith_agent,
     adapt_service_worker,
 )
+from nanobot.sagasmith_local.model import InstallMode, McpTransport, load_release_revisions
 
 SECRET = "cross-domain-host-conformance-secret-at-least-32-bytes"
-WORKSPACE = Path(__file__).parents[3]
+AGENT_ROOT = Path(__file__).parents[2]
+DEFAULT_WORKSPACE = AGENT_ROOT.parent
+REQUIRED_ENV = "SAGASMITH_REAL_DOMAINS_REQUIRED"
+WORKSPACE_ENV = "SAGASMITH_REAL_DOMAIN_WORKSPACE"
+STATE_ROOT_ENV = "SAGASMITH_REAL_DOMAIN_STATE_ROOT"
+LANE_ENV = "SAGASMITH_REAL_DOMAIN_LANE"
+TRANSPORTS = (McpTransport.STDIO, McpTransport.STREAMABLE_HTTP)
+# A cold Windows D&D run has exceeded 60 seconds after completing its MCP calls.
+# Keep teardown bounded without turning that valid first-run cost into a failure.
+CASE_TIMEOUT_SECONDS = 120
 
 
 @dataclass(frozen=True)
@@ -62,6 +73,86 @@ DOMAINS = (
         "packages/domain/src",
     ),
 )
+
+
+def _workspace() -> Path:
+    configured = os.environ.get(WORKSPACE_ENV, "").strip()
+    return Path(configured).expanduser().resolve() if configured else DEFAULT_WORKSPACE
+
+
+def _required() -> bool:
+    return os.environ.get(REQUIRED_ENV, "").strip().casefold() in {"1", "true", "yes"}
+
+
+def _downstream_python(workspace: Path, domain: Domain) -> Path:
+    candidate = workspace / domain.repo / ".venv" / (
+        "Scripts/python.exe" if os.name == "nt" else "bin/python"
+    )
+    if candidate.is_file():
+        return candidate
+    message = f"{domain.name} development environment is unavailable: {candidate}"
+    if _required():
+        pytest.fail(message)
+    pytest.skip(message)
+
+
+def _checkout_revision(repository: Path) -> str:
+    result = subprocess.run(
+        ["git", "-C", str(repository), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip()
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _verify_required_ci_lane() -> None:
+    if not _required():
+        return
+    workspace = _workspace()
+    missing = [domain.name for domain in DOMAINS if not (workspace / domain.repo).is_dir()]
+    if missing:
+        pytest.fail("required real-domain repositories are missing: " + ", ".join(missing))
+    for domain in DOMAINS:
+        _downstream_python(workspace, domain)
+
+    state_root = os.environ.get(STATE_ROOT_ENV, "").strip()
+    lane = os.environ.get(LANE_ENV, "").strip()
+    if not state_root or lane not in {"release-lock", "latest-main"}:
+        pytest.fail("required real-domain lane metadata is incomplete")
+    state_path = Path(state_root).expanduser().resolve() / "stack.json"
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        pytest.fail(f"cannot read required real-domain state {state_path}: {exc}")
+    assert state["source"] == "release"
+    assert state["mcp_transport"] == McpTransport.STREAMABLE_HTTP.value
+    assert Path(state["workspace_root"]).resolve() == workspace
+    revisions = state["component_revisions"]
+    expected_repositories = {
+        "SagaSmith-agent",
+        "sagasmith-core",
+        *(domain.repo for domain in DOMAINS),
+    }
+    assert expected_repositories <= set(revisions)
+    assert all(
+        len(revisions[repository]) == 40
+        for repository in expected_repositories
+    )
+    assert _checkout_revision(AGENT_ROOT) == revisions["SagaSmith-agent"]
+    assert all(
+        _checkout_revision(workspace / repository) == revisions[repository]
+        for repository in expected_repositories - {"SagaSmith-agent"}
+    )
+    if lane == "release-lock":
+        assert state["release_ref"] == "manifest"
+        expected = load_release_revisions(
+            AGENT_ROOT / "sagasmith-stack-lock.json", tuple(InstallMode)
+        )
+        assert {repository: revisions[repository] for repository in expected} == expected
+    else:
+        assert state["release_ref"] == "main"
 
 
 def _contexts() -> list[TrustedHostContext]:
@@ -111,49 +202,91 @@ def _contexts() -> list[TrustedHostContext]:
     ]
 
 
+@pytest.mark.parametrize("transport", TRANSPORTS, ids=lambda item: item.value)
 @pytest.mark.parametrize("domain", DOMAINS, ids=lambda item: item.name)
 @pytest.mark.parametrize("context", _contexts(), ids=lambda item: item.host)
 def test_real_domain_accepts_each_host_only_through_signed_bridge(
-    domain: Domain, context: TrustedHostContext, tmp_path: Path
+    transport: McpTransport,
+    domain: Domain,
+    context: TrustedHostContext,
+    tmp_path: Path,
 ) -> None:
-    asyncio.run(_exercise(domain, context, tmp_path))
-
-
-async def _exercise(domain: Domain, context: TrustedHostContext, tmp_path: Path) -> None:
-    repo = WORKSPACE / domain.repo
-    downstream_python = repo / ".venv" / (
-        "Scripts/python.exe" if os.name == "nt" else "bin/python"
+    asyncio.run(
+        asyncio.wait_for(
+            _exercise(transport, domain, context, tmp_path),
+            timeout=CASE_TIMEOUT_SECONDS,
+        )
     )
-    if not downstream_python.is_file():
-        pytest.skip(f"{domain.name} development environment is unavailable")
+
+
+def _http_bridge_target(domain: Domain) -> tuple[dict[str, object], str]:
+    configured = os.environ.get(STATE_ROOT_ENV, "").strip()
+    if not configured:
+        message = f"{STATE_ROOT_ENV} is required for streamable HTTP conformance"
+        if _required():
+            pytest.fail(message)
+        pytest.skip(message)
+    state_path = Path(configured).expanduser().resolve() / "stack.json"
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        config_path = Path(state["config_path"]).expanduser().resolve()
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        server = config["tools"]["mcpServers"][f"sagasmith_{domain.name}"]
+    except (KeyError, OSError, TypeError, UnicodeError, json.JSONDecodeError) as exc:
+        pytest.fail(f"cannot read installed streamable HTTP target for {domain.name}: {exc}")
+    assert isinstance(server, dict)
+    assert server["type"] == "streamableHttp"
+    secret = str(server.get("authContextSecret") or "")
+    assert len(secret.encode("utf-8")) >= 32
+    return {
+        "type": server["type"],
+        "url": server["url"],
+        "headers": server.get("headers") or {},
+    }, secret
+
+
+def _stdio_bridge_target(
+    workspace: Path, domain: Domain, tmp_path: Path
+) -> tuple[dict[str, object], str]:
+    repo = workspace / domain.repo
+    downstream_python = _downstream_python(workspace, domain)
+    return {
+        "type": "stdio",
+        "command": str(downstream_python),
+        "args": ["-m", domain.module],
+        "cwd": str(repo / "packages" / "mcp"),
+        "env": {
+            domain.home_variable: str(tmp_path / "domain-home"),
+            "SAGASMITH_AUTH_CONTEXT_SECRET": SECRET,
+            "PYTHONPATH": os.pathsep.join(
+                [
+                    str(repo / domain.mcp_source),
+                    str(repo / domain.domain_source),
+                    str(workspace / "sagasmith-core" / "src"),
+                ]
+            ),
+        },
+    }, SECRET
+
+
+async def _exercise(
+    transport: McpTransport,
+    domain: Domain,
+    context: TrustedHostContext,
+    tmp_path: Path,
+) -> None:
+    workspace = _workspace()
+    if transport == McpTransport.STREAMABLE_HTTP:
+        server_config, secret = _http_bridge_target(domain)
+    else:
+        server_config, secret = _stdio_bridge_target(workspace, domain, tmp_path)
 
     config_path = tmp_path / "bridge.json"
     context_path = tmp_path / "context.json"
     secret_path = tmp_path / "secret"
-    config_path.write_text(
-        json.dumps(
-            {
-                "type": "stdio",
-                "command": str(downstream_python),
-                "args": ["-m", domain.module],
-                "cwd": str(repo / "packages" / "mcp"),
-                "env": {
-                    domain.home_variable: str(tmp_path / "domain-home"),
-                    "SAGASMITH_AUTH_CONTEXT_SECRET": SECRET,
-                    "PYTHONPATH": os.pathsep.join(
-                        [
-                            str(repo / domain.mcp_source),
-                            str(repo / domain.domain_source),
-                            str(WORKSPACE / "sagasmith-core" / "src"),
-                        ]
-                    ),
-                },
-            }
-        ),
-        encoding="utf-8",
-    )
+    config_path.write_text(json.dumps(server_config), encoding="utf-8")
     context_path.write_text(json.dumps(context.to_dict()), encoding="utf-8")
-    secret_path.write_text(SECRET, encoding="utf-8")
+    secret_path.write_text(secret, encoding="utf-8")
     params = StdioServerParameters(
         command=sys.executable,
         args=[

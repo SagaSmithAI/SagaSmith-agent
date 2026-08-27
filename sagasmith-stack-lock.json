@@ -1,19 +1,19 @@
 {
   "schema": "sagasmith.release-lock/v2",
-  "release": "2026.8.19-monorepo",
-  "released_at": "2026-08-19T00:00:00+08:00",
+  "release": "2026.8.28-local-kit",
+  "released_at": "2026-08-28T01:53:26+08:00",
   "shared": {
-    "sagasmith-core": "1c37b882ec031e5ffed7741d0c8559a17d171b47"
+    "sagasmith-core": "08ac611cfa8e551231028d181c5c3bf2727ee0f7"
   },
   "profiles": {
     "dnd": {
-      "sagasmith-dnd": "33b13e17b4facbee8ebaa59915c3e4bd6fe41dd7"
+      "sagasmith-dnd": "25ee1ce4994f1950d6febd50145d364dbf621dbe"
     },
     "coc": {
-      "sagasmith-coc": "eb2af2d6e2eb99df18625f8b5f041ab1fef57351"
+      "sagasmith-coc": "36ded279e27acda86609bc3c6ee0c99c568218c7"
     },
     "narrative": {
-      "sagasmith-narrative": "62a9adc1bdb9090376e2ee4f3e70edc343f2d948"
+      "sagasmith-narrative": "35c1510996237648298fb56d23ef4b9e5ff39a81"
     }
   }
 }

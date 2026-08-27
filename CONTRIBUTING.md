@@ -113,9 +113,12 @@ In practice:
 If your PR touches `.github/workflows/`, please keep the CI within
 GitHub Actions' free tier:
 
-- Use only standard GitHub-hosted runners (`ubuntu-latest`, `windows-latest`)
-- Avoid macOS runners, larger runners (`*-cores`, `*-xlarge`, `*-gpu`),
-  and self-hosted runners
+- Use standard GitHub-hosted Ubuntu and Windows runners for routine CI.
+- The lightweight Local Kit startup/release smoke may also use `macos-latest` so the
+  supported Windows, macOS, and Linux launch paths stay covered. Keep that exception
+  scoped to the minimal profile without all-extras, artifacts, or a broader test matrix.
+- Avoid other macOS runners, larger runners (`*-cores`, `*-xlarge`, `*-gpu`), and
+  self-hosted runners.
 - Avoid uploading large artifacts or using long retention
 - Avoid paid Marketplace actions
 
