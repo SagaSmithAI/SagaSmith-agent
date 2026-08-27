@@ -694,7 +694,12 @@ def doctor(
 
 
 def tail_logs(layout: StackLayout, component: str | None = None, lines: int = 100) -> str:
-    names = [component] if component else [record.name for record in layout.load_state().processes]
+    if component:
+        names = [component]
+    else:
+        names = [record.name for record in layout.load_state().processes]
+        if not names and layout.logs_dir.is_dir():
+            names = sorted(path.stem for path in layout.logs_dir.glob("*.log") if path.is_file())
     output: list[str] = []
     for name in names:
         path = layout.logs_dir / f"{name}.log"

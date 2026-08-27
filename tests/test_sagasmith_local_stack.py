@@ -37,6 +37,7 @@ from nanobot.sagasmith_local.runtime import (
     doctor,
     restore,
     status,
+    tail_logs,
     verify_backup,
 )
 
@@ -283,6 +284,7 @@ def test_ci_runs_required_real_domains_against_lock_and_latest_mains() -> None:
     assert job["runs-on"] == "ubuntu-latest"
     assert job["strategy"]["matrix"]["lane"] == ["release-lock", "latest-main"]
     steps = _named_steps(job)
+    copy = steps["Copy valid Agent config into lane state"]
     exact = steps["Materialize exact release lock"]
     floating = steps["Materialize latest domain mains"]
     benchmark = steps["Verify selected Narrative revision over Streamable HTTP"]
@@ -291,6 +293,10 @@ def test_ci_runs_required_real_domains_against_lock_and_latest_mains() -> None:
     conformance = steps["Run all 42 signed-host/domain/transport combinations"]
     diagnostics = steps["Dump Local Kit logs after a failure"]
     stop = steps["Stop Streamable HTTP MCPs"]
+    assert copy["env"]["TARGET_CONFIG"] == (
+        "${{ runner.temp }}/sagasmith-real-domains/${{ matrix.lane }}/config.json"
+    )
+    assert "shutil.copyfile" in copy["run"]
     assert exact["if"] == "matrix.lane == 'release-lock'"
     assert "--release-manifest" in exact["run"]
     assert "--profile multi-system" in exact["run"]
@@ -321,6 +327,14 @@ def test_ci_runs_required_real_domains_against_lock_and_latest_mains() -> None:
     assert step_names.index("Run all 42 signed-host/domain/transport combinations") < (
         step_names.index("Stop Streamable HTTP MCPs")
     )
+
+
+def test_tail_logs_falls_back_to_failed_start_files(tmp_path: Path) -> None:
+    layout = layout_for(tmp_path)
+    layout.ensure()
+    (layout.logs_dir / "dnd_mcp.log").write_text("ready\nfailed\n", encoding="utf-8")
+
+    assert tail_logs(layout) == "== dnd_mcp ==\nready\nfailed"
 
 
 def test_ci_starts_locked_local_kit_on_each_supported_os() -> None:

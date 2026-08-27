@@ -82,6 +82,16 @@ jobs:
       - name: Install Agent conformance dependencies
         run: uv sync --extra dev
 
+      - name: Copy valid Agent config into lane state
+        env:
+          SOURCE_CONFIG: ${{ github.workspace }}/tests/fixtures/sagasmith-local-startup.json
+          TARGET_CONFIG: ${{ runner.temp }}/sagasmith-real-domains/${{ matrix.lane }}/config.json
+        run: >-
+          uv run python -c
+          "import os, shutil; from pathlib import Path;
+          target = Path(os.environ['TARGET_CONFIG']); target.parent.mkdir(parents=True, exist_ok=True);
+          shutil.copyfile(os.environ['SOURCE_CONFIG'], target)"
+
       - name: Materialize exact release lock
         if: matrix.lane == 'release-lock'
         run: >-
