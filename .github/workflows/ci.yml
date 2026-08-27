@@ -140,6 +140,13 @@ jobs:
           SAGASMITH_REAL_DOMAIN_WORKSPACE: ${{ runner.temp }}/sagasmith-real-domains/${{ matrix.lane }}/releases/current
         run: uv run python -m pytest -q tests/host_conformance/test_real_domains.py
 
+      - name: Dump Local Kit logs after a failure
+        if: failure()
+        run: >-
+          uv run nanobot sagasmith logs
+          --lines 200
+          --state-root "$RUNNER_TEMP/sagasmith-real-domains/${{ matrix.lane }}"
+
       - name: Stop Streamable HTTP MCPs
         if: always()
         run: >-

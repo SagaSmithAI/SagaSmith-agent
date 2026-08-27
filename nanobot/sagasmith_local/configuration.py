@@ -267,9 +267,11 @@ def dnd_environment(
         "DND5E_EMBEDDING_CACHE_DIR": embedding_cache,
         "SAGASMITH_DND_GATEWAY_HOST": "127.0.0.1",
         "SAGASMITH_DND_GATEWAY_PORT": "8766",
-        "SAGASMITH_DND_UI_DIST": str(layout.repo("sagasmith-dnd") / "apps" / "ui" / "dist"),
         "SAGASMITH_AGENT_WEBUI_URL": agent_webui_url(layout),
     }
+    ui_dist = layout.repo("sagasmith-dnd") / "apps" / "ui" / "dist"
+    if (ui_dist / "index.html").is_file():
+        values["SAGASMITH_DND_UI_DIST"] = str(ui_dist)
     rule_root = layout.workspace_root / "reference" / "DnD-Books" / "5e" / "Books"
     module_root = layout.workspace_root / "reference" / "DnD-Books" / "5e" / "Campaign"
     if configured := os.environ.get("SAGASMITH_DND_MCP_RULE_IMPORT_ROOTS"):
@@ -316,8 +318,10 @@ def coc_environment(
         "COC7_EMBEDDING_CACHE_DIR": embedding_cache,
         "SAGASMITH_COC_GATEWAY_HOST": "127.0.0.1",
         "SAGASMITH_COC_GATEWAY_PORT": "8768",
-        "SAGASMITH_COC_UI_DIST": str(layout.repo("sagasmith-coc") / "apps" / "ui" / "dist"),
     }
+    ui_dist = layout.repo("sagasmith-coc") / "apps" / "ui" / "dist"
+    if (ui_dist / "index.html").is_file():
+        values["SAGASMITH_COC_UI_DIST"] = str(ui_dist)
     if configured := os.environ.get("SAGASMITH_COC_MCP_MODULE_IMPORT_ROOTS"):
         values["SAGASMITH_COC_MCP_MODULE_IMPORT_ROOTS"] = configured
     if secret := auth_context_secret or _configured_auth_context_secret(layout):

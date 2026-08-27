@@ -10,8 +10,10 @@ import yaml
 
 from nanobot.sagasmith_local.configuration import (
     LOOPBACK_CIDR,
+    coc_environment,
     desired_servers,
     desired_skill_roots,
+    dnd_environment,
     reconcile_agent_config,
 )
 from nanobot.sagasmith_local.model import (
@@ -74,6 +76,29 @@ def test_named_profiles_and_transports_are_stable() -> None:
         transport_for_mode(McpTransport.MIXED, InstallMode.DND)
         == McpTransport.STREAMABLE_HTTP
     )
+
+
+@pytest.mark.parametrize(
+    ("repository", "environment_factory", "variable"),
+    [
+        ("sagasmith-dnd", dnd_environment, "SAGASMITH_DND_UI_DIST"),
+        ("sagasmith-coc", coc_environment, "SAGASMITH_COC_UI_DIST"),
+    ],
+)
+def test_domain_environment_only_exposes_built_ui(
+    tmp_path: Path,
+    repository: str,
+    environment_factory,
+    variable: str,
+) -> None:
+    layout = layout_for(tmp_path)
+    ui_dist = layout.repo(repository) / "apps" / "ui" / "dist"
+
+    assert variable not in environment_factory(layout)
+
+    ui_dist.mkdir(parents=True)
+    (ui_dist / "index.html").write_text("<!doctype html>", encoding="utf-8")
+    assert environment_factory(layout)[variable] == str(ui_dist)
 
 
 def test_domain_sync_installs_only_the_selected_mcp_and_required_gateway() -> None:
@@ -264,6 +289,7 @@ def test_ci_runs_required_real_domains_against_lock_and_latest_mains() -> None:
     start = steps["Start all three Streamable HTTP MCPs"]
     doctor = steps["Verify all three Streamable HTTP MCPs"]
     conformance = steps["Run all 42 signed-host/domain/transport combinations"]
+    diagnostics = steps["Dump Local Kit logs after a failure"]
     stop = steps["Stop Streamable HTTP MCPs"]
     assert exact["if"] == "matrix.lane == 'release-lock'"
     assert "--release-manifest" in exact["run"]
@@ -283,6 +309,9 @@ def test_ci_runs_required_real_domains_against_lock_and_latest_mains() -> None:
     assert conformance["run"] == (
         "uv run python -m pytest -q tests/host_conformance/test_real_domains.py"
     )
+    assert diagnostics["if"] == "failure()"
+    assert "nanobot sagasmith logs" in diagnostics["run"]
+    assert "--lines 200" in diagnostics["run"]
     assert stop["if"] == "always()"
     assert "nanobot sagasmith stop" in stop["run"]
     step_names = [step.get("name") for step in job["steps"]]
