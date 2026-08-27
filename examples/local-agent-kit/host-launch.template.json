@@ -1,0 +1,53 @@
+{
+  "codex": {
+    "command": "sagasmith-auth-bridge",
+    "args": [
+      "--config",
+      "replace-with-downstream-mcp-json",
+      "--context",
+      "replace-with-trusted-context-json",
+      "--secret-file",
+      "replace-with-owner-readable-secret-file"
+    ],
+    "startup_timeout_sec": 30,
+    "tool_timeout_sec": 900
+  },
+  "claude-code": {
+    "type": "stdio",
+    "command": "sagasmith-auth-bridge",
+    "args": [
+      "--config",
+      "replace-with-downstream-mcp-json",
+      "--context",
+      "replace-with-trusted-context-json",
+      "--secret-file",
+      "replace-with-owner-readable-secret-file"
+    ]
+  },
+  "openclaw-single-user-local": {
+    "transport": "stdio",
+    "command": "sagasmith-auth-bridge",
+    "args": [
+      "--config",
+      "replace-with-downstream-mcp-json",
+      "--context",
+      "replace-with-trusted-context-json",
+      "--secret-file",
+      "replace-with-owner-readable-secret-file"
+    ],
+    "timeout": 900,
+    "toolFilter": {"include": ["*"]}
+  },
+  "generic-stdio-single-user-local": {
+    "type": "stdio",
+    "command": "sagasmith-auth-bridge",
+    "args": [
+      "--config",
+      "replace-with-downstream-mcp-json",
+      "--context",
+      "replace-with-trusted-context-json",
+      "--secret-file",
+      "replace-with-owner-readable-secret-file"
+    ]
+  }
+}

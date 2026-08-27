@@ -1,0 +1,14 @@
+{
+  "sagasmith_dnd": {
+    "type": "streamable-http",
+    "url": "http://127.0.0.1:8767/mcp"
+  },
+  "sagasmith_coc": {
+    "type": "streamable-http",
+    "url": "http://127.0.0.1:8769/mcp"
+  },
+  "sagasmith_narrative": {
+    "type": "streamable-http",
+    "url": "http://127.0.0.1:8770/mcp"
+  }
+}

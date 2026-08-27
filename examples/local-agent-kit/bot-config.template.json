@@ -1,0 +1,26 @@
+{
+  "agents": {
+    "defaults": {
+      "model": "replace-with-provider/model-id"
+    }
+  },
+  "providers": {},
+  "channels": {
+    "discord": {
+      "enabled": false,
+      "token": "${DISCORD_BOT_TOKEN}",
+      "allowFrom": ["replace-with-user-id"]
+    },
+    "qq": {
+      "enabled": false,
+      "appId": "${QQ_APP_ID}",
+      "secret": "${QQ_APP_SECRET}",
+      "allowFrom": ["replace-with-user-id"]
+    },
+    "telegram": {
+      "enabled": false,
+      "token": "${TELEGRAM_BOT_TOKEN}",
+      "allowFrom": ["replace-with-user-id"]
+    }
+  }
+}

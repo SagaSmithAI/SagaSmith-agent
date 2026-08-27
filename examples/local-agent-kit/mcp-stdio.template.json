@@ -1,0 +1,29 @@
+{
+  "sagasmith_dnd": {
+    "type": "stdio",
+    "command": "replace-with-dnd-venv-python",
+    "args": ["-m", "sagasmith_dnd_mcp.server"],
+    "env": {
+      "SAGASMITH_DND_MCP_HOME": "replace-with-local-data-directory",
+      "SAGASMITH_DND_EMBEDDING_CACHE_DIR": "replace-with-local-cache-directory"
+    }
+  },
+  "sagasmith_coc": {
+    "type": "stdio",
+    "command": "replace-with-coc-venv-python",
+    "args": ["-m", "sagasmith_coc_mcp.server"],
+    "env": {
+      "SAGASMITH_COC_MCP_HOME": "replace-with-local-data-directory",
+      "SAGASMITH_COC_EMBEDDING_CACHE_DIR": "replace-with-local-cache-directory"
+    }
+  },
+  "sagasmith_narrative": {
+    "type": "stdio",
+    "command": "replace-with-narrative-venv-python",
+    "args": ["-m", "sagasmith_narrative_mcp.server"],
+    "env": {
+      "SAGASMITH_NARRATIVE_MCP_HOME": "replace-with-local-data-directory",
+      "SAGASMITH_NARRATIVE_EMBEDDING_CACHE_DIR": "reserved-not-yet-consumed"
+    }
+  }
+}

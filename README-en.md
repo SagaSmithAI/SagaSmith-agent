@@ -1,6 +1,6 @@
 # SagaSmith Agent
 
-[中文](README.md) · [English](README-en.md) · [Website](https://sagasmithai.github.io) · [Platform overview](https://github.com/SagaSmithAI/.github/blob/main/profile/README.md) · [Hosted service](https://github.com/SagaSmithAI/SagaSmith-service) · [Content catalog](https://github.com/SagaSmithAI/SagaSmith-dnd-content-library)
+[中文](README.md) · [English](README-en.md) · [Website](https://sagasmithai.github.io) · [Platform overview](https://github.com/SagaSmithAI/.github/blob/main/profile/README.md) · [SagaSmith Web](https://github.com/SagaSmithAI/SagaSmith-service) · [Content catalog](https://github.com/SagaSmithAI/SagaSmith-dnd-content-library)
 
 <p align="center"><img src="images/Sagasmith.png" alt="SagaSmith Agent" width="168"></p>
 
@@ -83,16 +83,29 @@ Domain, MCP, Skills, UI where present, and authoring workflows. The former
 standalone MCP, Skills, UI, and generic Module Generator repositories are
 archived; the installer neither reads them nor treats them as fallbacks.
 
-Install any combination from the Agent repository. Omitting `--mode` selects all three:
+Install a named release profile from the Agent repository. `--mode` remains
+available for custom combinations; omitting both selects `multi-system`:
 
 ```powershell
 cd SagaSmith-agent
-uv run nanobot sagasmith install --mode dnd
+uv run nanobot sagasmith install --profile dnd-only
+uv run nanobot sagasmith install --profile coc-only
+uv run nanobot sagasmith install --profile narrative-only
+uv run nanobot sagasmith install --profile multi-system
 uv run nanobot sagasmith install --mode coc --mode narrative
 uv run nanobot sagasmith install
 ```
 
-The Python installer keeps D&D, CoC, and Narrative optional and independently versioned. It reconciles only SagaSmith-owned config fields, builds only selected UIs, and never imports or activates a Pack.
+`sagasmith-local-kit.json` fixes the profiles, components, ports, templates, and
+shared `sagasmith.authoritative-mcp/v1` contract. Every profile supports
+`--transport stdio`, `--transport streamable-http`, or the backward-compatible
+`mixed` default. Both transports use the same handlers, schemas, errors,
+revisions, idempotency, and authority semantics; HTTP remains loopback-only.
+
+The Python installer keeps D&D, CoC, and Narrative optional and independently
+versioned. It reconciles only SagaSmith-owned config fields, builds only
+selected UIs, never imports or activates a Pack, and does not depend on
+SagaSmith Web, PostgreSQL, Redis, object storage, accounts, quota, or Forge.
 
 Create the repo-local Agent configuration after installation:
 
@@ -104,7 +117,24 @@ Then follow the [MCP configuration guide](docs/guides/configure-mcp-tools.md). R
 
 ```powershell
 uv run nanobot sagasmith install --verify-only
+uv run nanobot sagasmith doctor --json
 ```
+
+Doctor reports MCP/config, domain databases, Skills, provider readiness, and
+the selected transport separately. Credential-free Discord, QQ, Telegram,
+Codex, Claude Code, OpenClaw, and generic Agent templates live in
+[`examples/local-agent-kit`](examples/local-agent-kit/README.md).
+
+The friendly D&D and CoC embedding-cache paths map to Core's
+`DND5E_EMBEDDING_CACHE_DIR` and `COC7_EMBEDDING_CACHE_DIR`. Narrative's template
+entry is reserved only: the current Narrative runtime does not use the Core
+embedder and must not be treated as cache-enabled.
+
+The installer syncs only the Agent base and selected MCP packages; D&D/CoC add
+the `gateway` extra only for HTTP profiles. It does not install every Agent
+channel extra. Select Bot channels after installation, for example with
+`uv sync --extra discord`, `--extra qq`, or `--extra telegram`. Domain MCP
+document/OCR requirements still follow each package's current contract.
 
 After configuration passes, start the selected services and Agent:
 

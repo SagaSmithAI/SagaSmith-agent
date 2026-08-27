@@ -7,6 +7,7 @@ import os
 import shutil
 import signal
 import socket
+import sqlite3
 import subprocess
 import time
 import urllib.error
@@ -25,15 +26,18 @@ from .configuration import (
     desired_servers,
     desired_skill_roots,
     dnd_environment,
+    narrative_environment,
 )
 from .model import (
     InstallMode,
+    McpTransport,
     ProcessRecord,
     StackLayout,
     StackState,
     atomic_json_write,
     load_release_revisions,
     selected_components,
+    transport_for_mode,
 )
 
 
@@ -104,6 +108,20 @@ def validate_workspace(layout: StackLayout, modes: tuple[InstallMode, ...]) -> l
     return problems
 
 
+def _domain_sync_command(
+    uv: str,
+    mode: InstallMode,
+    transport: McpTransport,
+) -> list[str]:
+    command = [uv, "sync", "--package", f"sagasmith-{mode.value}-mcp"]
+    if mode in {InstallMode.DND, InstallMode.COC} and (
+        transport_for_mode(transport, mode) == McpTransport.STREAMABLE_HTTP
+    ):
+        command.extend(("--extra", "gateway"))
+    command.append("--frozen")
+    return command
+
+
 def install_workspace(
     layout: StackLayout,
     modes: tuple[InstallMode, ...],
@@ -112,6 +130,7 @@ def install_workspace(
     verify_only: bool = False,
     source: str = "workspace",
     release_ref: str = "manifest",
+    transport: McpTransport = McpTransport.MIXED,
 ) -> StackState:
     """Install selected source checkouts without importing or activating content Packs."""
     if not verify_only:
@@ -131,10 +150,13 @@ def install_workspace(
         ):
             if mode in selected:
                 _run(
-                    [uv, "sync", "--all-packages", "--all-extras", "--frozen"],
+                    _domain_sync_command(uv, mode, transport),
                     cwd=layout.repo(repository),
                 )
-        _run([uv, "sync", "--all-extras", "--frozen"], cwd=layout.agent_root)
+        # Bot/channel and document/model extras remain explicit user choices. The
+        # local installer only prepares the Agent's base runtime. Inexact sync
+        # preserves channel extras that the user selected explicitly.
+        _run([uv, "sync", "--inexact", "--frozen"], cwd=layout.agent_root)
         if build_ui:
             _run(["npm", "ci"], cwd=layout.agent_root / "webui")
             _run(["npm", "run", "build"], cwd=layout.agent_root / "webui")
@@ -152,10 +174,13 @@ def install_workspace(
         report = doctor(
             layout,
             modes=modes,
+            transport=transport,
             include_runtime=False,
             require_ui=build_ui,
         )
-        failed = [item for item in report["checks"] if not item["ok"]]
+        failed = [
+            item for item in report["checks"] if item["required"] and not item["ok"]
+        ]
         if failed:
             raise StackError(
                 "installation verification failed:\n- "
@@ -163,7 +188,7 @@ def install_workspace(
             )
         return state
 
-    configure_agent(layout, modes)
+    configure_agent(layout, modes, transport=transport)
     state = layout.load_state()
     previous = dict(state.component_revisions)
     revisions = {}
@@ -177,6 +202,7 @@ def install_workspace(
     state.modes = [mode.value for mode in modes]
     state.source = source
     state.release_ref = release_ref
+    state.mcp_transport = transport.value
     state.workspace_root = str(layout.workspace_root)
     state.config_path = str(layout.config_path)
     state.installed_at = utc_now()
@@ -187,10 +213,13 @@ def install_workspace(
     report = doctor(
         layout,
         modes=modes,
+        transport=transport,
         include_runtime=False,
         require_ui=build_ui,
     )
-    failed = [item for item in report["checks"] if not item["ok"]]
+    failed = [
+        item for item in report["checks"] if item["required"] and not item["ok"]
+    ]
     if failed:
         raise StackError("installation verification failed:\n- " + "\n- ".join(x["detail"] for x in failed))
     return state
@@ -242,10 +271,15 @@ def materialize_release(
 def _command_specs(
     layout: StackLayout,
     modes: tuple[InstallMode, ...],
+    transport: McpTransport,
 ) -> list[tuple[str, list[str], Path, dict[str, str], str | None]]:
     selected = set(modes)
     specs: list[tuple[str, list[str], Path, dict[str, str], str | None]] = []
-    if InstallMode.DND in selected:
+    if (
+        InstallMode.DND in selected
+        and transport_for_mode(transport, InstallMode.DND)
+        == McpTransport.STREAMABLE_HTTP
+    ):
         root = layout.repo("sagasmith-dnd")
         python = str(_venv_python(root))
         env = dnd_environment(layout)
@@ -255,7 +289,11 @@ def _command_specs(
                 ("dnd_gateway", [python, "-m", "sagasmith_dnd_mcp.gateway"], root, env, "http://127.0.0.1:8766/api/health"),
             ]
         )
-    if InstallMode.COC in selected:
+    if (
+        InstallMode.COC in selected
+        and transport_for_mode(transport, InstallMode.COC)
+        == McpTransport.STREAMABLE_HTTP
+    ):
         root = layout.repo("sagasmith-coc")
         python = str(_venv_python(root))
         env = coc_environment(layout)
@@ -264,6 +302,23 @@ def _command_specs(
                 ("coc_mcp", [python, "-m", "sagasmith_coc_mcp.server"], root, env, "http://127.0.0.1:8769/mcp"),
                 ("coc_gateway", [python, "-m", "sagasmith_coc_mcp.gateway"], root, env, "http://127.0.0.1:8768/api/health"),
             ]
+        )
+    if (
+        InstallMode.NARRATIVE in selected
+        and transport_for_mode(transport, InstallMode.NARRATIVE)
+        == McpTransport.STREAMABLE_HTTP
+    ):
+        root = layout.repo("sagasmith-narrative")
+        python = str(_venv_python(root))
+        env = narrative_environment(layout, transport=McpTransport.STREAMABLE_HTTP)
+        specs.append(
+            (
+                "narrative_mcp",
+                [python, "-m", "sagasmith_narrative_mcp.server"],
+                root,
+                env,
+                "http://127.0.0.1:8770/mcp",
+            )
         )
     agent_python = str(_venv_python(layout.agent_root))
     specs.append(
@@ -317,7 +372,9 @@ def start(layout: StackLayout, *, foreground: bool = False) -> StackState:
     opened: list[BinaryIO] = []
     processes: list[subprocess.Popen[bytes]] = []
     try:
-        for name, command, cwd, extra_env, health_url in _command_specs(layout, modes):
+        for name, command, cwd, extra_env, health_url in _command_specs(
+            layout, modes, state.selected_transport
+        ):
             log_path = layout.logs_dir / f"{name}.log"
             stream = log_path.open("ab", buffering=0)
             opened.append(stream)
@@ -401,14 +458,27 @@ def status(layout: StackLayout) -> dict[str, Any]:
         "installed": bool(state.modes),
         "modes": list(state.modes),
         "source": state.source,
+        "mcp_transport": state.mcp_transport,
         "revision": state.revision,
         "state_root": str(layout.state_root),
         "processes": processes,
         "running": bool(processes) and all(item["running"] for item in processes),
         "workbenches": {
             "agent": agent_webui_url(layout),
-            **({"dnd": "http://127.0.0.1:8766/"} if "dnd" in state.modes else {}),
-            **({"coc": "http://127.0.0.1:8768/"} if "coc" in state.modes else {}),
+            **(
+                {"dnd": "http://127.0.0.1:8766/"}
+                if "dnd" in state.modes
+                and transport_for_mode(state.selected_transport, InstallMode.DND)
+                == McpTransport.STREAMABLE_HTTP
+                else {}
+            ),
+            **(
+                {"coc": "http://127.0.0.1:8768/"}
+                if "coc" in state.modes
+                and transport_for_mode(state.selected_transport, InstallMode.COC)
+                == McpTransport.STREAMABLE_HTTP
+                else {}
+            ),
         },
     }
 
@@ -421,19 +491,75 @@ def _check_port(host: str, port: int) -> bool:
         return False
 
 
+def _database_check(path: Path) -> tuple[bool, str]:
+    if not path.exists():
+        ancestor = path.parent
+        while not ancestor.exists() and ancestor != ancestor.parent:
+            ancestor = ancestor.parent
+        return os.access(ancestor, os.W_OK), f"initializes on first start: {path}"
+    try:
+        connection = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
+        try:
+            result = connection.execute("PRAGMA quick_check").fetchone()
+        finally:
+            connection.close()
+    except sqlite3.Error as exc:
+        return False, f"cannot read {path}: {exc}"
+    ok = bool(result and result[0] == "ok")
+    return ok, str(path) if ok else f"SQLite quick_check failed: {path}"
+
+
+def _provider_check(config: dict[str, Any]) -> tuple[bool, str]:
+    providers = config.get("providers") or {}
+    if not isinstance(providers, dict):
+        return False, "providers must be a JSON object"
+    configured: list[str] = []
+    for name, value in providers.items():
+        if not isinstance(value, dict):
+            continue
+        meaningful: list[Any] = []
+        for key, item in value.items():
+            if key not in {"apiKey", "apiBase", "region", "token", "profile"}:
+                continue
+            text = str(item or "").strip()
+            if text.startswith("${") and text.endswith("}"):
+                text = os.environ.get(text[2:-1], "").strip()
+            if text:
+                meaningful.append(item)
+        if meaningful:
+            configured.append(str(name))
+    if configured:
+        return True, "configured provider entries: " + ", ".join(sorted(configured))
+    return False, "configure one model provider before sending Agent turns"
+
+
+def _server_matches(actual: dict[str, Any], expected: dict[str, Any]) -> bool:
+    keys = ("type", "url") if expected.get("type") == "streamableHttp" else (
+        "type",
+        "command",
+        "args",
+        "cwd",
+    )
+    return all(actual.get(key) == expected.get(key) for key in keys)
+
+
 def doctor(
     layout: StackLayout,
     *,
     modes: tuple[InstallMode, ...] | None = None,
+    transport: McpTransport | None = None,
     include_runtime: bool = True,
     require_ui: bool = False,
 ) -> dict[str, Any]:
     state = layout.load_state()
     selected = modes or state.selected_modes
+    selected_transport = transport or state.selected_transport
     checks: list[dict[str, Any]] = []
 
-    def add(name: str, ok: bool, detail: str) -> None:
-        checks.append({"name": name, "ok": ok, "detail": detail})
+    def add(name: str, ok: bool, detail: str, *, required: bool = True) -> None:
+        checks.append(
+            {"name": name, "ok": ok, "required": required, "detail": detail}
+        )
 
     for problem in validate_workspace(layout, selected):
         add("workspace", False, problem)
@@ -445,7 +571,10 @@ def doctor(
         try:
             config_value = json.loads(layout.config_path.read_text(encoding="utf-8"))
             actual_servers = dict(config_value.get("tools", {}).get("mcpServers", {}))
-            expected_names = set(desired_servers(layout, selected))
+            expected_servers = desired_servers(
+                layout, selected, transport=selected_transport
+            )
+            expected_names = set(expected_servers)
             actual_owned = set(actual_servers) & {
                 "sagasmith_dnd",
                 "sagasmith_coc",
@@ -457,6 +586,9 @@ def doctor(
             config_ok = actual_owned == expected_names and all(
                 actual_servers[name].get("sessionScoped") is True
                 for name in expected_names
+            ) and all(
+                _server_matches(actual_servers[name], expected_servers[name])
+                for name in expected_names
             ) and all(root in skills for root in desired_skill_roots(layout, selected))
             if not config_ok:
                 config_detail = "SagaSmith MCP or Skill entries do not match selected modes"
@@ -464,6 +596,11 @@ def doctor(
             config_ok = False
             config_detail = "Agent config is not valid UTF-8 JSON"
     add("agent-config", config_ok, config_detail)
+    if config_ok:
+        provider_ok, provider_detail = _provider_check(config_value)
+    else:
+        provider_ok, provider_detail = False, "Agent config must be valid first"
+    add("provider", provider_ok, provider_detail, required=False)
     for mode, repository, module in (
         (InstallMode.DND, "sagasmith-dnd", "sagasmith_dnd_mcp"),
         (InstallMode.COC, "sagasmith-coc", "sagasmith_coc_mcp"),
@@ -479,6 +616,23 @@ def doctor(
             add(f"{mode.value}-runtime", False, str(exc))
         else:
             add(f"{mode.value}-runtime", True, str(python))
+    for root in desired_skill_roots(layout, selected):
+        path = Path(root)
+        has_skill = path.is_dir() and any(path.rglob("SKILL.md"))
+        try:
+            relative = path.relative_to(layout.workspace_root)
+        except ValueError:
+            relative = path
+        check_name = "skills-" + "-".join(relative.parts).replace("_", "-")
+        add(check_name, has_skill, str(path))
+    for mode, path in (
+        (InstallMode.DND, layout.data_dir / "dnd" / "data" / "ttrpgbase.db"),
+        (InstallMode.COC, layout.data_dir / "coc" / "data" / "ttrpgbase.db"),
+        (InstallMode.NARRATIVE, layout.data_dir / "narrative" / "narrative.db"),
+    ):
+        if mode in selected:
+            ok, detail = _database_check(path)
+            add(f"database-{mode.value}", ok, detail)
     for mode, module_skill in (
         (
             InstallMode.DND,
@@ -512,13 +666,31 @@ def doctor(
             add("coc-ui", path.is_file(), str(path))
     if include_runtime:
         agent_port = int(agent_webui_url(layout).split(":")[-1].rstrip("/"))
-        for name, port in (("agent", agent_port), ("dnd-gateway", 8766), ("dnd-mcp", 8767), ("coc-gateway", 8768), ("coc-mcp", 8769)):
+        ports = [("agent", agent_port)]
+        if transport_for_mode(selected_transport, InstallMode.DND) == McpTransport.STREAMABLE_HTTP:
+            ports.extend((("dnd-gateway", 8766), ("dnd-mcp", 8767)))
+        if transport_for_mode(selected_transport, InstallMode.COC) == McpTransport.STREAMABLE_HTTP:
+            ports.extend((("coc-gateway", 8768), ("coc-mcp", 8769)))
+        if (
+            transport_for_mode(selected_transport, InstallMode.NARRATIVE)
+            == McpTransport.STREAMABLE_HTTP
+        ):
+            ports.append(("narrative-mcp", 8770))
+        for name, port in ports:
             if name.startswith("dnd") and InstallMode.DND not in selected:
                 continue
             if name.startswith("coc") and InstallMode.COC not in selected:
                 continue
+            if name.startswith("narrative") and InstallMode.NARRATIVE not in selected:
+                continue
             add(f"port-{name}", _check_port("127.0.0.1", port), f"127.0.0.1:{port}")
-    return {"ok": all(item["ok"] for item in checks), "modes": [m.value for m in selected], "checks": checks}
+    return {
+        "ok": all(item["ok"] for item in checks if item["required"]),
+        "ready": all(item["ok"] for item in checks),
+        "modes": [m.value for m in selected],
+        "mcp_transport": selected_transport.value,
+        "checks": checks,
+    }
 
 
 def tail_logs(layout: StackLayout, component: str | None = None, lines: int = 100) -> str:
@@ -659,6 +831,7 @@ def upgrade(layout: StackLayout, *, build_ui: bool = True) -> StackState:
         build_ui=build_ui,
         source=state.source,
         release_ref=state.release_ref,
+        transport=state.selected_transport,
     )
     result.previous_revisions = previous
     layout.save_state(result)
@@ -683,6 +856,7 @@ def rollback(layout: StackLayout, *, build_ui: bool = True) -> StackState:
         build_ui=build_ui,
         source=state.source,
         release_ref=state.release_ref,
+        transport=state.selected_transport,
     )
 
 
