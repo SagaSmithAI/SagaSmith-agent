@@ -20,7 +20,9 @@ WORKDIR /app
 # Install Python dependencies first (cached layer). Hatch reads the custom build
 # hook from hatch_build.py even for this metadata-only install.
 ARG NANOBOT_EXTRAS=whatsapp
-COPY pyproject.toml README.md LICENSE THIRD_PARTY_NOTICES.md hatch_build.py ./
+COPY pyproject.toml README.md LICENSE THIRD_PARTY_NOTICES.md hatch_build.py \
+    sagasmith-local-kit.json sagasmith-stack-lock.json ./
+COPY examples/local-agent-kit/ examples/local-agent-kit/
 RUN mkdir -p nanobot && touch nanobot/__init__.py && \
     NANOBOT_SKIP_WEBUI_BUILD=1 uv pip install --system --no-cache ".[$NANOBOT_EXTRAS]" && \
     rm -rf nanobot
