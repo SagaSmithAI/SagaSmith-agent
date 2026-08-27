@@ -105,4 +105,4 @@ bridge/node_modules/
 sagasmith/
 
 # Runtime config (includes API keys, tokens, channel config)
-config/
+/config/
