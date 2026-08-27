@@ -280,3 +280,22 @@ def test_allow_patterns_do_not_split_ampersand_redirections(command: str, patter
 
     assert ExecTool._split_shell_segments(command) == [command]
     assert tool._guard_command(command, "/tmp") is None
+
+
+@pytest.mark.parametrize(
+    ("command", "pattern", "shell"),
+    [
+        ("cat /outside", r"cat\s+/outside", "bash"),
+        ("Get-Content /outside", r"get-content\s+/outside", "pwsh"),
+        ("type /outside", r"type\s+/outside", "cmd"),
+    ],
+)
+def test_allow_patterns_do_not_bypass_workspace_paths_in_any_shell_dialect(
+    tmp_path, command: str, pattern: str, shell: str
+):
+    tool = ExecTool(allow_patterns=[pattern], restrict_to_workspace=True)
+
+    result = tool._guard_command(command, str(tmp_path), shell=shell)
+
+    assert result is not None
+    assert "path outside working dir" in result.lower()
