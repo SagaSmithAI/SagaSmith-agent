@@ -73,6 +73,11 @@ in the WebUI or logs.
 - Web fetch and HTTP MCP share an SSRF guard.
 - Private, loopback, link-local, and cloud metadata addresses are blocked by
   default.
+- With `useJinaReader` enabled (the default), fetched URLs are disclosed to the
+  remote reader. URLs with visible credentials and credential-bearing redirect
+  chains observed during local preflight use readability instead. Path-embedded
+  secrets and redirects that change after preflight cannot be detected
+  reliably; set `fetch.useJinaReader: false` when URLs must stay local.
 - Add `tools.ssrfWhitelist` only for narrow trusted CIDRs.
 - Do not give public chat users unrestricted web and shell access without
   review.
