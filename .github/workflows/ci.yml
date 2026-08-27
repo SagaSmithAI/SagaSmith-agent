@@ -80,7 +80,7 @@ jobs:
           prune-cache: true
 
       - name: Install Agent conformance dependencies
-        run: uv sync --frozen --extra dev
+        run: uv sync --extra dev
 
       - name: Materialize exact release lock
         if: matrix.lane == 'release-lock'
@@ -170,7 +170,7 @@ jobs:
           prune-cache: true
 
       - name: Install Agent runtime
-        run: uv sync --frozen
+        run: uv sync
 
       - name: Copy mutable startup fixture into runner temp
         env:
