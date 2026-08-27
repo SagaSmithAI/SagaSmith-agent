@@ -1420,6 +1420,42 @@ async def test_send_workspace_restriction_blocks_external_attachment(tmp_path) -
 
 
 @pytest.mark.asyncio
+async def test_send_workspace_restriction_allows_host_media_artifact(
+    tmp_path, monkeypatch
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    media_root = tmp_path / "runtime-media"
+    generated = media_root / "generated"
+    generated.mkdir(parents=True)
+    file_path = generated / "combat-grid.png"
+    file_path.write_bytes(b"png")
+    monkeypatch.setattr(matrix_module, "get_media_dir", lambda _name=None: media_root)
+
+    channel = MatrixChannel(
+        _make_config(),
+        MessageBus(),
+        restrict_to_workspace=True,
+        workspace=workspace,
+    )
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+
+    await channel.send(
+        OutboundMessage(
+            channel="matrix",
+            chat_id="!room:matrix.org",
+            content="Combat updated.",
+            media=[str(file_path)],
+        )
+    )
+
+    assert len(client.upload_calls) == 1
+    assert client.upload_calls[0]["filename"] == "combat-grid.png"
+    assert len(client.room_send_calls) == 2
+
+
+@pytest.mark.asyncio
 async def test_send_handles_upload_exception_and_reports_failure(tmp_path) -> None:
     channel = MatrixChannel(_make_config(), MessageBus())
     client = _FakeAsyncClient("", "", "", None)

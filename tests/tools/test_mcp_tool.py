@@ -1130,15 +1130,96 @@ async def test_execute_persists_image_block_as_artifact(tmp_path: Path) -> None:
 
     payload = json.loads(result)
     assert payload["text"] == "here you go"
-    assert len(payload["artifacts"]) == 1
-    artifact = payload["artifacts"][0]
-    assert artifact["mime"] == "image/png"
-    assert artifact["prompt"] == "a cat"
-    assert artifact["provider"] == "mcp:test"
-    assert Path(artifact["path"]).is_file()
-    # The base64 payload must NOT leak into the model-facing result.
+    assert payload["images"] == [{"id": payload["images"][0]["id"], "mime": "image/png"}]
+    assert "host" in payload["delivery"].lower()
+    assert len(result.media) == 1
+    assert Path(result.media[0]).is_file()
+    # Neither image bytes nor host-only artifact paths may enter model context.
     assert _PNG_B64 not in result
-    assert "message tool" in payload["next_step"]
+    assert result.media[0] not in result
+    assert "path" not in str(payload)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("audience_projection", "context", "expects_media"),
+    [
+        (
+            "caller",
+            RequestContext(
+                channel="discord",
+                chat_id="table-1",
+                conversation_principal="discord:group:table-1",
+            ),
+            False,
+        ),
+        (
+            "party_public",
+            RequestContext(
+                channel="feishu",
+                chat_id="table-1",
+                metadata={"chat_type": "group"},
+            ),
+            True,
+        ),
+        (
+            "caller",
+            RequestContext(
+                channel="napcat",
+                chat_id="private:42",
+                conversation_principal="private:42",
+                metadata={"is_group": False, "chat_type": "private"},
+            ),
+            True,
+        ),
+    ],
+    ids=("group-caller-blocked", "group-party-public", "private-caller"),
+)
+async def test_image_delivery_respects_audience_projection(
+    tmp_path: Path,
+    audience_projection: str,
+    context: RequestContext,
+    expects_media: bool,
+) -> None:
+    from nanobot.config.loader import set_config_path
+
+    set_config_path(tmp_path / "config.json")
+    structured = {
+        "audience_projection": audience_projection,
+        "mime_type": "image/png",
+    }
+
+    async def call_tool(_name: str, arguments: dict) -> object:
+        return SimpleNamespace(
+            content=[
+                _FakeTextContent(json.dumps(structured)),
+                _FakeImageContent(_PNG_B64, "image/png"),
+            ],
+            structuredContent=structured,
+            isError=False,
+        )
+
+    wrapper = _make_wrapper(SimpleNamespace(call_tool=call_tool))
+    with request_context(context):
+        result = await wrapper.execute()
+
+    payload = json.loads(result)
+    assert bool(result.media) is expects_media
+    assert _PNG_B64 not in result
+    if expects_media:
+        assert payload["images"][0]["mime"] == "image/png"
+        assert Path(result.media[0]).is_file()
+        assert result.media[0] not in result
+    else:
+        assert result.media == ()
+        assert payload == {
+            "delivery": (
+                "Automatic attachment was blocked because this caller-only image "
+                "targets a shared conversation."
+            ),
+            "suggested_audience_projection": "party_public",
+        }
+        assert "path" not in result
 
 
 @pytest.mark.asyncio

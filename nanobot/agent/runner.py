@@ -53,6 +53,7 @@ ToolAuditCallback = Callable[
     [dict[str, Any], list[dict[str, Any]]],
     None | Awaitable[None],
 ]
+HostMediaCallback = Callable[[list[str]], None | Awaitable[None]]
 
 _DEFAULT_ERROR_MESSAGE = "Sorry, I encountered an error calling the AI model."
 _ARREARAGE_ERROR_MESSAGE = (
@@ -95,6 +96,7 @@ class AgentRunSpec:
     finalize_on_max_iterations: bool = True
     context_barrier_callback: ContextBarrierCallback | None = None
     tool_audit_callback: ToolAuditCallback | None = None
+    host_media_callback: HostMediaCallback | None = None
 
 
 @dataclass(slots=True)
@@ -117,6 +119,29 @@ class AgentRunner:
 
     def __init__(self) -> None:
         self.context_governor = ContextGovernor()
+
+    @staticmethod
+    async def _emit_host_media(spec: AgentRunSpec, results: list[Any]) -> None:
+        """Forward host-only media without allowing delivery failures to fail the turn."""
+        if spec.host_media_callback is None:
+            return
+        media = list(
+            dict.fromkeys(
+                path
+                for result in results
+                if not bool(getattr(result, "is_error", False))
+                for path in getattr(result, "media", ())
+                if isinstance(path, str) and path
+            )
+        )
+        if not media:
+            return
+        try:
+            emitted = spec.host_media_callback(media)
+            if inspect.isawaitable(emitted):
+                await emitted
+        except Exception as exc:
+            logger.warning("Failed to retain host media for final delivery: {}", exc)
 
     @staticmethod
     def _merge_message_content(left: Any, right: Any) -> str | list[dict[str, Any]]:
@@ -447,6 +472,7 @@ class AgentRunner:
                     hook,
                     context,
                 )
+                await self._emit_host_media(spec, results)
                 tool_events.extend(new_events)
                 tools_used.extend(
                     tool_call.name

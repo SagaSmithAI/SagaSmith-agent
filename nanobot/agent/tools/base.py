@@ -205,6 +205,7 @@ class ToolResult(str):
     context_barrier: bool
     structured_content: Any
     audit_receipt: dict[str, Any] | None
+    media: tuple[str, ...]
 
     def __new__(
         cls,
@@ -214,12 +215,20 @@ class ToolResult(str):
         context_barrier: bool = False,
         structured_content: Any = None,
         audit_receipt: dict[str, Any] | None = None,
+        media: list[str] | tuple[str, ...] | None = None,
     ) -> ToolResult:
         obj = str.__new__(cls, content)
         obj.is_error = is_error
         obj.context_barrier = context_barrier
         obj.structured_content = deepcopy(structured_content)
         obj.audit_receipt = deepcopy(audit_receipt)
+        obj.media = tuple(
+            dict.fromkeys(
+                item.strip()
+                for item in (media or ())
+                if isinstance(item, str) and item.strip()
+            )
+        )
         return obj
 
     @classmethod
