@@ -147,6 +147,7 @@ class TurnContext:
     all_messages: list[dict[str, Any]] = field(default_factory=list)
     stop_reason: str = ""
     had_injections: bool = False
+    outbound_media: list[str] = field(default_factory=list)
 
     user_persisted_early: bool = False
     save_skip: int = 0
@@ -899,6 +900,7 @@ class AgentLoop:
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
         on_retry_wait: Callable[[str], Awaitable[None]] | None = None,
+        on_host_media: Callable[[list[str]], None | Awaitable[None]] | None = None,
         *,
         runtime: LLMRuntime,
         session: Session | None = None,
@@ -1174,6 +1176,7 @@ class AgentLoop:
                     ),
                     context_barrier_callback=_rebuild_after_context_barrier,
                     tool_audit_callback=_audit_tool_batch,
+                    host_media_callback=on_host_media,
                 )
             )
         finally:
@@ -1737,19 +1740,48 @@ class AgentLoop:
         on_stream: Callable[[str], Awaitable[None]] | None,
         *,
         turn_latency_ms: int | None = None,
+        host_media: list[str] | None = None,
     ) -> OutboundMessage | None:
         """Assemble the final outbound message from turn results."""
-        # MessageTool suppression
-        if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
-            if not had_injections or stop_reason == "empty_final_response":
-                return None
+        message_tool = self.tools.get("message")
+        delivered_media: set[str] = set()
+        suppress_final = False
+        if isinstance(message_tool, MessageTool):
+            delivered_media = set(message_tool.turn_delivered_media_paths())
+            suppress_final = message_tool._sent_in_turn and (
+                not had_injections or stop_reason == "empty_final_response"
+            )
 
-        preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
+        outbound_media: list[str] = []
+        seen_media: set[str] = set()
+        for raw_path in host_media or ():
+            try:
+                key = str(Path(raw_path).expanduser().resolve(strict=False))
+            except OSError:
+                key = raw_path
+            if key in delivered_media or key in seen_media:
+                continue
+            seen_media.add(key)
+            outbound_media.append(raw_path)
+
+        if suppress_final and not outbound_media:
+            return None
+        outbound_content = "" if suppress_final else final_content
+
+        preview = (
+            outbound_content[:120] + "..."
+            if len(outbound_content) > 120
+            else outbound_content
+        )
         logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
 
         event = None
         meta = dict(msg.metadata or {})
-        if on_stream is not None and stop_reason not in {"error", "tool_error"}:
+        if (
+            outbound_content
+            and on_stream is not None
+            and stop_reason not in {"error", "tool_error"}
+        ):
             event = StreamedResponseEvent()
         if turn_latency_ms is not None:
             meta["latency_ms"] = int(turn_latency_ms)
@@ -1757,7 +1789,8 @@ class AgentLoop:
         return OutboundMessage(
             channel=msg.channel,
             chat_id=msg.chat_id,
-            content=final_content,
+            content=outbound_content,
+            media=outbound_media,
             event=event,
             metadata=meta,
         )
@@ -1991,6 +2024,7 @@ class AgentLoop:
             turn_scopes=ctx.turn_scopes,
             tools=ctx.tools,
             request_context=ctx.request_context,
+            on_host_media=ctx.outbound_media.extend,
         )
         final_content, tools_used, all_msgs, stop_reason, had_injections = result
         ctx.final_content = final_content
@@ -2060,6 +2094,7 @@ class AgentLoop:
             ctx.had_injections,
             ctx.on_stream,
             turn_latency_ms=ctx.turn_latency_ms,
+            host_media=ctx.outbound_media,
         )
         if ctx.ephemeral and ctx.outbound is not None:
             ctx.outbound.metadata["_stop_reason"] = ctx.stop_reason

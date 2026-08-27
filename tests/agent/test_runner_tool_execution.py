@@ -87,6 +87,64 @@ class _ContextBarrierTool(_DelayTool):
         return ToolResult('{"campaign_id":"campaign-1"}', context_barrier=True)
 
 
+class _HostMediaTool(Tool):
+    @property
+    def name(self) -> str:
+        return "render_combat_grid"
+
+    @property
+    def description(self) -> str:
+        return "render combat grid"
+
+    @property
+    def parameters(self) -> dict:
+        return {"type": "object", "properties": {}, "required": []}
+
+    async def execute(self, **_kwargs):
+        return ToolResult("combat grid rendered", media=["/host/media/combat.png"])
+
+
+@pytest.mark.asyncio
+async def test_host_media_callback_failure_does_not_replace_final_text() -> None:
+    provider = MagicMock()
+    provider.chat_with_retry = AsyncMock(
+        side_effect=[
+            LLMResponse(
+                content="",
+                tool_calls=[
+                    ToolCallRequest(
+                        id="render",
+                        name="render_combat_grid",
+                        arguments={},
+                    )
+                ],
+                usage={},
+            ),
+            LLMResponse(content="Combat updated.", tool_calls=[], usage={}),
+        ]
+    )
+    tools = ToolRegistry()
+    tools.register(_HostMediaTool())
+
+    def reject_media(_media: list[str]) -> None:
+        raise RuntimeError("attachment sink unavailable")
+
+    result = await AgentRunner().run(
+        make_run_spec(
+            provider,
+            initial_messages=[{"role": "user", "content": "render combat"}],
+            tools=tools,
+            model="test-model",
+            max_iterations=2,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+            host_media_callback=reject_media,
+        )
+    )
+
+    assert result.final_content == "Combat updated."
+    assert result.stop_reason == "completed"
+
+
 async def _run_optional_tool_response(response: LLMResponse):
     provider = MagicMock()
     calls = {"n": 0}

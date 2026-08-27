@@ -366,10 +366,12 @@ class MatrixChannel(BaseChannel):
             self.logger.warning("Failed to save session: {}", e)
 
     def _is_workspace_path_allowed(self, path: Path) -> bool:
-        """Check path is inside workspace (when restriction enabled)."""
-        if not self._restrict_to_workspace or not self._workspace:
+        """Allow restricted attachments from the workspace or host media store."""
+        if not self._restrict_to_workspace:
             return True
-        return is_path_within(path, self._workspace)
+        if self._workspace and is_path_within(path, self._workspace):
+            return True
+        return is_path_within(path, get_media_dir())
 
     def _collect_outbound_media_candidates(self, media: list[str]) -> list[Path]:
         """Deduplicate and resolve outbound attachment paths."""

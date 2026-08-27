@@ -593,21 +593,62 @@ def _image_block_data_url(block: Any, types: Any) -> str | None:
     return None
 
 
-def _mcp_image_tool_result(text_parts: list[str], artifacts: list[dict[str, Any]]) -> str:
+def _request_is_shared_conversation() -> bool:
+    """Return whether the active tool request is known to target a shared chat."""
+    request = current_request_context()
+    if request is None:
+        return False
+    metadata = request.metadata if isinstance(request.metadata, dict) else {}
+    is_group = metadata.get("is_group")
+    if is_group is True:
+        return True
+    chat_type = str(metadata.get("chat_type") or "").strip().casefold()
+    if chat_type in {"group", "room", "channel", "guild", "supergroup", "thread"}:
+        return True
+    conversation = str(request.conversation_principal or "").strip().casefold()
+    if not conversation:
+        return False
+    parts = {part for part in re.split(r"[:/]+", conversation) if part}
+    return bool(parts & {"group", "room", "channel", "guild", "supergroup", "thread"})
+
+
+def _caller_media_delivery_blocked(structured_content: Any) -> bool:
+    """Protect caller-only render projections from automatic shared-chat delivery."""
+    return (
+        isinstance(structured_content, Mapping)
+        and str(structured_content.get("audience_projection") or "").casefold() == "caller"
+        and _request_is_shared_conversation()
+    )
+
+
+def _mcp_image_tool_result(
+    text_parts: list[str],
+    artifacts: list[dict[str, Any]],
+    *,
+    delivery_blocked: bool = False,
+) -> str:
     """Build the compact tool result for an MCP call that returned image(s).
 
-    The base64 stays out of the model context entirely — only artifact paths and
-    metadata are returned, so the result is small and the channel can deliver the
-    saved file via the message tool.
+    Host-only artifact paths and image bytes stay out of model context. Delivery
+    is handled by the agent host through ``ToolResult.media``.
     """
+    if delivery_blocked:
+        return json.dumps(
+            {
+                "delivery": (
+                    "Automatic attachment was blocked because this caller-only image "
+                    "targets a shared conversation."
+                ),
+                "suggested_audience_projection": "party_public",
+            },
+            ensure_ascii=False,
+        )
     payload: dict[str, Any] = {
-        "artifacts": artifacts,
-        "next_step": (
-            "These images were returned by an MCP tool and saved as local artifacts. "
-            "Call the message tool with the artifact 'path' values in the media "
-            "parameter to deliver the images to the user. Do not paste base64 or raw "
-            "paths into your reply unless the user asks for debug details."
-        ),
+        "images": [
+            {key: artifact[key] for key in ("id", "mime") if artifact.get(key)}
+            for artifact in artifacts
+        ],
+        "delivery": "The host saved and will attach these images to the current conversation.",
     }
     text = "\n".join(part for part in text_parts if part)
     if text:
@@ -933,10 +974,13 @@ class MCPToolWrapper(_MCPWrapperBase):
                         structured_content,
                     )
                     self._remember_authorization_epoch(authoritative_payload)
-                    rendered = self._render_call_result(
+                    rendered, media = self._render_call_result(
                         result.content,
                         kwargs,
                         structured_content=structured_content,
+                        block_media_delivery=_caller_media_delivery_blocked(
+                            structured_content
+                        ),
                     )
                     if getattr(result, "isError", False):
                         return ToolResult.error(rendered)
@@ -951,6 +995,7 @@ class MCPToolWrapper(_MCPWrapperBase):
                         context_barrier=context_changed,
                         structured_content=structured_content,
                         audit_receipt=_auth_context_receipt_from_result(result.content),
+                        media=media,
                     )
                 except Exception as exc:
                     logger.exception(
@@ -1028,7 +1073,8 @@ class MCPToolWrapper(_MCPWrapperBase):
         arguments: Mapping[str, Any],
         *,
         structured_content: Any = None,
-    ) -> str:
+        block_media_delivery: bool = False,
+    ) -> tuple[str, tuple[str, ...]]:
         """Turn MCP content blocks into a tool result string.
 
         Structured MCP output is authoritative when present, avoiding an invalid
@@ -1062,8 +1108,19 @@ class MCPToolWrapper(_MCPWrapperBase):
             text_parts.append(str(block))
 
         if artifacts:
-            return _mcp_image_tool_result(text_parts, artifacts)
-        return "\n".join(text_parts) or "(no output)"
+            return (
+                _mcp_image_tool_result(
+                    text_parts,
+                    artifacts,
+                    delivery_blocked=block_media_delivery,
+                ),
+                (
+                    ()
+                    if block_media_delivery
+                    else tuple(str(artifact["path"]) for artifact in artifacts)
+                ),
+            )
+        return "\n".join(text_parts) or "(no output)", ()
 
     def _store_image_block(
         self, data_url: str, arguments: Mapping[str, Any]

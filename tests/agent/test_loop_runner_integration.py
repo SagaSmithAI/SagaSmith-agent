@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from nanobot.agent.goal_permission import goal_mutation_allowed, goal_mutation_permission
+from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.bus.outbound_events import StreamedResponseEvent
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import GenerationSettings, LLMProvider, LLMResponse, ToolCallRequest
@@ -17,6 +18,29 @@ from nanobot.utils.llm_runtime import LLMRuntime
 
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
 _GOAL_RUNTIME_GUIDANCE_TAG = "[Goal Runtime Guidance — host instructions]"
+
+
+class _CombatRenderTool(Tool):
+    def __init__(self, image_path: str) -> None:
+        self.image_path = image_path
+
+    @property
+    def name(self) -> str:
+        return "mcp_sagasmith_dnd_render_combat_grid"
+
+    @property
+    def description(self) -> str:
+        return "Render the authoritative combat grid."
+
+    @property
+    def parameters(self) -> dict:
+        return {"type": "object", "properties": {}, "required": []}
+
+    async def execute(self, **_kwargs):
+        return ToolResult(
+            '{"images":[{"id":"combat-grid","mime":"image/png"}]}',
+            media=[self.image_path],
+        )
 
 
 def _make_loop(tmp_path):
@@ -34,6 +58,104 @@ def _make_loop(tmp_path):
         mock_sub_mgr.return_value.cancel_by_session = AsyncMock(return_value=0)
         loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path)
     return loop
+
+
+@pytest.mark.asyncio
+async def test_mcp_combat_media_attaches_to_current_group_without_model_path(tmp_path):
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.events import InboundMessage
+    from nanobot.bus.queue import MessageBus
+
+    image_path = tmp_path / "combat-grid.png"
+    image_path.write_bytes(b"png")
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    provider.generation = GenerationSettings()
+    requests: list[list[dict]] = []
+
+    async def chat_with_retry(*, messages, **_kwargs):
+        requests.append(messages)
+        if len(requests) == 1:
+            return LLMResponse(
+                content="",
+                tool_calls=[
+                    ToolCallRequest(
+                        id="render-grid",
+                        name="mcp_sagasmith_dnd_render_combat_grid",
+                        arguments={},
+                    )
+                ],
+                usage={},
+            )
+        return LLMResponse(content="Combat updated.", tool_calls=[], usage={})
+
+    provider.chat_with_retry = chat_with_retry
+    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
+    loop.tools.register(_CombatRenderTool(str(image_path)))
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=None)
+
+    result = await loop._process_message(
+        InboundMessage(
+            channel="napcat",
+            sender_id="player-1",
+            chat_id="group:42",
+            content="Show the updated combat grid.",
+        )
+    )
+
+    assert result is not None
+    assert result.channel == "napcat"
+    assert result.chat_id == "group:42"
+    assert result.content == "Combat updated."
+    assert result.media == [str(image_path)]
+    assert str(image_path) not in str(requests[1])
+
+
+def test_host_media_is_deduplicated_against_current_chat_message_tool(tmp_path):
+    from nanobot.agent.tools.message import MessageTool
+    from nanobot.bus.events import InboundMessage
+
+    loop = _make_loop(tmp_path)
+    message_tool = loop.tools.get("message")
+    assert isinstance(message_tool, MessageTool)
+    image_path = str((tmp_path / "combat-grid.png").resolve())
+    inbound = InboundMessage(
+        channel="napcat",
+        sender_id="player-1",
+        chat_id="group:42",
+        content="render combat",
+    )
+
+    message_tool.start_turn()
+    message_tool._sent_in_turn = True
+    message_tool._turn_delivered_media_var.set((image_path,))
+    assert (
+        loop._assemble_outbound(
+            inbound,
+            "Combat updated.",
+            [],
+            "completed",
+            False,
+            None,
+            host_media=[image_path],
+        )
+        is None
+    )
+
+    message_tool.start_turn()
+    message_tool._sent_in_turn = True
+    outbound = loop._assemble_outbound(
+        inbound,
+        "Combat updated.",
+        [],
+        "completed",
+        False,
+        None,
+        host_media=[image_path],
+    )
+    assert outbound is not None
+    assert outbound.content == ""
+    assert outbound.media == [image_path]
 
 
 @pytest.mark.asyncio
