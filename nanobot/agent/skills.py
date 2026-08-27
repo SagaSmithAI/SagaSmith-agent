@@ -1,30 +1,87 @@
 """Skills loader for agent capabilities."""
 
+from __future__ import annotations
+
+import copy
 import json
 import os
 import re
 import shutil
+import threading
+from collections import OrderedDict
+from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
 
-# Default builtin skills directory (relative to this file)
+from nanobot.utils.file_cache import (
+    BoundedTextFileCache,
+    CachedText,
+    PathSignature,
+    TextCacheKey,
+    normalize_cache_path,
+    path_signature,
+)
+
 BUILTIN_SKILLS_DIR = Path(__file__).parent.parent / "skills"
 
-# Opening ---, YAML body (group 1), closing --- on its own line; supports CRLF.
 _STRIP_SKILL_FRONTMATTER = re.compile(
     r"^---\s*\r?\n(.*?)\r?\n---\s*\r?\n?",
     re.DOTALL,
 )
 
 
-class SkillsLoader:
-    """
-    Loader for agent skills.
+@dataclass(frozen=True, slots=True)
+class _SkillEntry:
+    name: str
+    path: str
+    source: str
 
-    Skills are markdown files (SKILL.md) that teach the agent how to use
-    specific tools or perform certain tasks.
-    """
+    def as_dict(self) -> dict[str, str]:
+        return {"name": self.name, "path": self.path, "source": self.source}
+
+
+@dataclass(frozen=True, slots=True)
+class _DirectorySnapshot:
+    signature: PathSignature
+    child_signatures: tuple[PathSignature, ...]
+    entries: tuple[_SkillEntry, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _RequirementSpec:
+    bins: tuple[str, ...] = ()
+    env: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class _RequirementStatus:
+    available: bool
+    missing: str
+    fingerprint: tuple[tuple[str, str, bool], ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _SkillDocument:
+    key: TextCacheKey
+    content: str
+    body: str
+    metadata: dict[str, object] | None
+    nanobot_metadata: dict[str, object]
+    requirements: _RequirementSpec
+    description: str | None
+    always: bool
+    byte_size: int
+
+
+class SkillsLoader:
+    """Load and index workspace, builtin, and external Agent Skills."""
+
+    _MAX_DIRECTORY_SNAPSHOTS = 16
+    _MAX_WATCHED_CHILDREN = 1024
+    _MAX_DOCUMENT_ENTRIES = 256
+    _MAX_DOCUMENT_BYTES = 8 * 1024 * 1024
+    _MAX_SUMMARY_ENTRIES = 32
 
     def __init__(
         self,
@@ -49,178 +106,231 @@ class SkillsLoader:
             self.external_skill_dirs.append(path)
         self.disabled_skills = disabled_skills or set()
 
-    def _skill_entries_from_dir(self, base: Path, source: str, *, skip_names: set[str] | None = None) -> list[dict[str, str]]:
-        if not base.exists():
+        # Caches are instance-owned: hosted workspaces and tenants cannot read
+        # each other's prompt material through process-global state.
+        self._lock = threading.RLock()
+        self._text_cache = BoundedTextFileCache(
+            max_entries=self._MAX_DOCUMENT_ENTRIES,
+            max_bytes=self._MAX_DOCUMENT_BYTES,
+        )
+        self._directory_snapshots: OrderedDict[str, _DirectorySnapshot] = OrderedDict()
+        self._documents: OrderedDict[TextCacheKey, _SkillDocument] = OrderedDict()
+        self._document_bytes = 0
+        self._summary_cache: OrderedDict[tuple[object, ...], str] = OrderedDict()
+
+    def _skill_entries_from_dir(
+        self,
+        base: Path,
+        source: str,
+        *,
+        skip_names: set[str] | None = None,
+    ) -> list[dict[str, str]]:
+        entries = self._cached_entries_from_dir(base, source)
+        if skip_names:
+            entries = [entry for entry in entries if entry.name not in skip_names]
+        return [entry.as_dict() for entry in entries]
+
+    def _cached_entries_from_dir(self, base: Path, source: str) -> list[_SkillEntry]:
+        signature = path_signature(base, kind="directory")
+        if signature is None:
+            with self._lock:
+                self._directory_snapshots.pop(normalize_cache_path(base), None)
             return []
-        entries: list[dict[str, str]] = []
-        root_skill = base / "SKILL.md"
-        if root_skill.is_file():
-            name = base.name
-            if skip_names is None or name not in skip_names:
-                entries.append({"name": name, "path": str(root_skill), "source": source})
-        for skill_dir in base.iterdir():
-            if not skill_dir.is_dir():
-                continue
-            skill_file = skill_dir / "SKILL.md"
-            if not skill_file.exists():
-                continue
-            name = skill_dir.name
-            if skip_names is not None and name in skip_names:
-                continue
-            entries.append({"name": name, "path": str(skill_file), "source": source})
-        return entries
+
+        with self._lock:
+            snapshot = self._directory_snapshots.get(signature.path)
+            if snapshot is not None and self._snapshot_is_current(snapshot, signature):
+                self._directory_snapshots.move_to_end(signature.path)
+                return [_SkillEntry(entry.name, entry.path, source) for entry in snapshot.entries]
+
+            entries, stable_signature, child_signatures = self._scan_directory(base, source)
+            if (
+                stable_signature is not None
+                and not stable_signature.has_coarse_timestamps
+                and len(child_signatures) <= self._MAX_WATCHED_CHILDREN
+                and all(not child.has_coarse_timestamps for child in child_signatures)
+            ):
+                self._directory_snapshots[stable_signature.path] = _DirectorySnapshot(
+                    signature=stable_signature,
+                    child_signatures=child_signatures,
+                    entries=tuple(entries),
+                )
+                self._directory_snapshots.move_to_end(stable_signature.path)
+                while len(self._directory_snapshots) > self._MAX_DIRECTORY_SNAPSHOTS:
+                    self._directory_snapshots.popitem(last=False)
+            else:
+                self._directory_snapshots.pop(signature.path, None)
+            return entries
+
+    @staticmethod
+    def _snapshot_is_current(
+        snapshot: _DirectorySnapshot,
+        current_signature: PathSignature,
+    ) -> bool:
+        if snapshot.signature != current_signature or current_signature.has_coarse_timestamps:
+            return False
+        for expected in snapshot.child_signatures:
+            current = path_signature(Path(expected.path), kind="directory")
+            if current != expected or (current is not None and current.has_coarse_timestamps):
+                return False
+        return True
+
+    @staticmethod
+    def _scan_directory(
+        base: Path,
+        source: str,
+    ) -> tuple[list[_SkillEntry], PathSignature | None, tuple[PathSignature, ...]]:
+        """Scan once, retrying when the directory changes during discovery."""
+        last_entries: list[_SkillEntry] = []
+        last_children: tuple[PathSignature, ...] = ()
+        for _attempt in range(2):
+            before = path_signature(base, kind="directory")
+            if before is None:
+                return [], None, ()
+            try:
+                children = list(base.iterdir())
+            except OSError:
+                return [], None, ()
+
+            entries: list[_SkillEntry] = []
+            root_skill = base / "SKILL.md"
+            if root_skill.is_file():
+                entries.append(_SkillEntry(name=base.name, path=str(root_skill), source=source))
+
+            child_signatures: list[PathSignature] = []
+            for skill_dir in children:
+                child_signature = path_signature(skill_dir, kind="directory")
+                if child_signature is None:
+                    continue
+                child_signatures.append(child_signature)
+                skill_file = skill_dir / "SKILL.md"
+                if skill_file.is_file():
+                    entries.append(
+                        _SkillEntry(
+                            name=skill_dir.name,
+                            path=str(skill_file),
+                            source=source,
+                        )
+                    )
+
+            after = path_signature(base, kind="directory")
+            last_entries = entries
+            last_children = tuple(child_signatures)
+            if before == after:
+                return entries, after, last_children
+        return last_entries, None, last_children
+
+    def _all_entries(self, *, include_disabled: bool = False) -> list[_SkillEntry]:
+        skills = self._cached_entries_from_dir(self.workspace_skills, "workspace")
+        workspace_names = {entry.name for entry in skills}
+        if self.builtin_skills:
+            skills.extend(
+                entry
+                for entry in self._cached_entries_from_dir(self.builtin_skills, "builtin")
+                if entry.name not in workspace_names
+            )
+        known_names = {entry.name for entry in skills}
+        for root in self.external_skill_dirs:
+            extra = [
+                entry
+                for entry in self._cached_entries_from_dir(root, "external")
+                if entry.name not in known_names
+            ]
+            skills.extend(extra)
+            known_names.update(entry.name for entry in extra)
+        if include_disabled or not self.disabled_skills:
+            return skills
+        return [entry for entry in skills if entry.name not in self.disabled_skills]
 
     def list_skills(self, filter_unavailable: bool = True) -> list[dict[str, str]]:
-        """
-        List all available skills.
-
-        Args:
-            filter_unavailable: If True, filter out skills with unmet requirements.
-
-        Returns:
-            List of skill info dicts with 'name', 'path', 'source'.
-        """
-        skills = self._skill_entries_from_dir(self.workspace_skills, "workspace")
-        workspace_names = {entry["name"] for entry in skills}
-        if self.builtin_skills and self.builtin_skills.exists():
-            skills.extend(
-                self._skill_entries_from_dir(self.builtin_skills, "builtin", skip_names=workspace_names)
-            )
-        known_names = {entry["name"] for entry in skills}
-        for root in self.external_skill_dirs:
-            extra = self._skill_entries_from_dir(root, "external", skip_names=known_names)
-            skills.extend(extra)
-            known_names.update(entry["name"] for entry in extra)
-
-        if self.disabled_skills:
-            skills = [s for s in skills if s["name"] not in self.disabled_skills]
-
+        """List skills with stable workspace/builtin/external precedence."""
+        skills = self._all_entries()
         if filter_unavailable:
-            return [skill for skill in skills if self._check_requirements(self._get_skill_meta(skill["name"]))]
-        return skills
+            skills = [
+                entry
+                for entry in skills
+                if self._requirement_status(self._document_for_entry(entry).requirements).available
+            ]
+        return [entry.as_dict() for entry in skills]
+
+    def _find_entry(self, name: str) -> _SkillEntry | None:
+        return next(
+            (entry for entry in self._all_entries(include_disabled=True) if entry.name == name),
+            None,
+        )
 
     def load_skill(self, name: str) -> str | None:
-        """
-        Load a skill by name.
-
-        Args:
-            name: Skill name (directory name).
-
-        Returns:
-            Skill content or None if not found.
-        """
-        roots = [self.workspace_skills]
-        if self.builtin_skills:
-            roots.append(self.builtin_skills)
-        roots.extend(self.external_skill_dirs)
-        for root in roots:
-            root_skill = root / "SKILL.md"
-            if root.name == name and root_skill.exists():
-                return root_skill.read_text(encoding="utf-8")
-            path = root / name / "SKILL.md"
-            if path.exists():
-                return path.read_text(encoding="utf-8")
-        return None
+        """Load a skill by name, using the in-memory text cache."""
+        entry = self._find_entry(name)
+        if entry is None:
+            return None
+        cached = self._text_cache.read(Path(entry.path))
+        return cached.content if cached is not None else None
 
     def load_skills_for_context(self, skill_names: list[str]) -> str:
-        """
-        Load specific skills for inclusion in agent context.
-
-        Args:
-            skill_names: List of skill names to load.
-
-        Returns:
-            Formatted skills content.
-        """
-        parts = [
-            f"### Skill: {name}\n\n{self._strip_frontmatter(markdown)}"
-            for name in skill_names
-            if (markdown := self.load_skill(name))
-        ]
+        """Load specific skills for inclusion in agent context."""
+        parts: list[str] = []
+        for name in skill_names:
+            entry = self._find_entry(name)
+            if entry is None:
+                continue
+            document = self._document_for_entry(entry)
+            if not document.content:
+                continue
+            parts.append(f"### Skill: {name}\n\n{document.body}")
         return "\n\n---\n\n".join(parts)
 
     def build_skills_summary(self, exclude: set[str] | None = None) -> str:
-        """
-        Build a summary of all skills (name, description, path, availability).
-
-        This is used for progressive loading - the agent can read the full
-        skill content using read_file when needed.
-
-        Args:
-            exclude: Set of skill names to omit from the summary.
-
-        Returns:
-            Markdown-formatted skills summary.
-        """
-        all_skills = self.list_skills(filter_unavailable=False)
-        if not all_skills:
-            return ""
-
-        lines: list[str] = []
-        for entry in all_skills:
-            skill_name = entry["name"]
-            if exclude and skill_name in exclude:
+        """Build a cached summary keyed by files and live requirements."""
+        entries = self._all_entries()
+        excluded = frozenset(exclude or ())
+        rows: list[tuple[_SkillEntry, _SkillDocument, _RequirementStatus]] = []
+        state: list[object] = [excluded]
+        for entry in entries:
+            if entry.name in excluded:
                 continue
-            meta = self._get_skill_meta(skill_name)
-            available = self._check_requirements(meta)
-            desc = self._get_skill_description(skill_name)
-            if available:
-                lines.append(f"- **{skill_name}** — {desc}  `{entry['path']}`")
-            else:
-                missing = self._get_missing_requirements(meta)
-                suffix = f" (unavailable: {missing})" if missing else " (unavailable)"
-                lines.append(f"- **{skill_name}** — {desc}{suffix}  `{entry['path']}`")
-        return "\n".join(lines)
+            document = self._document_for_entry(entry)
+            status = self._requirement_status(document.requirements)
+            rows.append((entry, document, status))
+            state.append(
+                (
+                    entry.name,
+                    entry.path,
+                    entry.source,
+                    document.key,
+                    status.fingerprint,
+                )
+            )
+        cache_key = tuple(state)
+        with self._lock:
+            if cache_key in self._summary_cache:
+                cached = self._summary_cache[cache_key]
+                self._summary_cache.move_to_end(cache_key)
+                return cached
+            lines: list[str] = []
+            for entry, document, status in rows:
+                description = document.description or entry.name
+                if status.available:
+                    lines.append(f"- **{entry.name}** — {description}  `{entry.path}`")
+                else:
+                    suffix = (
+                        f" (unavailable: {status.missing})"
+                        if status.missing
+                        else " (unavailable)"
+                    )
+                    lines.append(
+                        f"- **{entry.name}** — {description}{suffix}  `{entry.path}`"
+                    )
+            summary = "\n".join(lines)
+            self._summary_cache[cache_key] = summary
+            self._summary_cache.move_to_end(cache_key)
+            while len(self._summary_cache) > self._MAX_SUMMARY_ENTRIES:
+                self._summary_cache.popitem(last=False)
+            return summary
 
-    def _get_missing_requirements(self, skill_meta: dict) -> str:
-        """Get a description of missing requirements."""
-        requires = skill_meta.get("requires", {})
-        required_bins = requires.get("bins", [])
-        required_env_vars = requires.get("env", [])
-        return ", ".join(
-            [f"CLI: {command_name}" for command_name in required_bins if not shutil.which(command_name)]
-            + [f"ENV: {env_name}" for env_name in required_env_vars if not os.environ.get(env_name)]
-        )
-
-    def get_skill_availability(self, name: str) -> tuple[bool, str]:
-        """Return whether a skill can run and why not when it cannot."""
-        meta = self._get_skill_meta(name)
-        available = self._check_requirements(meta)
-        return available, "" if available else self._get_missing_requirements(meta)
-
-    def get_skill_requirements(self, name: str) -> dict[str, list[str]]:
-        """Return explicit command/env requirements and currently missing entries."""
-        requires = self._get_skill_meta(name).get("requires", {})
-        bins = [str(value) for value in requires.get("bins", [])]
-        env = [str(value) for value in requires.get("env", [])]
-        return {
-            "bins": bins,
-            "env": env,
-            "missing_bins": [value for value in bins if not shutil.which(value)],
-            "missing_env": [value for value in env if not os.environ.get(value)],
-        }
-
-    def _get_skill_description(self, name: str) -> str:
-        """Get the description of a skill from its frontmatter."""
-        meta = self.get_skill_metadata(name)
-        if meta and meta.get("description"):
-            return meta["description"]
-        return name  # Fallback to skill name
-
-    def _strip_frontmatter(self, content: str) -> str:
-        """Remove YAML frontmatter from markdown content."""
-        if not content.startswith("---"):
-            return content
-        match = _STRIP_SKILL_FRONTMATTER.match(content)
-        if match:
-            return content[match.end():].strip()
-        return content
-
-    def _parse_nanobot_metadata(self, raw: object) -> dict:
-        """Extract nanobot/openclaw metadata from a frontmatter field.
-
-        ``raw`` may be a dict (already parsed by yaml.safe_load) or a JSON str.
-        """
+    @staticmethod
+    def _parse_nanobot_metadata(raw: object) -> dict[str, object]:
+        """Extract nanobot/openclaw metadata from a frontmatter field."""
         if isinstance(raw, dict):
             data = raw
         elif isinstance(raw, str):
@@ -233,59 +343,197 @@ class SkillsLoader:
         if not isinstance(data, dict):
             return {}
         payload = data.get("nanobot", data.get("openclaw", {}))
-        return payload if isinstance(payload, dict) else {}
+        if not isinstance(payload, dict):
+            return {}
+        return {str(key): value for key, value in payload.items()}
+
+    @staticmethod
+    def _requirement_spec(skill_meta: dict[str, object]) -> _RequirementSpec:
+        requires = skill_meta.get("requires", {})
+        if not isinstance(requires, dict):
+            return _RequirementSpec()
+        raw_bins = requires.get("bins", [])
+        raw_env = requires.get("env", [])
+        bins = tuple(str(value) for value in raw_bins) if isinstance(raw_bins, list) else ()
+        env = tuple(str(value) for value in raw_env) if isinstance(raw_env, list) else ()
+        return _RequirementSpec(bins=bins, env=env)
+
+    @staticmethod
+    def _requirement_status(requirements: _RequirementSpec) -> _RequirementStatus:
+        bin_states = tuple(("bin", name, bool(shutil.which(name))) for name in requirements.bins)
+        env_states = tuple(("env", name, bool(os.environ.get(name))) for name in requirements.env)
+        missing = [f"CLI: {name}" for _kind, name, available in bin_states if not available]
+        missing.extend(f"ENV: {name}" for _kind, name, available in env_states if not available)
+        fingerprint = bin_states + env_states
+        return _RequirementStatus(
+            available=all(available for _kind, _name, available in fingerprint),
+            missing=", ".join(missing),
+            fingerprint=fingerprint,
+        )
+
+    def _document_for_entry(self, entry: _SkillEntry) -> _SkillDocument:
+        cached = self._text_cache.read(Path(entry.path))
+        if cached is None:
+            # Discovery and reading raced a deletion. Missing metadata behaves
+            # as empty, matching the previous loader behavior.
+            return self._empty_document(entry.path)
+        with self._lock:
+            document = self._documents.get(cached.key)
+            if document is not None:
+                self._documents.move_to_end(cached.key)
+                return document
+            document = self._parse_document(cached)
+            if document.byte_size <= self._MAX_DOCUMENT_BYTES:
+                stale_keys = [key for key in self._documents if key.path == cached.key.path]
+                for stale_key in stale_keys:
+                    removed = self._documents.pop(stale_key)
+                    self._document_bytes -= removed.byte_size
+                self._documents[cached.key] = document
+                self._document_bytes += document.byte_size
+                self._documents.move_to_end(cached.key)
+                while (
+                    len(self._documents) > self._MAX_DOCUMENT_ENTRIES
+                    or self._document_bytes > self._MAX_DOCUMENT_BYTES
+                ):
+                    _key, removed = self._documents.popitem(last=False)
+                    self._document_bytes -= removed.byte_size
+            return document
+
+    @staticmethod
+    def _empty_document(path: str) -> _SkillDocument:
+        key = TextCacheKey(
+            path=path,
+            mtime_ns=0,
+            size=0,
+            change_ns=0,
+            device=0,
+            inode=0,
+            sha256="",
+        )
+        return _SkillDocument(
+            key=key,
+            content="",
+            body="",
+            metadata=None,
+            nanobot_metadata={},
+            requirements=_RequirementSpec(),
+            description=None,
+            always=False,
+            byte_size=0,
+        )
+
+    def _parse_document(self, cached: CachedText) -> _SkillDocument:
+        content = cached.content
+        metadata: dict[str, object] | None = None
+        body = content
+        match = _STRIP_SKILL_FRONTMATTER.match(content) if content.startswith("---") else None
+        if match is not None:
+            body = content[match.end():].strip()
+            try:
+                parsed = yaml.safe_load(match.group(1))
+            except yaml.YAMLError:
+                parsed = None
+            if isinstance(parsed, dict):
+                metadata = {str(key): value for key, value in parsed.items()}
+
+        nanobot_metadata = self._parse_nanobot_metadata(
+            metadata.get("metadata") if metadata else None
+        )
+        description = metadata.get("description") if metadata else None
+        requirements = self._requirement_spec(nanobot_metadata)
+        always = bool(
+            nanobot_metadata.get("always")
+            or (metadata.get("always") if metadata else False)
+        )
+        return _SkillDocument(
+            key=cached.key,
+            content=content,
+            body=body,
+            metadata=metadata,
+            nanobot_metadata=nanobot_metadata,
+            requirements=requirements,
+            description=str(description) if description else None,
+            always=always,
+            byte_size=cached.byte_size,
+        )
+
+    def _get_missing_requirements(self, skill_meta: dict) -> str:
+        """Get a description of missing requirements."""
+        return self._requirement_status(self._requirement_spec(skill_meta)).missing
+
+    def get_skill_availability(self, name: str) -> tuple[bool, str]:
+        """Return whether a skill can run and why not when it cannot."""
+        entry = self._find_entry(name)
+        if entry is None:
+            return True, ""
+        status = self._requirement_status(self._document_for_entry(entry).requirements)
+        return status.available, "" if status.available else status.missing
+
+    def get_skill_requirements(self, name: str) -> dict[str, list[str]]:
+        """Return explicit command/env requirements and currently missing entries."""
+        entry = self._find_entry(name)
+        requirements = (
+            self._document_for_entry(entry).requirements if entry is not None else _RequirementSpec()
+        )
+        status = self._requirement_status(requirements)
+        missing_bins = [
+            requirement
+            for kind, requirement, available in status.fingerprint
+            if kind == "bin" and not available
+        ]
+        missing_env = [
+            requirement
+            for kind, requirement, available in status.fingerprint
+            if kind == "env" and not available
+        ]
+        return {
+            "bins": list(requirements.bins),
+            "env": list(requirements.env),
+            "missing_bins": missing_bins,
+            "missing_env": missing_env,
+        }
+
+    def _get_skill_description(self, name: str) -> str:
+        """Get the description of a skill from its frontmatter."""
+        entry = self._find_entry(name)
+        if entry is None:
+            return name
+        return self._document_for_entry(entry).description or name
+
+    @staticmethod
+    def _strip_frontmatter(content: str) -> str:
+        """Remove YAML frontmatter from markdown content."""
+        if not content.startswith("---"):
+            return content
+        match = _STRIP_SKILL_FRONTMATTER.match(content)
+        if match:
+            return content[match.end():].strip()
+        return content
 
     def _check_requirements(self, skill_meta: dict) -> bool:
         """Check if skill requirements are met (bins, env vars)."""
-        requires = skill_meta.get("requires", {})
-        required_bins = requires.get("bins", [])
-        required_env_vars = requires.get("env", [])
-        return all(shutil.which(cmd) for cmd in required_bins) and all(
-            os.environ.get(var) for var in required_env_vars
-        )
+        return self._requirement_status(self._requirement_spec(skill_meta)).available
 
     def _get_skill_meta(self, name: str) -> dict:
-        """Get nanobot metadata for a skill (cached in frontmatter)."""
-        raw_meta = self.get_skill_metadata(name) or {}
-        return self._parse_nanobot_metadata(raw_meta.get("metadata"))
+        """Get parsed nanobot metadata for a skill."""
+        entry = self._find_entry(name)
+        if entry is None:
+            return {}
+        return copy.deepcopy(self._document_for_entry(entry).nanobot_metadata)
 
     def get_always_skills(self) -> list[str]:
         """Get skills marked as always=true that meet requirements."""
-        return [
-            entry["name"]
-            for entry in self.list_skills(filter_unavailable=True)
-            if (meta := self.get_skill_metadata(entry["name"]) or {})
-            and (
-                self._parse_nanobot_metadata(meta.get("metadata")).get("always")
-                or meta.get("always")
-            )
-        ]
+        always: list[str] = []
+        for entry in self._all_entries():
+            document = self._document_for_entry(entry)
+            if document.always and self._requirement_status(document.requirements).available:
+                always.append(entry.name)
+        return always
 
     def get_skill_metadata(self, name: str) -> dict | None:
-        """
-        Get metadata from a skill's frontmatter.
-
-        Args:
-            name: Skill name.
-
-        Returns:
-            Metadata dict or None.
-        """
-        content = self.load_skill(name)
-        if not content or not content.startswith("---"):
+        """Get a defensive copy of parsed skill frontmatter."""
+        entry = self._find_entry(name)
+        if entry is None:
             return None
-        match = _STRIP_SKILL_FRONTMATTER.match(content)
-        if not match:
-            return None
-        try:
-            parsed = yaml.safe_load(match.group(1))
-        except yaml.YAMLError:
-            return None
-        if not isinstance(parsed, dict):
-            return None
-        # yaml.safe_load returns native types (int, bool, list, etc.);
-        # keep values as-is so downstream consumers get correct types.
-        metadata: dict[str, object] = {}
-        for key, value in parsed.items():
-            metadata[str(key)] = value
-        return metadata
+        metadata = self._document_for_entry(entry).metadata
+        return copy.deepcopy(metadata) if metadata is not None else None

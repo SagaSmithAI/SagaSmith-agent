@@ -1,5 +1,6 @@
 """Tests for ContextBuilder — system prompt and message assembly."""
 
+import os
 from pathlib import Path
 
 import pytest
@@ -122,6 +123,65 @@ class TestLoadBootstrapFiles:
         builder = _builder(tmp_path)
         result = builder._load_bootstrap_files()
         assert "用中文回复" in result
+
+    def test_unchanged_bootstrap_uses_memory_cache(self, tmp_path, monkeypatch):
+        agents = tmp_path / "AGENTS.md"
+        agents.write_text("Stable rules.", encoding="utf-8")
+        precise = 1_700_000_000_123_456_789
+        os.utime(agents, ns=(precise, precise))
+        builder = _builder(tmp_path)
+
+        first = builder._load_bootstrap_files()
+
+        def unexpected_read(_path: Path) -> bytes:
+            raise AssertionError("unchanged bootstrap must not be read twice")
+
+        monkeypatch.setattr(Path, "read_bytes", unexpected_read)
+        assert builder._load_bootstrap_files() == first
+        assert builder._bootstrap_file_cache.info().hits == 1
+
+    def test_bootstrap_invalidates_same_size_coarse_mtime_collision(self, tmp_path):
+        agents = tmp_path / "AGENTS.md"
+        coarse = 1_700_000_000_000_000_000
+        agents.write_text("first", encoding="utf-8")
+        os.utime(agents, ns=(coarse, coarse))
+        builder = _builder(tmp_path)
+
+        assert "first" in builder._load_bootstrap_files()
+        agents.write_text("other", encoding="utf-8")
+        os.utime(agents, ns=(coarse, coarse))
+
+        refreshed = builder._load_bootstrap_files()
+        assert "other" in refreshed
+        assert "first" not in refreshed
+
+    def test_bootstrap_detects_addition_and_deletion(self, tmp_path):
+        builder = _builder(tmp_path)
+        assert builder._load_bootstrap_files() == ""
+
+        identity = tmp_path / "IDENTITY.md"
+        identity.write_text("New identity.", encoding="utf-8")
+        assert "New identity." in builder._load_bootstrap_files()
+
+        identity.unlink()
+        assert "New identity." not in builder._load_bootstrap_files()
+
+    def test_workspace_override_does_not_cross_tenant_paths(self, tmp_path):
+        default = tmp_path / "default"
+        other = tmp_path / "other"
+        default.mkdir()
+        other.mkdir()
+        (default / "USER.md").write_text("default-user", encoding="utf-8")
+        (other / "USER.md").write_text("other-user", encoding="utf-8")
+        builder = _builder(default)
+
+        default_prompt = builder._load_bootstrap_files()
+        other_prompt = builder._load_bootstrap_files(other)
+
+        assert "default-user" in default_prompt
+        assert "other-user" not in default_prompt
+        assert "other-user" in other_prompt
+        assert "default-user" not in other_prompt
 
 
 # ---------------------------------------------------------------------------
