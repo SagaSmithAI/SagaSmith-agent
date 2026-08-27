@@ -125,6 +125,14 @@ the selected transport separately. Credential-free Discord, QQ, Telegram,
 Codex, Claude Code, OpenClaw, and generic Agent templates live in
 [`examples/local-agent-kit`](examples/local-agent-kit/README.md).
 
+The local performance baseline does not call an LLM or open existing campaign
+data. It starts one loopback MCP at a time in a temporary directory and records
+cold start, warm `server_capabilities` calls in one session, and idle RSS:
+
+```powershell
+uv run nanobot sagasmith benchmark --profile dnd-only --iterations 5 --json
+```
+
 The friendly D&D and CoC embedding-cache paths map to Core's
 `DND5E_EMBEDDING_CACHE_DIR` and `COC7_EMBEDDING_CACHE_DIR`. Narrative's template
 entry is reserved only: the current Narrative runtime does not use the Core

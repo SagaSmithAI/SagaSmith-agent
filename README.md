@@ -159,6 +159,14 @@ doctor 分别报告 MCP/config、领域数据库、Skills、provider 与所选 t
 Codex、Claude Code、OpenClaw/通用 Agent 的无凭证模板位于
 [`examples/local-agent-kit`](examples/local-agent-kit/README.md)。
 
+本地性能基线不会调用 LLM，也不会打开现有 campaign 数据。它在临时目录逐个启动
+loopback MCP，并测量 cold start、同一 session 内的 warm `server_capabilities` 调用和
+idle RSS：
+
+```powershell
+uv run nanobot sagasmith benchmark --profile dnd-only --iterations 5 --json
+```
+
 D&D 与 CoC 的用户友好 embedding cache 路径会分别映射到 Core 使用的
 `DND5E_EMBEDDING_CACHE_DIR` 与 `COC7_EMBEDDING_CACHE_DIR`。Narrative 模板中的 cache
 路径只是预留项；当前 Narrative runtime 不使用 Core embedder，不能据此认为缓存已启用。
