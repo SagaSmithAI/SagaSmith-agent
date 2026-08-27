@@ -1821,6 +1821,16 @@ Create a key at [serper.dev](https://serper.dev). You can also set `SERPER_API_K
 
 nanobot by default uses [Jina Reader](https://jina.ai/reader/), a third-party API, to convert arbitrary pages into Markdown format for easy digestion by the LLM, with a local fallback based on [readability-lxml](https://github.com/buriy/python-readability) if the former fails.
 
+> [!NOTE]
+> Using the remote reader discloses the fetched URL to that third-party service.
+> nanobot keeps URLs with visible credentials (userinfo, signed-URL parameters,
+> or token/signature/key-style query parameters) on the local readability path.
+> It also checks the observed redirect chain locally before using Jina. This is
+> best-effort: secrets embedded in URL paths cannot be detected reliably, and a
+> destination can change its response or redirect between the local preflight
+> and Jina's later request. Set `useJinaReader: false` when fetched URLs must
+> never leave the machine.
+
 If you want to always use the local conversion, you can force it using:
 
 ```json
