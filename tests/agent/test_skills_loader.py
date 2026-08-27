@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import json
+import os
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
+import yaml
 
 from nanobot.agent.skills import SkillsLoader
 from nanobot.config.schema import AgentDefaults
@@ -30,6 +33,11 @@ def _write_skill(
     path = skill_dir / "SKILL.md"
     path.write_text("\n".join(lines), encoding="utf-8")
     return path
+
+
+def _precise_mtime(path: Path, offset: int = 0) -> None:
+    value = 1_700_000_000_123_456_789 + offset
+    os.utime(path, ns=(value, value))
 
 
 def test_list_skills_empty_when_skills_dir_missing(tmp_path: Path) -> None:
@@ -489,3 +497,221 @@ def test_get_skill_metadata_handles_yaml_types(tmp_path: Path) -> None:
     assert meta.get("always") is True
     # metadata is a parsed dict, not a JSON string
     assert isinstance(meta.get("metadata"), dict)
+
+
+def test_hot_summary_avoids_reads_scans_and_yaml_parsing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A warm turn should do stat checks only, not repeat expensive work."""
+    workspace = tmp_path / "workspace"
+    skills_root = workspace / "skills"
+    skill_path = _write_skill(
+        skills_root,
+        "alpha",
+        metadata_json={"requires": {"env": ["CACHE_BENCH_ENV"]}},
+        body="# Alpha",
+    )
+    builtin = tmp_path / "builtin"
+    builtin.mkdir()
+    _precise_mtime(skill_path)
+    _precise_mtime(skill_path.parent, 1)
+    _precise_mtime(skills_root, 2)
+    _precise_mtime(builtin, 3)
+    monkeypatch.setenv("CACHE_BENCH_ENV", "configured")
+
+    loader = SkillsLoader(workspace, builtin_skills_dir=builtin)
+    first = loader.build_skills_summary()
+
+    def unexpected_iterdir(_path: Path):
+        raise AssertionError("hot summary must not traverse skill directories")
+
+    def unexpected_read(_path: Path) -> bytes:
+        raise AssertionError("hot summary must not read unchanged SKILL.md")
+
+    def unexpected_yaml(_value: str):
+        raise AssertionError("hot summary must not reparse unchanged frontmatter")
+
+    monkeypatch.setattr(Path, "iterdir", unexpected_iterdir)
+    monkeypatch.setattr(Path, "read_bytes", unexpected_read)
+    monkeypatch.setattr("nanobot.agent.skills.yaml.safe_load", unexpected_yaml)
+
+    assert loader.build_skills_summary() == first
+    assert loader._text_cache.info().hits >= 1
+    assert len(loader._summary_cache) == 1
+
+
+def test_skill_content_collision_invalidates_cached_metadata(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    skills_root = workspace / "skills"
+    skill_dir = skills_root / "alpha"
+    skill_dir.mkdir(parents=True)
+    skill_path = skill_dir / "SKILL.md"
+    first = "---\nname: alpha\ndescription: First\n---\nBody"
+    second = "---\nname: alpha\ndescription: Other\n---\nBody"
+    assert len(first) == len(second)
+    skill_path.write_text(first, encoding="utf-8")
+    coarse = 1_700_000_000_000_000_000
+    os.utime(skill_path, ns=(coarse, coarse))
+    _precise_mtime(skill_dir, 1)
+    _precise_mtime(skills_root, 2)
+    builtin = tmp_path / "builtin"
+    builtin.mkdir()
+    _precise_mtime(builtin, 3)
+    loader = SkillsLoader(workspace, builtin_skills_dir=builtin)
+
+    assert "First" in loader.build_skills_summary()
+    skill_path.write_text(second, encoding="utf-8")
+    os.utime(skill_path, ns=(coarse, coarse))
+
+    summary = loader.build_skills_summary()
+    assert "Other" in summary
+    assert "First" not in summary
+
+
+def test_skill_discovery_invalidates_add_delete_and_rename(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    skills_root = workspace / "skills"
+    alpha = _write_skill(skills_root, "alpha")
+    builtin = tmp_path / "builtin"
+    builtin.mkdir()
+    _precise_mtime(alpha.parent, 1)
+    _precise_mtime(skills_root, 2)
+    _precise_mtime(builtin, 3)
+    loader = SkillsLoader(workspace, builtin_skills_dir=builtin)
+
+    assert {item["name"] for item in loader.list_skills(False)} == {"alpha"}
+
+    beta = _write_skill(skills_root, "beta")
+    _precise_mtime(beta.parent, 4)
+    _precise_mtime(skills_root, 5)
+    assert {item["name"] for item in loader.list_skills(False)} == {"alpha", "beta"}
+
+    gamma_dir = skills_root / "gamma"
+    alpha.parent.rename(gamma_dir)
+    _precise_mtime(gamma_dir, 6)
+    _precise_mtime(skills_root, 7)
+    assert {item["name"] for item in loader.list_skills(False)} == {"beta", "gamma"}
+
+    beta.unlink()
+    beta.parent.rmdir()
+    _precise_mtime(skills_root, 8)
+    assert {item["name"] for item in loader.list_skills(False)} == {"gamma"}
+
+
+def test_summary_invalidates_when_env_requirement_status_changes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    skills_root = workspace / "skills"
+    _write_skill(
+        skills_root,
+        "needs-env",
+        metadata_json={"requires": {"env": ["CACHE_STATUS_ENV"]}},
+    )
+    builtin = tmp_path / "builtin"
+    builtin.mkdir()
+    monkeypatch.delenv("CACHE_STATUS_ENV", raising=False)
+    loader = SkillsLoader(workspace, builtin_skills_dir=builtin)
+
+    unavailable = loader.build_skills_summary()
+    assert "unavailable: ENV: CACHE_STATUS_ENV" in unavailable
+
+    monkeypatch.setenv("CACHE_STATUS_ENV", "present")
+    available = loader.build_skills_summary()
+    assert "unavailable" not in available
+    assert available != unavailable
+
+
+def test_summary_invalidates_when_binary_requirement_status_changes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    skills_root = workspace / "skills"
+    _write_skill(
+        skills_root,
+        "needs-bin",
+        metadata_json={"requires": {"bins": ["cache-test-bin"]}},
+    )
+    builtin = tmp_path / "builtin"
+    builtin.mkdir()
+    state = {"available": False}
+    monkeypatch.setattr(
+        "nanobot.agent.skills.shutil.which",
+        lambda _name: "/bin/cache-test-bin" if state["available"] else None,
+    )
+    loader = SkillsLoader(workspace, builtin_skills_dir=builtin)
+
+    assert "unavailable: CLI: cache-test-bin" in loader.build_skills_summary()
+    state["available"] = True
+    assert "unavailable" not in loader.build_skills_summary()
+
+
+def test_skill_caches_are_bounded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(SkillsLoader, "_MAX_DOCUMENT_ENTRIES", 2)
+    monkeypatch.setattr(SkillsLoader, "_MAX_SUMMARY_ENTRIES", 2)
+    workspace = tmp_path / "workspace"
+    skills_root = workspace / "skills"
+    for name in ("alpha", "beta", "gamma"):
+        _write_skill(skills_root, name, body=f"# {name}")
+    builtin = tmp_path / "builtin"
+    builtin.mkdir()
+    loader = SkillsLoader(workspace, builtin_skills_dir=builtin)
+
+    loader.build_skills_summary()
+    loader.build_skills_summary(exclude={"alpha"})
+    loader.build_skills_summary(exclude={"beta"})
+
+    assert len(loader._documents) <= 2
+    assert loader._text_cache.info().entries <= 2
+    assert len(loader._summary_cache) <= 2
+
+
+def test_loader_instances_do_not_share_tenant_content(tmp_path: Path) -> None:
+    left_workspace = tmp_path / "tenant-a"
+    right_workspace = tmp_path / "tenant-b"
+    _write_skill(left_workspace / "skills", "shared", body="# Tenant A")
+    _write_skill(right_workspace / "skills", "shared", body="# Tenant B")
+    builtin = tmp_path / "builtin"
+    builtin.mkdir()
+
+    left = SkillsLoader(left_workspace, builtin_skills_dir=builtin)
+    right = SkillsLoader(right_workspace, builtin_skills_dir=builtin)
+
+    assert "Tenant A" in left.load_skill("shared")
+    assert "Tenant B" not in left.load_skill("shared")
+    assert "Tenant B" in right.load_skill("shared")
+    assert "Tenant A" not in right.load_skill("shared")
+
+
+def test_concurrent_summary_build_parses_frontmatter_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    skills_root = workspace / "skills"
+    skill_path = _write_skill(skills_root, "shared", metadata_json={}, body="# Shared")
+    builtin = tmp_path / "builtin"
+    builtin.mkdir()
+    _precise_mtime(skill_path)
+    _precise_mtime(skill_path.parent, 1)
+    _precise_mtime(skills_root, 2)
+    _precise_mtime(builtin, 3)
+    original = yaml.safe_load
+    calls = 0
+
+    def counting_safe_load(value: str):
+        nonlocal calls
+        calls += 1
+        return original(value)
+
+    monkeypatch.setattr("nanobot.agent.skills.yaml.safe_load", counting_safe_load)
+    loader = SkillsLoader(workspace, builtin_skills_dir=builtin)
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        summaries = list(executor.map(lambda _index: loader.build_skills_summary(), range(32)))
+
+    assert len(set(summaries)) == 1
+    assert calls == 1

@@ -25,6 +25,7 @@ from nanobot.runtime_context import (
     RuntimeContextBlock,
     append_runtime_context,
 )
+from nanobot.utils.file_cache import BoundedTextFileCache
 from nanobot.utils.helpers import (
     detect_image_mime,
     load_bundled_template,
@@ -77,6 +78,10 @@ class ContextBuilder:
         self.workspace = workspace
         self.timezone = timezone
         self.memory = MemoryStore(workspace)
+        self._bootstrap_file_cache = BoundedTextFileCache(
+            max_entries=16,
+            max_bytes=1024 * 1024,
+        )
         self.skills = SkillsLoader(
             workspace,
             disabled_skills=set(disabled_skills) if disabled_skills else None,
@@ -188,9 +193,9 @@ class ContextBuilder:
 
         for filename in self.BOOTSTRAP_FILES if filenames is None else filenames:
             file_path = root / filename
-            if file_path.exists():
-                content = file_path.read_text(encoding="utf-8")
-                parts.append(f"## {filename}\n\n{content}")
+            cached = self._bootstrap_file_cache.read(file_path)
+            if cached is not None:
+                parts.append(f"## {filename}\n\n{cached.content}")
 
         return "\n\n".join(parts) if parts else ""
 
