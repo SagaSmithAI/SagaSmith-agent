@@ -57,6 +57,165 @@ jobs:
       - name: Run tests
         run: uv run python -m pytest tests/ --cov=nanobot --cov-report=term-missing:skip-covered
 
+  real-domain-conformance:
+    name: real domains (${{ matrix.lane }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [release-lock, latest-main]
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.0.1
+        with:
+          prune-cache: true
+
+      - name: Install Agent conformance dependencies
+        run: uv sync --frozen --extra dev
+
+      - name: Materialize exact release lock
+        if: matrix.lane == 'release-lock'
+        run: >-
+          uv run nanobot sagasmith install
+          --source release
+          --release-manifest "$GITHUB_WORKSPACE/sagasmith-stack-lock.json"
+          --profile multi-system
+          --transport streamable-http
+          --skip-ui
+          --state-root "$RUNNER_TEMP/sagasmith-real-domains/${{ matrix.lane }}"
+          --config "$RUNNER_TEMP/sagasmith-real-domains/${{ matrix.lane }}/config.json"
+          --json
+
+      - name: Materialize latest domain mains
+        if: matrix.lane == 'latest-main'
+        run: >-
+          uv run nanobot sagasmith install
+          --source release
+          --release-ref main
+          --profile multi-system
+          --transport streamable-http
+          --skip-ui
+          --state-root "$RUNNER_TEMP/sagasmith-real-domains/${{ matrix.lane }}"
+          --config "$RUNNER_TEMP/sagasmith-real-domains/${{ matrix.lane }}/config.json"
+          --json
+
+      - name: Verify selected Narrative revision over Streamable HTTP
+        run: >-
+          uv run nanobot sagasmith benchmark
+          --mode narrative
+          --iterations 1
+          --timeout 60
+          --state-root "$RUNNER_TEMP/sagasmith-real-domains/${{ matrix.lane }}"
+          --json
+
+      - name: Start all three Streamable HTTP MCPs
+        run: >-
+          uv run nanobot sagasmith start
+          --state-root "$RUNNER_TEMP/sagasmith-real-domains/${{ matrix.lane }}"
+          --config "$RUNNER_TEMP/sagasmith-real-domains/${{ matrix.lane }}/config.json"
+          --json
+
+      - name: Verify all three Streamable HTTP MCPs
+        run: >-
+          uv run nanobot sagasmith doctor
+          --profile multi-system
+          --transport streamable-http
+          --state-root "$RUNNER_TEMP/sagasmith-real-domains/${{ matrix.lane }}"
+          --json
+
+      - name: Run all 42 signed-host/domain/transport combinations
+        env:
+          SAGASMITH_REAL_DOMAINS_REQUIRED: "1"
+          SAGASMITH_REAL_DOMAIN_LANE: ${{ matrix.lane }}
+          SAGASMITH_REAL_DOMAIN_STATE_ROOT: ${{ runner.temp }}/sagasmith-real-domains/${{ matrix.lane }}
+          SAGASMITH_REAL_DOMAIN_WORKSPACE: ${{ runner.temp }}/sagasmith-real-domains/${{ matrix.lane }}/releases/current
+        run: uv run python -m pytest -q tests/host_conformance/test_real_domains.py
+
+      - name: Stop Streamable HTTP MCPs
+        if: always()
+        run: >-
+          uv run nanobot sagasmith stop
+          --state-root "$RUNNER_TEMP/sagasmith-real-domains/${{ matrix.lane }}"
+          --json
+
+  local-kit-startup:
+    name: Local Kit startup (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.0.1
+        with:
+          prune-cache: true
+
+      - name: Install Agent runtime
+        run: uv sync --frozen
+
+      - name: Copy mutable startup fixture into runner temp
+        env:
+          SOURCE_CONFIG: ${{ github.workspace }}/tests/fixtures/sagasmith-local-startup.json
+          TARGET_CONFIG: ${{ runner.temp }}/sagasmith-local-startup/config.json
+        run: >-
+          uv run python -c
+          "import os, shutil; from pathlib import Path;
+          target = Path(os.environ['TARGET_CONFIG']); target.parent.mkdir(parents=True, exist_ok=True);
+          shutil.copyfile(os.environ['SOURCE_CONFIG'], target)"
+
+      - name: Materialize locked Narrative profile
+        run: >-
+          uv run nanobot sagasmith install
+          --source release
+          --release-manifest "${{ github.workspace }}/sagasmith-stack-lock.json"
+          --profile narrative-only
+          --transport streamable-http
+          --skip-ui
+          --state-root "${{ runner.temp }}/sagasmith-local-startup"
+          --config "${{ runner.temp }}/sagasmith-local-startup/config.json"
+          --json
+
+      - name: Start the Local Kit
+        run: >-
+          uv run nanobot sagasmith start
+          --state-root "${{ runner.temp }}/sagasmith-local-startup"
+          --config "${{ runner.temp }}/sagasmith-local-startup/config.json"
+          --json
+
+      - name: Verify the running Local Kit
+        run: >-
+          uv run nanobot sagasmith doctor
+          --mode narrative
+          --transport streamable-http
+          --state-root "${{ runner.temp }}/sagasmith-local-startup"
+          --json
+
+      - name: Stop the Local Kit
+        if: always()
+        run: >-
+          uv run nanobot sagasmith stop
+          --state-root "${{ runner.temp }}/sagasmith-local-startup"
+          --json
+
   webui:
     runs-on: ubuntu-latest
     timeout-minutes: 15

@@ -3,8 +3,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.parse import urlparse
 
 import pytest
+import yaml
 
 from nanobot.sagasmith_local.configuration import (
     LOOPBACK_CIDR,
@@ -238,6 +240,103 @@ def test_distribution_manifest_declares_all_profiles_and_templates() -> None:
     assert set(manifest["transports"]) == {"mixed", "stdio", "streamable-http"}
     for relative in manifest["templates"].values():
         assert (root / relative).is_file()
+
+
+def _ci_workflow() -> dict:
+    path = Path(__file__).parents[1] / ".github" / "workflows" / "ci.yml"
+    workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert isinstance(workflow, dict)
+    return workflow
+
+
+def _named_steps(job: dict) -> dict[str, dict]:
+    return {step["name"]: step for step in job["steps"] if "name" in step}
+
+
+def test_ci_runs_required_real_domains_against_lock_and_latest_mains() -> None:
+    job = _ci_workflow()["jobs"]["real-domain-conformance"]
+    assert job["runs-on"] == "ubuntu-latest"
+    assert job["strategy"]["matrix"]["lane"] == ["release-lock", "latest-main"]
+    steps = _named_steps(job)
+    exact = steps["Materialize exact release lock"]
+    floating = steps["Materialize latest domain mains"]
+    benchmark = steps["Verify selected Narrative revision over Streamable HTTP"]
+    start = steps["Start all three Streamable HTTP MCPs"]
+    doctor = steps["Verify all three Streamable HTTP MCPs"]
+    conformance = steps["Run all 42 signed-host/domain/transport combinations"]
+    stop = steps["Stop Streamable HTTP MCPs"]
+    assert exact["if"] == "matrix.lane == 'release-lock'"
+    assert "--release-manifest" in exact["run"]
+    assert "--profile multi-system" in exact["run"]
+    assert "--transport streamable-http" in exact["run"]
+    assert floating["if"] == "matrix.lane == 'latest-main'"
+    assert "--release-ref main" in floating["run"]
+    assert "--profile multi-system" in floating["run"]
+    assert "--transport streamable-http" in floating["run"]
+    assert "--mode narrative" in benchmark["run"]
+    assert "--timeout 60" in benchmark["run"]
+    assert "nanobot sagasmith start" in start["run"]
+    assert "--profile multi-system" in doctor["run"]
+    assert "--transport streamable-http" in doctor["run"]
+    assert conformance["env"]["SAGASMITH_REAL_DOMAINS_REQUIRED"] == "1"
+    assert conformance["env"]["SAGASMITH_REAL_DOMAIN_LANE"] == "${{ matrix.lane }}"
+    assert conformance["run"] == (
+        "uv run python -m pytest -q tests/host_conformance/test_real_domains.py"
+    )
+    assert stop["if"] == "always()"
+    assert "nanobot sagasmith stop" in stop["run"]
+    step_names = [step.get("name") for step in job["steps"]]
+    assert step_names.index("Start all three Streamable HTTP MCPs") < step_names.index(
+        "Run all 42 signed-host/domain/transport combinations"
+    )
+    assert step_names.index("Run all 42 signed-host/domain/transport combinations") < (
+        step_names.index("Stop Streamable HTTP MCPs")
+    )
+
+
+def test_ci_starts_locked_local_kit_on_each_supported_os() -> None:
+    root = Path(__file__).parents[1]
+    job = _ci_workflow()["jobs"]["local-kit-startup"]
+    steps = _named_steps(job)
+    config = json.loads(
+        (root / "tests" / "fixtures" / "sagasmith-local-startup.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert job["runs-on"] == "${{ matrix.os }}"
+    assert job["strategy"]["matrix"]["os"] == [
+        "ubuntu-latest",
+        "windows-latest",
+        "macos-latest",
+    ]
+    copy = steps["Copy mutable startup fixture into runner temp"]
+    materialize = steps["Materialize locked Narrative profile"]
+    start = steps["Start the Local Kit"]
+    doctor = steps["Verify the running Local Kit"]
+    stop = steps["Stop the Local Kit"]
+    assert copy["env"]["SOURCE_CONFIG"].endswith(
+        "/tests/fixtures/sagasmith-local-startup.json"
+    )
+    assert copy["env"]["TARGET_CONFIG"] == (
+        "${{ runner.temp }}/sagasmith-local-startup/config.json"
+    )
+    assert "shutil.copyfile" in copy["run"]
+    assert "--release-manifest" in materialize["run"]
+    assert "--profile narrative-only" in materialize["run"]
+    assert "--transport streamable-http" in materialize["run"]
+    assert "${{ runner.temp }}/sagasmith-local-startup/config.json" in materialize["run"]
+    assert "${{ github.workspace }}/tests/fixtures" not in materialize["run"]
+    assert "nanobot sagasmith start" in start["run"]
+    assert "${{ runner.temp }}/sagasmith-local-startup/config.json" in start["run"]
+    assert "--mode narrative" in doctor["run"]
+    assert "--transport streamable-http" in doctor["run"]
+    assert stop["if"] == "always()"
+    assert "nanobot sagasmith stop" in stop["run"]
+    assert config["agents"]["defaults"]["provider"] == "ollama"
+    provider_url = urlparse(config["providers"]["ollama"]["apiBase"])
+    assert provider_url.scheme == "http"
+    assert provider_url.hostname == "127.0.0.1"
+    assert provider_url.port == 11434
 
 
 def test_wheel_build_maps_distribution_assets_into_the_python_package() -> None:

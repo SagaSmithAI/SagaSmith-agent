@@ -1,0 +1,25 @@
+{
+  "agents": {
+    "defaults": {
+      "workspace": "workspace",
+      "provider": "ollama",
+      "model": "sagasmith-ci-smoke"
+    }
+  },
+  "providers": {
+    "ollama": {
+      "apiBase": "http://127.0.0.1:11434/v1"
+    }
+  },
+  "gateway": {
+    "host": "127.0.0.1",
+    "port": 18790
+  },
+  "channels": {
+    "websocket": {
+      "enabled": true,
+      "host": "127.0.0.1",
+      "port": 8765
+    }
+  }
+}
