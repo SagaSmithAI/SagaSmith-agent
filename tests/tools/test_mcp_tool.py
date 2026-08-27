@@ -1327,6 +1327,45 @@ async def test_exposure_mutation_refreshes_before_delayed_list_changed(
 
 
 @pytest.mark.asyncio
+async def test_exposure_mutation_waits_until_remote_tool_list_converges(
+    fake_mcp_runtime: dict[str, object | None],
+) -> None:
+    session = _make_fake_session(["exposure"])
+    fake_mcp_runtime["session"] = session
+    registry = ToolRegistry()
+    stacks = await connect_mcp_servers(
+        {"test": MCPServerConfig(command="fake", enabled_tools=["*"])},
+        registry,
+    )
+    list_calls = 0
+
+    async def delayed_list_tools() -> SimpleNamespace:
+        nonlocal list_calls
+        list_calls += 1
+        names = ["exposure"] if list_calls < 3 else ["exposure", "character_query"]
+        return SimpleNamespace(tools=[_make_tool_def(name) for name in names])
+
+    async def call_tool(_name: str, arguments: dict) -> SimpleNamespace:
+        session.list_tools = delayed_list_tools
+        return SimpleNamespace(
+            content=[_FakeTextContent("{}")],
+            isError=False,
+            structuredContent={"loaded_tools": ["character_query"]},
+        )
+
+    session.call_tool = call_tool
+    exposure = registry.get("mcp_test_exposure")
+    assert exposure is not None
+
+    await exposure.execute(action="set", add_tool_ids=["character_query"])
+
+    assert list_calls == 3
+    assert "mcp_test_character_query" in registry.tool_names
+    for stack in stacks.values():
+        await stack.aclose()
+
+
+@pytest.mark.asyncio
 async def test_parallel_model_calls_do_not_cross_dynamic_tool_refresh(
     fake_mcp_runtime: dict[str, object | None],
 ) -> None:

@@ -70,8 +70,11 @@ _WINDOWS_SHELL_LAUNCHERS: frozenset[str] = frozenset(("npx", "npm", "pnpm", "yar
 _SANITIZE_RE = re.compile(r"_+")
 _RELOAD_LOCKS: WeakKeyDictionary[Any, asyncio.Lock] = WeakKeyDictionary()
 _ReconnectCallback = Callable[[str, str, Tool], Awaitable[Tool | None]]
-_PostCallSyncCallback = Callable[[bool], Awaitable[None]]
+_PostCallSyncCallback = Callable[
+    [bool, frozenset[str], frozenset[str]], Awaitable[None]
+]
 _MCP_CONTEXT_TOOL_LIMIT = 48
+_MCP_EXPOSURE_REFRESH_TIMEOUT_SECONDS = 1.0
 
 
 def _first_string_field(value: Any, names: frozenset[str]) -> str | None:
@@ -902,8 +905,22 @@ class MCPToolWrapper(_MCPWrapperBase):
                     # instead of racing the notification transport.
                     force_tool_refresh = self._original_name == "exposure" and kwargs.get(
                         "action"
-                    ) in {"open", "set"}
-                    await self._post_call_sync(force_tool_refresh)
+                    ) in {"open", "set"} and not getattr(result, "isError", False)
+                    expected_present = frozenset(
+                        str(tool_id)
+                        for tool_id in (kwargs.get("add_tool_ids") or [])
+                        if isinstance(tool_id, str) and tool_id
+                    )
+                    expected_absent = frozenset(
+                        str(tool_id)
+                        for tool_id in (kwargs.get("remove_tool_ids") or [])
+                        if isinstance(tool_id, str) and tool_id
+                    )
+                    await self._post_call_sync(
+                        force_tool_refresh,
+                        expected_present,
+                        expected_absent,
+                    )
                 # Success — extract text and persist any image content as artifacts.
                 try:
                     structured_content = (
@@ -1454,7 +1471,11 @@ async def connect_mcp_servers(
                 await server_stack.aclose()
                 return name, None
 
-            async def wait_for_pending_tool_refresh(force: bool = False) -> None:
+            async def wait_for_pending_tool_refresh(
+                force: bool = False,
+                expected_present: frozenset[str] = frozenset(),
+                expected_absent: frozenset[str] = frozenset(),
+            ) -> None:
                 nonlocal synced_generation
                 # The receive loop dispatches list_changed independently of the
                 # tool-call task. Run tools/list in its own task after tools/call
@@ -1462,18 +1483,39 @@ async def connect_mcp_servers(
                 # inline from the outer task during that response handoff.
                 await asyncio.sleep(0)
                 if force:
-                    # Streamable HTTP may deliver list_changed later than the
-                    # single event-loop handoff above. A direct post-mutation
-                    # list keeps the model-facing registry authoritative even in
-                    # that case; a genuinely later notification is harmlessly
-                    # reconciled by the normal generation path.
-                    target_generation = refresh_generation
-                    task = asyncio.create_task(
-                        sync_tools(),
-                        name=f"mcp-tools-post-exposure-refresh:{name}",
-                    )
-                    await asyncio.shield(task)
-                    synced_generation = max(synced_generation, target_generation)
+                    # Streamable HTTP can make the changed list observable only
+                    # after tools/call has returned. Reconcile until the exact
+                    # exposure delta requested by the model is visible, with a
+                    # short bound so a broken server cannot stall the turn.
+                    loop = asyncio.get_running_loop()
+                    deadline = loop.time() + _MCP_EXPOSURE_REFRESH_TIMEOUT_SECONDS
+                    delay = 0.01
+                    available: set[str] = set()
+                    while True:
+                        target_generation = refresh_generation
+                        task = asyncio.create_task(
+                            sync_tools(),
+                            name=f"mcp-tools-post-exposure-refresh:{name}",
+                        )
+                        available = set(await asyncio.shield(task))
+                        synced_generation = max(synced_generation, target_generation)
+                        converged = expected_present <= available and not (
+                            expected_absent & available
+                        )
+                        if converged:
+                            break
+                        remaining = deadline - loop.time()
+                        if remaining <= 0:
+                            logger.warning(
+                                "MCP server '{}': exposure tool list did not converge; "
+                                "missing={}, still_present={}",
+                                name,
+                                ", ".join(sorted(expected_present - available)) or "(none)",
+                                ", ".join(sorted(expected_absent & available)) or "(none)",
+                            )
+                            break
+                        await asyncio.sleep(min(delay, remaining))
+                        delay = min(delay * 2, 0.1)
                     logger.info(
                         "MCP server '{}': refreshed tools after exposure mutation",
                         name,
