@@ -44,7 +44,7 @@ def test_measure_session_uses_sdk_v2_call_result_fields(
 
     @asynccontextmanager
     async def fake_transport(_url: str):
-        yield object(), object(), None
+        yield object(), object()
 
     class FakeSession:
         def __init__(self, _read: object, _write: object) -> None:

@@ -106,7 +106,8 @@ async def _measure_session(
     started_at: float,
     iterations: int,
 ) -> tuple[float, list[float]]:
-    async with streamable_http_client(url) as (read, write, _):
+    async with streamable_http_client(url) as streams:
+        read, write = streams[0], streams[1]
         async with ClientSession(read, write) as session:
             await session.initialize()
             first = await session.call_tool("server_capabilities", {})
