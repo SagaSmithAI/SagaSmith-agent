@@ -19,7 +19,11 @@ import uvicorn
 from fastapi import FastAPI, Header, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from nanobot.agent.mcp_observability import mcp_metrics_snapshot
+from nanobot.agent.mcp_observability import (
+    mcp_catalog_selection_snapshot,
+    mcp_metrics_snapshot,
+    record_mcp_catalog_selection,
+)
 from nanobot.apps.hosted_workspace import HostedWorkspaceLease, HostedWorkspacePolicy
 
 
@@ -150,6 +154,7 @@ def create_worker_app(
         return {
             "schema": "sagasmith.host-mcp-metrics/v1",
             "counters": mcp_metrics_snapshot(),
+            "catalog_selections": mcp_catalog_selection_snapshot(),
         }
 
     @app.post("/v1/chat/completions")
@@ -265,6 +270,22 @@ def create_worker_app(
             system_id=trusted.system_id,
         )
         turn_tools = base_tools.clone()
+        allowed_operations = frozenset(trusted.allowed_operations)
+        mcp_candidates = 0
+        mcp_selected = 0
+        for tool_name in list(turn_tools.tool_names):
+            tool = turn_tools.get(tool_name)
+            if tool is None or not getattr(tool, "_server_name", None):
+                continue
+            if not getattr(tool, "_model_visible", True):
+                continue
+            mcp_candidates += 1
+            operation = getattr(tool, "_original_name", None)
+            if operation not in allowed_operations:
+                turn_tools.unregister(tool_name)
+            else:
+                mcp_selected += 1
+        record_mcp_catalog_selection(mcp_candidates, mcp_selected)
         structured_tool = None
         receipt_hook = ReceiptCaptureHook()
         if payload.response_contract is not None:

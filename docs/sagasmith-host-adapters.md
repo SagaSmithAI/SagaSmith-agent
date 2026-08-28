@@ -117,9 +117,10 @@ The response contains `mcp_results` with standard text/image/audio/resource/embe
 blocks and `host_media` envelopes for Web artifact ingestion. Activity callbacks reuse one HTTP
 client; their token is scoped to Web and is never passed downstream.
 
-`GET /metrics/mcp` exposes bounded counters by phase, outcome, transport and protocol era. It never
-uses tool names, users, campaigns, runs or arguments as labels, so Hosted deployments can scrape it
-without creating unbounded cardinality or leaking authority context.
+`GET /metrics/mcp` exposes bounded counters by phase, outcome, transport and protocol era, plus
+fixed buckets for stable-catalog candidate and per-turn selected counts. It never uses tool names,
+users, campaigns, runs or arguments as labels, so Hosted deployments can scrape it without creating
+unbounded cardinality or leaking authority context.
 
 `--workspace-ttl-seconds`, `--workspace-max-bytes`, and `--workspace-max-count` bound registered
 worker workspaces. Cleanup removes only terminated directories with a matching SagaSmith marker;

@@ -85,9 +85,11 @@ Its authenticated sticky-session Workbench gateway is on port 8768 and binds
 the principal server-side. Narrative remains an Agent-owned session-scoped
 stdio child because it currently has no independent browser client.
 
-The seven always-available tools are `exposure`, `server_capabilities`, `storage_status`,
-`campaign_query`, `game_phase`, `resolution_presentation`, and `skill_query`. Do not configure
-retired exposure facades or a second host-side phase/profile filter.
+The legacy server initially exposes seven facade tools: `exposure`, `server_capabilities`,
+`storage_status`, `campaign_query`, `game_phase`, `resolution_presentation`, and `skill_query`.
+Do not configure retired exposure facades. In Hosted modern mode, Web supplies concrete
+`allowed_operations` after intersecting system, campaign phase, caller permission and the current
+task; Agent clones the stable catalog and exposes only that bounded intersection to the model.
 
 Legacy peers use the protocol in this order:
 

@@ -64,6 +64,10 @@ class FakeRegistry:
     def get(self, name: str):
         return self.tools.get(name)
 
+    @property
+    def tool_names(self):
+        return list(self.tools)
+
     def clone(self):
         cloned = FakeRegistry()
         cloned.tools = dict(self.tools)
@@ -156,6 +160,50 @@ def test_hosted_worker_injects_authenticated_principal_as_sender() -> None:
     assert loop.calls[0]["trusted_metadata"]["room_turn_id"] == "turn-1"
     assert loop.selected_system == "dnd5e"
     assert response.json()["usage"]["total_tokens"] == 5
+
+
+def test_hosted_worker_selects_only_authorized_mcp_operations_for_model() -> None:
+    loop = FakeLoop()
+    loop.registry.register(SimpleNamespace(name="builtin", _model_visible=True))
+    loop.registry.register(
+        SimpleNamespace(
+            name="mcp_dnd_actor_query",
+            _server_name="sagasmith_dnd",
+            _original_name="actor_query",
+            _model_visible=True,
+        )
+    )
+    loop.registry.register(
+        SimpleNamespace(
+            name="mcp_dnd_campaign_delete",
+            _server_name="sagasmith_dnd",
+            _original_name="campaign_delete",
+            _model_visible=True,
+        )
+    )
+    app = create_worker_app(loop, "test-model", service_token=TOKEN)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/chat/completions",
+            headers={"Authorization": f"Bearer {TOKEN}"},
+            json=request_json(
+                trusted_context=trusted_context(allowed_operations=["actor_query"])
+            ),
+        )
+        metrics = client.get("/metrics/mcp").json()
+
+    assert response.status_code == 200
+    selected = loop.calls[0]["tools"]
+    assert selected.has("builtin")
+    assert selected.has("mcp_dnd_actor_query")
+    assert not selected.has("mcp_dnd_campaign_delete")
+    assert any(
+        item["candidate_bucket"] == "1-7"
+        and item["selected_bucket"] == "1-7"
+        and item["count"] >= 1
+        for item in metrics["catalog_selections"]
+    )
 
 
 def test_hosted_worker_rejects_untrusted_principal_shape() -> None:
