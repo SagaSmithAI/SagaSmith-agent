@@ -18,7 +18,7 @@ from pydantic import Field
 from websockets.asyncio.client import ClientConnection
 from websockets.asyncio.client import connect as ws_connect
 
-from nanobot.bus.events import OutboundMessage
+from nanobot.bus.events import HostMediaCapabilities, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
@@ -58,6 +58,14 @@ class NapcatChannel(BaseChannel):
 
     name = "napcat"
     display_name = "Napcat (QQ)"
+
+    def media_capabilities(self) -> HostMediaCapabilities:
+        return HostMediaCapabilities(
+            atomic_caption=True,
+            native_alt_text=False,
+            max_file_bytes=self.config.max_image_bytes,
+            max_caption_chars=512,
+        )
 
     @classmethod
     def default_config(cls) -> dict[str, Any]:
@@ -439,9 +447,19 @@ class NapcatChannel(BaseChannel):
             return
 
         segments: list[dict[str, Any]] = []
-        for ref in msg.media or []:
-            if seg := await self._build_image_segment(ref):
+        for envelope in msg.host_media():
+            try:
+                seg = await self._build_image_segment(envelope.path)
+            except Exception:
+                logger.exception("napcat: failed to prepare outbound image")
+                seg = None
+            if seg:
                 segments.append(seg)
+                caption = envelope.caption or envelope.alt_text
+                if caption:
+                    segments.append({"type": "text", "data": {"text": caption[:512]}})
+            else:
+                segments.append({"type": "text", "data": {"text": envelope.fallback_text}})
         if text := (msg.content or "").strip():
             segments.append({"type": "text", "data": {"text": text}})
         if not segments:
@@ -475,6 +493,9 @@ class NapcatChannel(BaseChannel):
         path = Path(os.path.expanduser(ref)).resolve()
         if not path.is_file():
             logger.warning("napcat: local image not found: {}", path)
+            return None
+        if path.stat().st_size > self.config.max_image_bytes:
+            logger.warning("napcat: local image exceeds max_image_bytes: {}", path.name)
             return None
         data = await asyncio.to_thread(path.read_bytes)
         return {"type": "image", "data": {"file": "base64://" + base64.b64encode(data).decode()}}

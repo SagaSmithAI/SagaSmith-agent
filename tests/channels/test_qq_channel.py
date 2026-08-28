@@ -17,7 +17,7 @@ if not QQ_AVAILABLE:
 
 import aiohttp
 
-from nanobot.bus.events import OutboundMessage
+from nanobot.bus.events import HostMediaEnvelope, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.qq import QQChannel, QQConfig
 
@@ -157,6 +157,33 @@ async def test_send_c2c_message_uses_plain_text_c2c_api_with_msg_seq() -> None:
         "msg_seq": 2,
     }
     assert not channel._client.api.group_calls
+
+
+@pytest.mark.asyncio
+async def test_send_media_degrades_to_image_then_accessible_caption() -> None:
+    channel = QQChannel(QQConfig(app_id="app", secret="secret", allow_from=["*"]), MessageBus())
+    channel._client = _FakeClient()
+    channel._send_media = AsyncMock(return_value=True)
+
+    await channel.send(
+        OutboundMessage(
+            channel="qq",
+            chat_id="user123",
+            content="",
+            media_envelopes=[
+                HostMediaEnvelope(
+                    path="combat.png",
+                    caption="Round 3 positions",
+                    alt_text="A goblin stands north of the fighter.",
+                )
+            ],
+            metadata={"message_id": "msg1"},
+        )
+    )
+
+    channel._send_media.assert_awaited_once()
+    assert channel._client.api.c2c_calls[0]["content"] == "Round 3 positions"
+    assert channel.media_capabilities().atomic_caption is False
 
 
 @pytest.mark.asyncio

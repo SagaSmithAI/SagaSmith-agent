@@ -7,6 +7,8 @@ from collections.abc import Callable
 from copy import deepcopy
 from typing import Any, TypeVar
 
+from nanobot.bus.events import HostMediaEnvelope
+
 if typing.TYPE_CHECKING:
     from pydantic import BaseModel
 
@@ -206,6 +208,7 @@ class ToolResult(str):
     structured_content: Any
     audit_receipt: dict[str, Any] | None
     media: tuple[str, ...]
+    media_envelopes: tuple[HostMediaEnvelope, ...]
 
     def __new__(
         cls,
@@ -216,19 +219,36 @@ class ToolResult(str):
         structured_content: Any = None,
         audit_receipt: dict[str, Any] | None = None,
         media: list[str] | tuple[str, ...] | None = None,
+        media_envelopes: list[HostMediaEnvelope] | tuple[HostMediaEnvelope, ...] | None = None,
     ) -> ToolResult:
         obj = str.__new__(cls, content)
         obj.is_error = is_error
         obj.context_barrier = context_barrier
         obj.structured_content = deepcopy(structured_content)
         obj.audit_receipt = deepcopy(audit_receipt)
-        obj.media = tuple(
-            dict.fromkeys(
-                item.strip()
-                for item in (media or ())
-                if isinstance(item, str) and item.strip()
-            )
+        envelopes = list(media_envelopes or ())
+        envelope_paths = {item.path for item in envelopes}
+        envelopes.extend(
+            HostMediaEnvelope(path=item.strip())
+            for item in (media or ())
+            if isinstance(item, str) and item.strip() and item.strip() not in envelope_paths
         )
+        deduplicated: list[HostMediaEnvelope] = []
+        seen_checksums: set[str] = set()
+        seen_paths: set[str] = set()
+        for item in envelopes:
+            if not isinstance(item, HostMediaEnvelope) or not item.path:
+                continue
+            path_key = HostMediaEnvelope(path=item.path).dedup_key
+            checksum_key = item.dedup_key if item.checksum else None
+            if path_key in seen_paths or (checksum_key is not None and checksum_key in seen_checksums):
+                continue
+            seen_paths.add(path_key)
+            if checksum_key is not None:
+                seen_checksums.add(checksum_key)
+            deduplicated.append(item)
+        obj.media_envelopes = tuple(deduplicated)
+        obj.media = tuple(item.path for item in obj.media_envelopes)
         return obj
 
     @classmethod

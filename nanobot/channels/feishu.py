@@ -21,7 +21,7 @@ from rich.markup import escape
 from rich.panel import Panel
 from rich.text import Text
 
-from nanobot.bus.events import OutboundMessage
+from nanobot.bus.events import HostMediaCapabilities, OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
@@ -582,6 +582,13 @@ class FeishuChannel(BaseChannel):
 
     name = "feishu"
     display_name = "Feishu"
+    host_media_capabilities = HostMediaCapabilities(
+        atomic_caption=True,
+        native_alt_text=False,
+        native_card=True,
+        max_file_bytes=10 * 1024 * 1024,
+        max_caption_chars=1024,
+    )
 
     _STREAM_EDIT_INTERVAL = 0.5  # throttle between CardKit streaming updates
 
@@ -2094,22 +2101,87 @@ class FeishuChannel(BaseChannel):
                     # Fall back to regular send if reply fails
                 self._send_message_sync(receive_id_type, msg.chat_id, m_type, content)
 
-            for file_path in msg.media:
+            async def _do_media_send(m_type: str, content: str) -> bool:
+                """Keep an attachment failure from suppressing authoritative text."""
+                try:
+                    await loop.run_in_executor(None, _do_send, m_type, content)
+                    return True
+                except Exception:
+                    self.logger.exception("Failed to send Feishu media envelope")
+                    return False
+
+            for envelope in msg.host_media():
+                file_path = envelope.path
                 if not os.path.isfile(file_path):
                     self.logger.warning("Media file not found: {}", file_path)
+                    await _do_media_send(
+                        "text",
+                        json.dumps({"text": envelope.fallback_text}, ensure_ascii=False),
+                    )
+                    continue
+                try:
+                    file_size = os.path.getsize(file_path)
+                except OSError:
+                    file_size = -1
+                if file_size < 0 or file_size > 10 * 1024 * 1024:
+                    self.logger.warning("Media file exceeds Feishu channel limit: {}", file_path)
+                    await _do_media_send(
+                        "text",
+                        json.dumps({"text": envelope.fallback_text}, ensure_ascii=False),
+                    )
                     continue
                 ext = os.path.splitext(file_path)[1].lower()
                 if ext in self._IMAGE_EXTS:
-                    key = await loop.run_in_executor(None, self._upload_image_sync, file_path)
+                    try:
+                        key = await loop.run_in_executor(None, self._upload_image_sync, file_path)
+                    except Exception:
+                        self.logger.exception("Failed to upload Feishu image: {}", file_path)
+                        key = None
                     if key:
-                        await loop.run_in_executor(
-                            None,
-                            _do_send,
+                        caption = envelope.caption
+                        if envelope.alt_text and envelope.alt_text.casefold() not in caption.casefold():
+                            caption = (
+                                f"{caption}\n\nAlt: {envelope.alt_text}"
+                                if caption
+                                else envelope.alt_text
+                            )
+                        if caption:
+                            post = {
+                                "zh_cn": {
+                                    "content": [
+                                        [
+                                            {"tag": "img", "image_key": key},
+                                            {"tag": "text", "text": caption[:1024]},
+                                        ]
+                                    ]
+                                }
+                            }
+                            if not await _do_media_send(
+                                "post",
+                                json.dumps(post, ensure_ascii=False),
+                            ):
+                                await _do_media_send(
+                                    "text",
+                                    json.dumps(
+                                        {"text": envelope.fallback_text}, ensure_ascii=False
+                                    ),
+                                )
+                            continue
+                        await _do_media_send(
                             "image",
                             json.dumps({"image_key": key}, ensure_ascii=False),
                         )
+                    else:
+                        await _do_media_send(
+                            "text",
+                            json.dumps({"text": envelope.fallback_text}, ensure_ascii=False),
+                        )
                 else:
-                    key = await loop.run_in_executor(None, self._upload_file_sync, file_path)
+                    try:
+                        key = await loop.run_in_executor(None, self._upload_file_sync, file_path)
+                    except Exception:
+                        self.logger.exception("Failed to upload Feishu file: {}", file_path)
+                        key = None
                     if key:
                         # Feishu's OpenAPI names video messages "media".
                         # Use "audio" for audio, "media" for video, "file" for documents.
@@ -2120,11 +2192,14 @@ class FeishuChannel(BaseChannel):
                             media_type = "media"
                         else:
                             media_type = "file"
-                        await loop.run_in_executor(
-                            None,
-                            _do_send,
+                        await _do_media_send(
                             media_type,
                             json.dumps({"file_key": key}, ensure_ascii=False),
+                        )
+                    else:
+                        await _do_media_send(
+                            "text",
+                            json.dumps({"text": envelope.fallback_text}, ensure_ascii=False),
                         )
 
             if msg.content and msg.content.strip():

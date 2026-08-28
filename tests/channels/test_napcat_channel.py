@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from nanobot.bus.events import OutboundMessage
+from nanobot.bus.events import HostMediaEnvelope, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.napcat import NapcatChannel, NapcatConfig
 
@@ -81,6 +81,34 @@ async def test_send_encodes_local_combat_grid_for_group(tmp_path) -> None:
         {"type": "text", "data": {"text": "Combat updated."}},
     ]
     assert list(channel._bot_outbound_ids) == [7]
+
+
+@pytest.mark.asyncio
+async def test_send_keeps_image_and_caption_in_one_onebot_message(tmp_path) -> None:
+    image_path = tmp_path / "combat-grid.png"
+    image_path.write_bytes(b"grid-image")
+    channel = _channel()
+    channel._ws = _FakeWs()
+    channel._call_action = AsyncMock(return_value={"data": {"message_id": 8}})
+
+    await channel.send(
+        OutboundMessage(
+            channel="napcat",
+            chat_id="group:42",
+            content="",
+            media_envelopes=[
+                HostMediaEnvelope(
+                    path=str(image_path),
+                    caption="Round 3",
+                    audience_projection="party_public",
+                )
+            ],
+        )
+    )
+
+    params = channel._call_action.await_args.args[1]
+    assert [segment["type"] for segment in params["message"]] == ["image", "text"]
+    assert params["message"][1]["data"]["text"] == "Round 3"
 
 
 @pytest.mark.asyncio

@@ -8,7 +8,7 @@ from typing import Any
 
 from loguru import logger
 
-from nanobot.bus.events import InboundMessage, OutboundMessage
+from nanobot.bus.events import HostMediaCapabilities, InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.pairing import (
     PAIRING_CODE_META_KEY,
@@ -31,6 +31,11 @@ class BaseChannel(ABC):
     send_progress: bool = True
     send_tool_hints: bool = False
     show_reasoning: bool = True
+    host_media_capabilities = HostMediaCapabilities()
+
+    def media_capabilities(self) -> HostMediaCapabilities:
+        """Return predictable channel-native media behavior for host discovery."""
+        return self.host_media_capabilities
 
     def __init__(self, config: Any, bus: MessageBus):
         """

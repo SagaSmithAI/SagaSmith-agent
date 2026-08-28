@@ -17,7 +17,7 @@ from typing import Any
 import httpx
 from pydantic import Field, computed_field, field_validator
 
-from nanobot.bus.events import InboundMessage, OutboundMessage
+from nanobot.bus.events import HostMediaCapabilities, InboundMessage, OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
@@ -345,6 +345,13 @@ class SignalChannel(BaseChannel):
     _TYPING_REFRESH_SECONDS = 10.0
     _MAX_MESSAGE_LEN = 64_000  # signal-cli practical limit (protocol max ~64 KB)
     _HTTP_TIMEOUT_SECONDS = 60.0
+    _MAX_MEDIA_BYTES = 20 * 1024 * 1024
+    host_media_capabilities = HostMediaCapabilities(
+        atomic_caption=True,
+        native_alt_text=False,
+        max_file_bytes=_MAX_MEDIA_BYTES,
+        max_caption_chars=2048,
+    )
 
     @classmethod
     def default_config(cls) -> dict[str, Any]:
@@ -546,8 +553,33 @@ class SignalChannel(BaseChannel):
         """Send a message through Signal."""
         is_progress_message = isinstance(msg.event, ProgressEvent)
         try:
-            plain_text, text_styles = _markdown_to_signal(msg.content)
-            if not plain_text and not msg.media:
+            attachments: list[str] = []
+            media_text: list[str] = []
+            media_failures: list[str] = []
+            explicit_paths = {item.path for item in msg.media_envelopes}
+            for envelope in msg.host_media():
+                path = Path(envelope.path).expanduser()
+                try:
+                    allowed = (
+                        envelope.path not in explicit_paths
+                        or (path.is_file() and path.stat().st_size <= self._MAX_MEDIA_BYTES)
+                    )
+                except OSError:
+                    allowed = False
+                if allowed:
+                    # Preserve legacy attachment strings exactly.  signal-cli may
+                    # run in a different OS/container namespace than this host.
+                    attachments.append(str(path) if envelope.path in explicit_paths else envelope.path)
+                    caption = envelope.caption or envelope.alt_text
+                    if caption:
+                        media_text.append(caption[:2048])
+                else:
+                    media_failures.append(envelope.fallback_text)
+            combined_text = "\n\n".join(
+                part for part in [msg.content, *media_text, *media_failures] if part
+            )
+            plain_text, text_styles = _markdown_to_signal(combined_text)
+            if not plain_text and not attachments:
                 return
             recipient_params = self._recipient_params(msg.chat_id)
 
@@ -558,13 +590,28 @@ class SignalChannel(BaseChannel):
                 if chunk_styles[i]:
                     params["textStyle"] = chunk_styles[i]
                 params.update(recipient_params)
-                if msg.media and i == 0:
-                    params["attachments"] = msg.media
+                if attachments and i == 0:
+                    params["attachments"] = attachments
 
                 response = await self._send_request("send", params)
 
                 if "error" in response:
                     self.logger.error("Error sending Signal message: {}", response['error'])
+                    if attachments and i == 0:
+                        fallback_params: dict[str, Any] = {
+                            "message": "\n\n".join(
+                                part
+                                for part in [
+                                    chunk,
+                                    *(envelope.fallback_text for envelope in msg.host_media()),
+                                ]
+                                if part
+                            )
+                        }
+                        fallback_params.update(recipient_params)
+                        fallback_response = await self._send_request("send", fallback_params)
+                        if "error" not in fallback_response:
+                            continue
                     raise RuntimeError(f"signal-cli send failed: {response['error']}")
                 else:
                     self.logger.debug(

@@ -11,7 +11,7 @@ pytest.importorskip("mistune")
 from nio import RoomSendResponse, SyncError
 
 import nanobot.channels.matrix as matrix_module
-from nanobot.bus.events import OutboundMessage
+from nanobot.bus.events import HostMediaEnvelope, OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.matrix import (
@@ -1265,6 +1265,38 @@ async def test_send_uploads_media_and_sends_file_event(tmp_path) -> None:
     assert client.room_send_calls[0]["content"]["msgtype"] == "m.file"
     assert client.room_send_calls[0]["content"]["url"] == "mxc://example.org/uploaded"
     assert client.room_send_calls[1]["content"]["body"] == "Please review."
+
+
+@pytest.mark.asyncio
+async def test_send_uses_native_attachment_description_and_bounded_caption(tmp_path) -> None:
+    channel = MatrixChannel(_make_config(), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+    image = tmp_path / "combat.png"
+    image.write_bytes(b"png")
+
+    await channel.send(
+        OutboundMessage(
+            channel="matrix",
+            chat_id="!room:matrix.org",
+            content="Combat updated.",
+            media_envelopes=[
+                HostMediaEnvelope(
+                    path=str(image),
+                    caption="Round 3 positions",
+                    alt_text="A goblin stands north of the fighter.",
+                )
+            ],
+        )
+    )
+
+    assert client.room_send_calls[0]["content"]["body"] == (
+        "A goblin stands north of the fighter."
+    )
+    assert client.room_send_calls[1]["content"]["body"] == (
+        "Combat updated.\nRound 3 positions"
+    )
+    assert channel.media_capabilities().native_alt_text is True
 
 
 @pytest.mark.asyncio

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 import json
 import re
 import uuid
@@ -96,6 +97,7 @@ def store_generated_image_artifact(
         "prompt": prompt,
         "model": model,
         "provider": provider,
+        "checksum": hashlib.sha256(raw).hexdigest(),
         "source_images": list(source_images or []),
         "created_at": now.isoformat(),
     }

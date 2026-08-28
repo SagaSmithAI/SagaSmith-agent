@@ -41,7 +41,7 @@ from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.self import MyTool
 from nanobot.agent.turn_hooks import AgentTurnHookSpec, build_agent_turn_hook
-from nanobot.bus.events import InboundMessage, OutboundMessage
+from nanobot.bus.events import HostMediaEnvelope, InboundMessage, OutboundMessage
 from nanobot.bus.outbound_events import (
     RetryWaitEvent,
     StreamDeltaEvent,
@@ -147,7 +147,7 @@ class TurnContext:
     all_messages: list[dict[str, Any]] = field(default_factory=list)
     stop_reason: str = ""
     had_injections: bool = False
-    outbound_media: list[str] = field(default_factory=list)
+    outbound_media: list[HostMediaEnvelope] = field(default_factory=list)
 
     user_persisted_early: bool = False
     save_skip: int = 0
@@ -900,7 +900,7 @@ class AgentLoop:
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
         on_retry_wait: Callable[[str], Awaitable[None]] | None = None,
-        on_host_media: Callable[[list[str]], None | Awaitable[None]] | None = None,
+        on_host_media: Callable[[list[HostMediaEnvelope]], None | Awaitable[None]] | None = None,
         *,
         runtime: LLMRuntime,
         session: Session | None = None,
@@ -1740,7 +1740,7 @@ class AgentLoop:
         on_stream: Callable[[str], Awaitable[None]] | None,
         *,
         turn_latency_ms: int | None = None,
-        host_media: list[str] | None = None,
+        host_media: list[HostMediaEnvelope] | None = None,
     ) -> OutboundMessage | None:
         """Assemble the final outbound message from turn results."""
         message_tool = self.tools.get("message")
@@ -1752,17 +1752,31 @@ class AgentLoop:
                 not had_injections or stop_reason == "empty_final_response"
             )
 
-        outbound_media: list[str] = []
-        seen_media: set[str] = set()
-        for raw_path in host_media or ():
+        outbound_media: list[HostMediaEnvelope] = []
+        seen_checksums: set[str] = set()
+        seen_paths: set[str] = set()
+        for candidate in host_media or ():
+            envelope = (
+                candidate
+                if isinstance(candidate, HostMediaEnvelope)
+                else HostMediaEnvelope(path=str(candidate))
+            )
+            raw_path = envelope.path
             try:
                 key = str(Path(raw_path).expanduser().resolve(strict=False))
             except OSError:
                 key = raw_path
-            if key in delivered_media or key in seen_media:
+            checksum_key = envelope.dedup_key if envelope.checksum else None
+            if (
+                key in delivered_media
+                or key in seen_paths
+                or (checksum_key is not None and checksum_key in seen_checksums)
+            ):
                 continue
-            seen_media.add(key)
-            outbound_media.append(raw_path)
+            seen_paths.add(key)
+            if checksum_key is not None:
+                seen_checksums.add(checksum_key)
+            outbound_media.append(envelope)
 
         if suppress_final and not outbound_media:
             return None
@@ -1790,7 +1804,8 @@ class AgentLoop:
             channel=msg.channel,
             chat_id=msg.chat_id,
             content=outbound_content,
-            media=outbound_media,
+            media=[item.path for item in outbound_media],
+            media_envelopes=outbound_media,
             event=event,
             metadata=meta,
         )

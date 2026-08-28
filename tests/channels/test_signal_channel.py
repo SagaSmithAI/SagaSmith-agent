@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from nanobot.bus.events import InboundMessage, OutboundMessage
+from nanobot.bus.events import HostMediaEnvelope, InboundMessage, OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.signal import (
@@ -1328,6 +1328,31 @@ class TestSend:
         await ch.send(msg)
         params = client.posts[0]["json"]["params"]
         assert params.get("attachments") == ["/tmp/file.jpg"]
+
+    @pytest.mark.asyncio
+    async def test_send_keeps_attachment_and_accessible_caption_atomic(self, tmp_path):
+        ch, client = self._make_send_channel()
+        image = tmp_path / "combat.jpg"
+        image.write_bytes(b"jpg")
+        msg = OutboundMessage(
+            channel="signal",
+            chat_id="+19995550001",
+            content="Combat updated.",
+            media_envelopes=[
+                HostMediaEnvelope(
+                    path=str(image),
+                    caption="Round 3 positions",
+                    alt_text="A goblin stands north of the fighter.",
+                )
+            ],
+        )
+
+        await ch.send(msg)
+
+        params = client.posts[0]["json"]["params"]
+        assert params["attachments"] == [str(image)]
+        assert params["message"] == "Combat updated.\n\nRound 3 positions"
+        assert ch.media_capabilities().atomic_caption is True
 
     @pytest.mark.asyncio
     async def test_send_progress_message_does_not_stop_typing(self):
