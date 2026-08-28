@@ -8,6 +8,7 @@ from mcp import types
 from nanobot.agent.auth_context import AUTH_CONTEXT_DELEGATION_SCHEMA
 from nanobot.agent.tools.context import RequestContext, request_context
 from nanobot.agent.tools.mcp import MCPToolWrapper
+from nanobot.agent.tools.registry import ToolRegistry
 
 
 class CapturingSession:
@@ -23,6 +24,37 @@ class CapturingSession:
             structuredContent={"revision": 8},
             isError=False,
         )
+
+
+def test_trusted_operations_filter_model_catalog_without_mutating_stable_catalog() -> None:
+    session = CapturingSession()
+    registry = ToolRegistry()
+    for operation in ("campaign_query", "campaign_delete"):
+        registry.register(
+            MCPToolWrapper(
+                session,
+                "sagasmith-dnd-mcp",
+                types.Tool(
+                    name=operation,
+                    description=operation,
+                    inputSchema={"type": "object", "properties": {}},
+                ),
+            )
+        )
+    context = RequestContext(
+        channel="service",
+        chat_id="table-1",
+        allowed_operations=("campaign_query",),
+    )
+
+    with request_context(context):
+        assert registry.definition_names() == ["mcp_sagasmith-dnd-mcp_campaign_query"]
+        assert registry.prepare_call("mcp_sagasmith-dnd-mcp_campaign_delete", {})[2] is not None
+
+    assert sorted(registry.tool_names) == [
+        "mcp_sagasmith-dnd-mcp_campaign_delete",
+        "mcp_sagasmith-dnd-mcp_campaign_query",
+    ]
 
 
 @pytest.mark.asyncio

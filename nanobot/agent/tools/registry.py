@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections import ChainMap
 from typing import TYPE_CHECKING, Any
 
 from nanobot.agent.tools.base import Tool, ToolResult
@@ -36,6 +37,13 @@ class ToolRegistry:
         """Copy registrations so one session may mutate MCP tools independently."""
         cloned = ToolRegistry()
         cloned._tools = dict(self._tools)
+        return cloned
+
+    def live_clone(self) -> "ToolRegistry":
+        """Overlay transient tools while retaining live parent catalog updates."""
+
+        cloned = ToolRegistry()
+        cloned._tools = ChainMap({}, self._tools)  # type: ignore[assignment]
         return cloned
 
     def unregister(self, name: str) -> None:

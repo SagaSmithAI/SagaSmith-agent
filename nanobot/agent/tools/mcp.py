@@ -616,6 +616,15 @@ class _MCPWrapperBase(Tool):
     def set_reconnect_handler(self, reconnect: _ReconnectCallback) -> None:
         self._reconnect = reconnect
 
+    def is_available(self, context: Any | None) -> bool:
+        """Apply the trusted per-turn operation allowlist at model and call time."""
+
+        operations = tuple(getattr(context, "allowed_operations", ()) or ())
+        if not operations:
+            return True
+        operation = getattr(self, "_original_name", None)
+        return isinstance(operation, str) and operation in operations
+
     async def _refresh_session_after_termination(
         self,
         exc: BaseException,

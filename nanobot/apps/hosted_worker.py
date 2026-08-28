@@ -269,10 +269,11 @@ def create_worker_app(
             session_key,
             system_id=trusted.system_id,
         )
-        turn_tools = base_tools.clone()
+        turn_tools = base_tools.live_clone()
         allowed_operations = frozenset(trusted.allowed_operations)
         mcp_candidates = 0
         mcp_selected = 0
+        catalog_operations: set[str] = set()
         for tool_name in list(turn_tools.tool_names):
             tool = turn_tools.get(tool_name)
             if tool is None or not getattr(tool, "_server_name", None):
@@ -281,10 +282,22 @@ def create_worker_app(
                 continue
             mcp_candidates += 1
             operation = getattr(tool, "_original_name", None)
-            if operation not in allowed_operations:
-                turn_tools.unregister(tool_name)
-            else:
+            if isinstance(operation, str):
+                catalog_operations.add(operation)
+            if operation in allowed_operations:
                 mcp_selected += 1
+        unknown_operations = sorted(allowed_operations - catalog_operations)
+        if unknown_operations:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                "allowed_operations contains tool IDs absent from the authorized MCP catalog: "
+                + ", ".join(unknown_operations),
+            )
+        if mcp_selected == 0:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                "allowed_operations selected no model-visible MCP tools",
+            )
         record_mcp_catalog_selection(mcp_candidates, mcp_selected)
         structured_tool = None
         receipt_hook = ReceiptCaptureHook()

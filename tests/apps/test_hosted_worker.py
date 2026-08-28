@@ -73,12 +73,24 @@ class FakeRegistry:
         cloned.tools = dict(self.tools)
         return cloned
 
+    def live_clone(self):
+        return self.clone()
+
 
 class FakeLoop:
     def __init__(self) -> None:
         self.calls = []
         self._last_usage = {"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5}
         self.registry = FakeRegistry()
+        for operation in ("actor_query", "resolution"):
+            self.registry.register(
+                SimpleNamespace(
+                    name=f"mcp_dnd_{operation}",
+                    _server_name="sagasmith_dnd",
+                    _original_name=operation,
+                    _model_visible=True,
+                )
+            )
         self.structured_submission = None
         self.structured_tool_results = []
         self.auth_context_receipt = None
@@ -197,7 +209,9 @@ def test_hosted_worker_selects_only_authorized_mcp_operations_for_model() -> Non
     selected = loop.calls[0]["tools"]
     assert selected.has("builtin")
     assert selected.has("mcp_dnd_actor_query")
-    assert not selected.has("mcp_dnd_campaign_delete")
+    # The live catalog stays intact for legacy list_changed updates; request-context
+    # availability keeps the unselected operation out of model definitions and calls.
+    assert selected.has("mcp_dnd_campaign_delete")
     assert any(
         item["candidate_bucket"] == "1-7"
         and item["selected_bucket"] == "1-7"
@@ -217,6 +231,56 @@ def test_hosted_worker_rejects_untrusted_principal_shape() -> None:
             ),
         )
     assert response.status_code == 422
+
+
+def test_hosted_worker_rejects_web_policy_groups_instead_of_tool_ids() -> None:
+    loop = FakeLoop()
+    with TestClient(create_worker_app(loop, "test-model", service_token=TOKEN)) as client:
+        response = client.post(
+            "/v1/chat/completions",
+            headers={"Authorization": f"Bearer {TOKEN}"},
+            json=request_json(
+                trusted_context=trusted_context(
+                    allowed_operations=[
+                        "campaign.read",
+                        "mechanics.resolve",
+                        "campaign.write",
+                    ]
+                )
+            ),
+        )
+
+    assert response.status_code == 422
+    assert "absent from the authorized MCP catalog" in response.json()["detail"]
+
+
+def test_hosted_worker_accepts_web_envelope_with_exact_facade_tool_ids() -> None:
+    loop = FakeLoop()
+    loop.registry.register(
+        SimpleNamespace(
+            name="mcp_dnd_campaign_query",
+            _server_name="sagasmith_dnd",
+            _original_name="campaign_query",
+            _model_visible=True,
+        )
+    )
+    with TestClient(create_worker_app(loop, "test-model", service_token=TOKEN)) as client:
+        response = client.post(
+            "/v1/chat/completions",
+            headers={"Authorization": f"Bearer {TOKEN}"},
+            json=request_json(
+                trusted_context=trusted_context(
+                    allowed_operations=["actor_query", "campaign_query", "resolution"]
+                )
+            ),
+        )
+
+    assert response.status_code == 200
+    assert loop.calls[0]["trusted_metadata"]["allowed_operations"] == [
+        "actor_query",
+        "campaign_query",
+        "resolution",
+    ]
 
 
 def test_hosted_worker_rejects_missing_dedicated_service_credential() -> None:

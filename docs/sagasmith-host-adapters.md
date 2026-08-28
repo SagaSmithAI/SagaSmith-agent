@@ -113,6 +113,11 @@ revocation, campaign isolation, receipts, and dynamic tool-list changes.
 Set a unique `SAGASMITH_WORKER_SERVICE_TOKEN` (at least 32 bytes) for the Web-to-Agent audience.
 The completion request must carry `trusted_context` separately from the single player message.
 It includes `system_id`, so the worker connects only the matching `systemIds` MCP configuration.
+`allowed_operations` contains exact MCP tool IDs such as `campaign_query` or `resolution`, never
+Web policy groups such as `campaign.read`. Web derives that exact allowlist from system, phase,
+caller permissions and task. Agent rejects unknown IDs before invoking the model and also enforces
+the same list when tools are called. The per-turn live registry sees legacy catalog updates while
+keeping transient response tools out of the underlying session registry.
 The response contains `mcp_results` with standard text/image/audio/resource/embedded-resource
 blocks and `host_media` envelopes for Web artifact ingestion. Activity callbacks reuse one HTTP
 client; their token is scoped to Web and is never passed downstream.

@@ -59,6 +59,19 @@ def test_get_definitions_orders_builtins_then_mcp_tools() -> None:
     ]
 
 
+def test_live_clone_receives_parent_catalog_updates_without_leaking_transient_tools() -> None:
+    parent = _registry_with_names(["mcp_domain_query"])
+    turn = parent.live_clone()
+    turn.register(_FakeTool("submit_turn"))
+
+    parent.register(_FakeTool("mcp_domain_resolve"))
+
+    assert turn.has("mcp_domain_query")
+    assert turn.has("mcp_domain_resolve")
+    assert turn.has("submit_turn")
+    assert not parent.has("submit_turn")
+
+
 def test_prepare_call_rejects_near_miss_tool_name_with_suggestion() -> None:
     registry = ToolRegistry()
     registry.register(_FakeTool("read_file"))
