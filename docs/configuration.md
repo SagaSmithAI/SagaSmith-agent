@@ -2076,7 +2076,7 @@ The heartbeat job is backed by the same cron service as user-created reminders. 
 
 ## Subagent Concurrency
 
-By default, nanobot only allows one spawned subagent at a time. When the limit is reached, the `spawn` tool returns an error so the agent can decide to wait or rearrange its work. This protects local LLM servers from loading multiple KV caches at once. If your provider can handle more parallel work, raise the limit:
+By default, nanobot runs one spawned subagent at a time. Additional tasks wait for capacity instead of being rejected. This protects local LLM servers from loading multiple KV caches at once while letting the main agent submit an independent batch without retry loops. If your provider can handle more parallel work, raise the limit:
 
 ```json
 {
@@ -2102,7 +2102,7 @@ Subagents also stop immediately when one of their tools returns an execution err
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `agents.defaults.maxConcurrentSubagents` | `1` | Maximum number of spawned subagents that may run at the same time. Attempts to spawn beyond this limit return an error. |
+| `agents.defaults.maxConcurrentSubagents` | `1` | Maximum number of spawned subagents that may run at the same time. Additional tasks wait for capacity and remain cancelable. |
 | `agents.defaults.failOnToolError` | `true` | Stop a spawned subagent when a tool execution fails. Set to `false` to return tool errors to the subagent model so it can recover within the same run. |
 
 
