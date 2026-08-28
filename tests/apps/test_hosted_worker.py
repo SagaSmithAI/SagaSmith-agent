@@ -1,10 +1,51 @@
 from __future__ import annotations
 
+import asyncio
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
+import httpx
+import pytest
 from fastapi.testclient import TestClient
 
+from nanobot.agent.mcp_observability import record_mcp_event
+from nanobot.agent.tools.base import ToolResult
 from nanobot.apps.hosted_worker import create_worker_app
+from nanobot.bus.events import HostMediaEnvelope
+
+TOKEN = "hosted-worker-test-token-at-least-32-bytes"
+
+
+def trusted_context(**overrides):
+    value = {
+        "caller_principal": "workload:web:room-worker",
+        "workload_identity": "spiffe://sagasmith/web/room-worker",
+        "requester_principal": "discord:user:account-id",
+        "resource_owner_principal": "discord:user:owner",
+        "acting_host_principal": "campaign:gm",
+        "acting_character_id": "hero",
+        "authorized_audience": "player",
+        "allowed_operations": ["actor_query", "resolution"],
+        "room_turn_id": "turn-1",
+        "campaign_id": "campaign",
+        "system_id": "dnd5e",
+        "base_revision": 3,
+        "expires_at": (datetime.now(UTC) + timedelta(minutes=5)).isoformat(),
+        "idempotency_key": "turn-1:operation-1",
+        "conversation_principal": "discord:group:table-1",
+    }
+    value.update(overrides)
+    return value
+
+
+def request_json(**overrides):
+    value = {
+        "messages": [{"role": "user", "content": "hello"}],
+        "session_id": "campaign:user:conversation",
+        "trusted_context": trusted_context(),
+    }
+    value.update(overrides)
+    return value
 
 
 class FakeRegistry:
@@ -23,6 +64,11 @@ class FakeRegistry:
     def get(self, name: str):
         return self.tools.get(name)
 
+    def clone(self):
+        cloned = FakeRegistry()
+        cloned.tools = dict(self.tools)
+        return cloned
+
 
 class FakeLoop:
     def __init__(self) -> None:
@@ -39,7 +85,8 @@ class FakeLoop:
     async def close_mcp(self) -> None:
         return None
 
-    async def _tools_for_session(self, _session_key: str):
+    async def _tools_for_session(self, _session_key: str, *, system_id: str | None = None):
+        self.selected_system = system_id
         return self.registry
 
     async def process_direct(self, **arguments):
@@ -61,60 +108,92 @@ class FakeLoop:
                             if index == len(self.structured_tool_results) - 1
                             else None
                         ),
+                        mcp_result={"content": [{"type": "text", "text": "ok"}]},
+                        media_envelopes=(),
                     ),
                 )
-        return SimpleNamespace(content="ok")
+        return SimpleNamespace(
+            content="ok",
+            metadata={"_agent_usage": self._last_usage},
+        )
+
+
+def test_hosted_worker_exports_only_low_cardinality_mcp_metrics() -> None:
+    record_mcp_event("tool", "ok", transport="http", protocol="2026-07-28")
+    app = create_worker_app(FakeLoop(), "test-model", service_token=TOKEN)
+
+    with TestClient(app) as client:
+        response = client.get("/metrics/mcp")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["schema"] == "sagasmith.host-mcp-metrics/v1"
+    counter = next(
+        item
+        for item in body["counters"]
+        if item["phase"] == "tool"
+        and item["outcome"] == "ok"
+        and item["transport"] == "http"
+        and item["protocol"] == "2026-07-28"
+    )
+    assert counter["count"] >= 1
+    assert set(counter) == {"phase", "outcome", "transport", "protocol", "count"}
 
 
 def test_hosted_worker_injects_authenticated_principal_as_sender() -> None:
     loop = FakeLoop()
-    with TestClient(create_worker_app(loop, "test-model")) as client:
+    with TestClient(create_worker_app(loop, "test-model", service_token=TOKEN)) as client:
         response = client.post(
             "/v1/chat/completions",
-            json={
-                "messages": [{"role": "user", "content": "hello"}],
-                "session_id": "campaign:user:conversation",
-                "principal_id": "user:account-id",
-            },
+            headers={"Authorization": f"Bearer {TOKEN}"},
+            json=request_json(),
         )
     assert response.status_code == 200
-    assert loop.calls[0]["channel"] == "user"
-    assert loop.calls[0]["sender_id"] == "account-id"
-    assert loop.calls[0]["actor_principal"] == "user:account-id"
-    assert loop.calls[0]["conversation_principal"] == (
-        "service:session:campaign:user:conversation"
-    )
+    assert loop.calls[0]["channel"] == "service"
+    assert loop.calls[0]["sender_id"] == "discord:user:account-id"
+    assert loop.calls[0]["actor_principal"] == "discord:user:account-id"
+    assert loop.calls[0]["conversation_principal"] == "discord:group:table-1"
+    assert loop.calls[0]["trusted_metadata"]["room_turn_id"] == "turn-1"
+    assert loop.selected_system == "dnd5e"
     assert response.json()["usage"]["total_tokens"] == 5
 
 
 def test_hosted_worker_rejects_untrusted_principal_shape() -> None:
     loop = FakeLoop()
-    with TestClient(create_worker_app(loop, "test-model")) as client:
+    with TestClient(create_worker_app(loop, "test-model", service_token=TOKEN)) as client:
         response = client.post(
             "/v1/chat/completions",
-            json={
-                "messages": [{"role": "user", "content": "hello"}],
-                "session_id": "conversation",
-                "principal_id": "service:spoofed",
-            },
+            headers={"Authorization": f"Bearer {TOKEN}"},
+            json=request_json(
+                trusted_context=trusted_context(allowed_operations=["*"])
+            ),
         )
     assert response.status_code == 422
 
 
+def test_hosted_worker_rejects_missing_dedicated_service_credential() -> None:
+    loop = FakeLoop()
+    with TestClient(create_worker_app(loop, "test-model", service_token=TOKEN)) as client:
+        response = client.post("/v1/chat/completions", json=request_json())
+    assert response.status_code == 401
+
+
 def test_hosted_worker_injects_agent_identity_principal() -> None:
     loop = FakeLoop()
-    with TestClient(create_worker_app(loop, "test-model")) as client:
+    with TestClient(create_worker_app(loop, "test-model", service_token=TOKEN)) as client:
         response = client.post(
             "/v1/chat/completions",
-            json={
-                "messages": [{"role": "user", "content": "host this scene"}],
-                "session_id": "campaign:agent:identity:conversation",
-                "principal_id": "agent:identity-id",
-            },
+            headers={"Authorization": f"Bearer {TOKEN}"},
+            json=request_json(
+                messages=[{"role": "user", "content": "host this scene"}],
+                trusted_context=trusted_context(
+                    requester_principal="service:agent:identity-id"
+                ),
+            ),
         )
     assert response.status_code == 200
-    assert loop.calls[0]["channel"] == "agent"
-    assert loop.calls[0]["sender_id"] == "identity-id"
+    assert loop.calls[0]["channel"] == "service"
+    assert loop.calls[0]["sender_id"] == "service:agent:identity-id"
 
 
 def test_hosted_worker_captures_auth_receipt_without_response_contract() -> None:
@@ -128,14 +207,11 @@ def test_hosted_worker_captures_auth_receipt_without_response_contract() -> None
         "revision": 3,
     }
     loop.structured_tool_results = [None]
-    with TestClient(create_worker_app(loop, "test-model")) as client:
+    with TestClient(create_worker_app(loop, "test-model", service_token=TOKEN)) as client:
         response = client.post(
             "/v1/chat/completions",
-            json={
-                "messages": [{"role": "user", "content": "query actors"}],
-                "session_id": "campaign:user:conversation",
-                "principal_id": "user:account-id",
-            },
+            headers={"Authorization": f"Bearer {TOKEN}"},
+            json=request_json(messages=[{"role": "user", "content": "query actors"}]),
         )
 
     assert response.status_code == 200, response.text
@@ -184,19 +260,18 @@ def test_hosted_worker_captures_receipts_and_removes_structured_output_tool() ->
         {"private": "raw MCP receipt"},
         presentation,
     ]
-    with TestClient(create_worker_app(loop, "test-model")) as client:
+    with TestClient(create_worker_app(loop, "test-model", service_token=TOKEN)) as client:
         response = client.post(
             "/v1/chat/completions",
-            json={
-                "messages": [{"role": "user", "content": "host this turn"}],
-                "session_id": "campaign:user:conversation",
-                "principal_id": "user:account-id",
-                "response_contract": {
+            headers={"Authorization": f"Bearer {TOKEN}"},
+            json=request_json(
+                messages=[{"role": "user", "content": "host this turn"}],
+                response_contract={
                     "name": "submit_room_turn",
                     "description": "Submit.",
                     "parameters": {"type": "object"},
                 },
-            },
+            ),
         )
 
     assert response.status_code == 200, response.text
@@ -209,3 +284,82 @@ def test_hosted_worker_captures_receipts_and_removes_structured_output_tool() ->
         }
     ]
     assert loop.registry.get("submit_room_turn") is None
+
+
+@pytest.mark.asyncio
+async def test_hosted_worker_allows_independent_sessions_to_run_concurrently() -> None:
+    class ConcurrentLoop(FakeLoop):
+        def __init__(self) -> None:
+            super().__init__()
+            self.active = 0
+            self.maximum_active = 0
+
+        async def process_direct(self, **arguments):
+            self.active += 1
+            self.maximum_active = max(self.maximum_active, self.active)
+            await asyncio.sleep(0.02)
+            self.active -= 1
+            return SimpleNamespace(content="ok", metadata={"_agent_usage": {}})
+
+    loop = ConcurrentLoop()
+    app = create_worker_app(loop, "test-model", service_token=TOKEN)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://worker.test",
+    ) as client:
+        first, second = await asyncio.gather(
+            client.post(
+                "/v1/chat/completions",
+                headers={"Authorization": f"Bearer {TOKEN}"},
+                json=request_json(session_id="session-a"),
+            ),
+            client.post(
+                "/v1/chat/completions",
+                headers={"Authorization": f"Bearer {TOKEN}"},
+                json=request_json(session_id="session-b"),
+            ),
+        )
+    assert first.status_code == second.status_code == 200
+    assert loop.maximum_active == 2
+
+
+def test_hosted_worker_returns_standard_mcp_result_and_media_envelope() -> None:
+    class MediaLoop(FakeLoop):
+        async def process_direct(self, **arguments):
+            result = ToolResult(
+                "grid",
+                mcp_result={
+                    "content": [
+                        {"type": "image", "data": "aW1hZ2U=", "mimeType": "image/png"}
+                    ],
+                    "isError": False,
+                },
+                media_envelopes=[
+                    HostMediaEnvelope(
+                        path="D:/worker/artifacts/grid.png",
+                        mime_type="image/png",
+                        attachment_role="combat_grid",
+                        audience_projection="party_public",
+                    )
+                ],
+            )
+            for hook in arguments["hooks"]:
+                await hook.after_execute_tool(
+                    None,
+                    SimpleNamespace(name="mcp_dnd_render_grid"),
+                    None,
+                    None,
+                    result,
+                )
+            return SimpleNamespace(content="ok", metadata={"_agent_usage": {}})
+
+    loop = MediaLoop()
+    with TestClient(create_worker_app(loop, "test-model", service_token=TOKEN)) as client:
+        response = client.post(
+            "/v1/chat/completions",
+            headers={"Authorization": f"Bearer {TOKEN}"},
+            json=request_json(),
+        )
+    payload = response.json()
+    assert payload["mcp_results"][0]["result"]["content"][0]["type"] == "image"
+    assert payload["host_media"][0]["attachment_role"] == "combat_grid"

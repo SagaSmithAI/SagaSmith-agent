@@ -21,7 +21,13 @@ _MIME_EXTENSIONS = {
     "image/jpeg": ".jpg",
     "image/webp": ".webp",
     "image/gif": ".gif",
+    "audio/mpeg": ".mp3",
+    "audio/mp4": ".m4a",
+    "audio/ogg": ".ogg",
+    "audio/wav": ".wav",
+    "audio/webm": ".webm",
 }
+_MAX_MCP_MEDIA_BYTES = 32 * 1024 * 1024
 
 class ArtifactError(ValueError):
     """Raised when an artifact cannot be safely decoded or stored."""
@@ -99,6 +105,54 @@ def store_generated_image_artifact(
         "provider": provider,
         "checksum": hashlib.sha256(raw).hexdigest(),
         "source_images": list(source_images or []),
+        "created_at": now.isoformat(),
+    }
+    metadata_path.write_text(
+        json.dumps(metadata, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return metadata
+
+
+def store_mcp_media_artifact(
+    encoded: str,
+    *,
+    mime: str,
+    provider: str,
+    save_dir: str = "mcp",
+    created_at: datetime | None = None,
+) -> dict[str, Any]:
+    """Persist a bounded standard MCP image/audio block as a Host artifact."""
+
+    normalized_mime = str(mime or "").strip().casefold()
+    ext = _MIME_EXTENSIONS.get(normalized_mime)
+    if ext is None:
+        raise ArtifactError(f"unsupported MCP media MIME type: {normalized_mime or '(empty)'}")
+    try:
+        raw = base64.b64decode(encoded, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ArtifactError("invalid base64 MCP media payload") from exc
+    if not raw or len(raw) > _MAX_MCP_MEDIA_BYTES:
+        raise ArtifactError("MCP media payload is empty or exceeds 32 MiB")
+    if normalized_mime.startswith("image/"):
+        detected = detect_image_mime(raw)
+        if detected is None:
+            raise ArtifactError("unrecognized MCP image data")
+        normalized_mime = detected
+        ext = _MIME_EXTENSIONS[detected]
+
+    now = created_at or datetime.now().astimezone()
+    day_dir = ensure_dir(_artifact_root(save_dir) / now.strftime("%Y-%m-%d"))
+    artifact_id = f"mcp_{uuid.uuid4().hex[:12]}"
+    media_path = day_dir / f"{artifact_id}{ext}"
+    metadata_path = day_dir / f"{artifact_id}.json"
+    media_path.write_bytes(raw)
+    metadata = {
+        "id": artifact_id,
+        "path": str(media_path),
+        "mime": normalized_mime,
+        "provider": provider,
+        "checksum": hashlib.sha256(raw).hexdigest(),
         "created_at": now.isoformat(),
     }
     metadata_path.write_text(

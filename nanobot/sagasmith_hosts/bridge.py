@@ -11,12 +11,10 @@ from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import Any
 
-import httpx
-from mcp import ClientSession, StdioServerParameters, types
-from mcp.client.stdio import stdio_client
+import httpx2
+from mcp import Client, StdioServerParameters, types
 from mcp.client.streamable_http import streamable_http_client
 from mcp.server import NotificationOptions, Server
-from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.stdio import stdio_server
 
 from nanobot.agent.auth_context import AUTH_CONTEXT_META_KEY, sign_auth_context
@@ -77,8 +75,8 @@ def _first_text(value: Any, field: str) -> str:
 
 
 def _result_payload(result: types.CallToolResult) -> Mapping[str, Any]:
-    if isinstance(result.structuredContent, Mapping):
-        return result.structuredContent
+    if isinstance(result.structured_content, Mapping):
+        return result.structured_content
     for block in result.content:
         if not isinstance(block, types.TextContent):
             continue
@@ -119,40 +117,25 @@ class AuthBridge:
         self.server_config = dict(server_config)
         self.context = context
         self.secret = secret
-        self.downstream: ClientSession | None = None
+        self.downstream: Client | None = None
         self.tool_definitions: dict[str, types.Tool] = {}
         self.authorization_epoch = 0
-        self._upstream_sessions: dict[int, Any] = {}
         self._refresh_pending: set[str] = set()
         self._refresh_lock = asyncio.Lock()
         self.server = Server(
             "sagasmith-auth-bridge",
-            version="1",
+            version="2",
             instructions=(
                 "SagaSmith identity is injected by the trusted bridge. "
                 "Caller-supplied principal fields are ignored."
             ),
+            on_list_tools=self._handle_list_tools,
+            on_call_tool=self._handle_call_tool,
+            on_list_resources=self._handle_list_resources,
+            on_read_resource=self._handle_read_resource,
+            on_list_prompts=self._handle_list_prompts,
+            on_get_prompt=self._handle_get_prompt,
         )
-        self._register_handlers()
-
-    def _remember_upstream(self) -> None:
-        session = self.server.request_context.session
-        self._upstream_sessions[id(session)] = session
-
-    async def _notify_upstream(self, kind: str) -> None:
-        stale: list[int] = []
-        for key, session in self._upstream_sessions.items():
-            try:
-                if kind == "tools":
-                    await session.send_tool_list_changed()
-                elif kind == "resources":
-                    await session.send_resource_list_changed()
-                elif kind == "prompts":
-                    await session.send_prompt_list_changed()
-            except Exception:
-                stale.append(key)
-        for key in stale:
-            self._upstream_sessions.pop(key, None)
 
     async def _server_message(self, message: Any) -> None:
         payload = getattr(message, "root", message)
@@ -165,9 +148,6 @@ class AuthBridge:
         if kind is None:
             return
         self._refresh_pending.add(kind)
-        # A notification can arrive outside a tool call. Forward it immediately;
-        # the next list request remains authoritative and refreshes the cache.
-        await self._notify_upstream(kind)
 
     async def _list_tools(self) -> list[types.Tool]:
         if self.downstream is None:
@@ -180,7 +160,7 @@ class AuthBridge:
 
     @staticmethod
     def _principal_argument(tool: types.Tool) -> str | None:
-        properties = tool.inputSchema.get("properties", {})
+        properties = tool.input_schema.get("properties", {})
         if not isinstance(properties, Mapping):
             return None
         for name in ("auth_principal_id", "by_principal_id", "principal_id"):
@@ -237,65 +217,59 @@ class AuthBridge:
             await self._list_tools()
         return result
 
-    def _register_handlers(self) -> None:
-        @self.server.list_tools()
-        async def list_tools() -> list[types.Tool]:
-            self._remember_upstream()
-            return await self._list_tools()
+    async def _handle_list_tools(
+        self,
+        _context: Any,
+        _params: types.PaginatedRequestParams | None,
+    ) -> types.ListToolsResult:
+        return types.ListToolsResult(
+            tools=sorted(await self._list_tools(), key=lambda tool: tool.name),
+            ttlMs=5_000,
+            cacheScope="private",
+        )
 
-        @self.server.call_tool(validate_input=True)
-        async def call_tool(name: str, arguments: dict[str, Any]) -> types.CallToolResult:
-            self._remember_upstream()
-            return await self._call_tool(name, arguments)
+    async def _handle_call_tool(
+        self,
+        _context: Any,
+        params: types.CallToolRequestParams,
+    ) -> types.CallToolResult:
+        return await self._call_tool(params.name, params.arguments or {})
 
-        @self.server.list_resources()
-        async def list_resources() -> types.ListResourcesResult:
-            self._remember_upstream()
-            if self.downstream is None:
-                raise RuntimeError("downstream MCP session is unavailable")
-            return await self.downstream.list_resources()
+    async def _handle_list_resources(
+        self,
+        _context: Any,
+        _params: types.PaginatedRequestParams | None,
+    ) -> types.ListResourcesResult:
+        if self.downstream is None:
+            raise RuntimeError("downstream MCP session is unavailable")
+        return await self.downstream.list_resources()
 
-        @self.server.read_resource()
-        async def read_resource(uri: Any) -> list[ReadResourceContents]:
-            self._remember_upstream()
-            if self.downstream is None:
-                raise RuntimeError("downstream MCP session is unavailable")
-            result = await self.downstream.read_resource(uri)
-            contents: list[ReadResourceContents] = []
-            for item in result.contents:
-                if isinstance(item, types.TextResourceContents):
-                    contents.append(
-                        ReadResourceContents(
-                            content=item.text,
-                            mime_type=item.mimeType,
-                            meta=item.meta,
-                        )
-                    )
-                elif isinstance(item, types.BlobResourceContents):
-                    contents.append(
-                        ReadResourceContents(
-                            content=item.blob.encode("ascii"),
-                            mime_type=item.mimeType,
-                            meta=item.meta,
-                        )
-                    )
-            return contents
+    async def _handle_read_resource(
+        self,
+        _context: Any,
+        params: types.ReadResourceRequestParams,
+    ) -> types.ReadResourceResult:
+        if self.downstream is None:
+            raise RuntimeError("downstream MCP session is unavailable")
+        return await self.downstream.read_resource(params.uri)
 
-        @self.server.list_prompts()
-        async def list_prompts() -> types.ListPromptsResult:
-            self._remember_upstream()
-            if self.downstream is None:
-                raise RuntimeError("downstream MCP session is unavailable")
-            return await self.downstream.list_prompts()
+    async def _handle_list_prompts(
+        self,
+        _context: Any,
+        _params: types.PaginatedRequestParams | None,
+    ) -> types.ListPromptsResult:
+        if self.downstream is None:
+            raise RuntimeError("downstream MCP session is unavailable")
+        return await self.downstream.list_prompts()
 
-        @self.server.get_prompt()
-        async def get_prompt(
-            name: str, arguments: dict[str, str] | None
-        ) -> types.GetPromptResult:
-            self._remember_upstream()
-            if self.downstream is None:
-                raise RuntimeError("downstream MCP session is unavailable")
-            return await self.downstream.get_prompt(name, arguments)
+    async def _handle_get_prompt(
+        self,
+        _context: Any,
+        params: types.GetPromptRequestParams,
+    ) -> types.GetPromptResult:
+        if self.downstream is None:
+            raise RuntimeError("downstream MCP session is unavailable")
+        return await self.downstream.get_prompt(params.name, params.arguments)
 
     async def _connect(self, stack: AsyncExitStack) -> None:
         transport = str(self.server_config.get("type") or "").casefold()
@@ -316,7 +290,7 @@ class AuthBridge:
                 cwd=str(self.server_config.get("cwd") or "") or None,
                 env=environment,
             )
-            read, write = await stack.enter_async_context(stdio_client(params))
+            client_transport: Any = params
         elif transport in {"streamablehttp", "streamable-http", "http"}:
             url = str(self.server_config.get("url") or "").strip()
             if not url:
@@ -325,20 +299,19 @@ class AuthBridge:
             if not isinstance(headers, Mapping):
                 raise ValueError("downstream MCP headers must be an object")
             client = await stack.enter_async_context(
-                httpx.AsyncClient(
+                httpx2.AsyncClient(
                     headers={str(key): str(value) for key, value in headers.items()},
-                    timeout=httpx.Timeout(900, connect=10),
+                    follow_redirects=False,
+                    timeout=httpx2.Timeout(900, connect=10),
                 )
             )
-            read, write, _ = await stack.enter_async_context(
-                streamable_http_client(url, http_client=client)
-            )
+            client_transport = streamable_http_client(url, http_client=client)
         else:
             raise ValueError(f"unsupported downstream MCP transport: {transport}")
+        mode = str(self.server_config.get("protocolMode") or "legacy")
         self.downstream = await stack.enter_async_context(
-            ClientSession(read, write, message_handler=self._server_message)
+            Client(client_transport, mode=mode, message_handler=self._server_message)
         )
-        await self.downstream.initialize()
         await self._list_tools()
 
     async def run(self) -> None:

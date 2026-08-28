@@ -23,6 +23,17 @@ SagaSmith Agent owns trusted channel identity, the multi-turn agent loop, worksp
 
 It does **not** write D&D/CoC databases directly, reimplement rules/combat/module parsing, infer permission from display names, or bypass a matching MCP workflow with a CLI or temporary script.
 
+## MCP 2026-07-28 and the Hosted boundary
+
+Python SDK v2 `protocolMode: "auto"` supports both legacy initialize and MCP 2026-07-28
+discover. The modern path sends no `Mcp-Session-Id`. Every call carries a short-lived
+`sagasmith.auth-context/v2` delegation bound to the target MCP, workload, requester, resource
+owner, acting Host/character, audience, concrete operations, `room_turn_id`, and `base_revision`.
+Hosted Worker requires a dedicated `SAGASMITH_WORKER_SERVICE_TOKEN`, keeps trusted context
+structurally separate from player text, and connects only the MCP for the current `system_id`.
+Standard MCP text/image/audio/resource/embedded-resource results are retained while `host_media`
+envelopes feed the Web artifact pipeline.
+
 ## D&D: the MCP-first path
 
 The D&D MCP in [sagasmith-dnd](https://github.com/SagaSmithAI/sagasmith-dnd) owns campaigns, rules, modules, characters, knowledge, branches, snapshots, and combat. Every chat session opens its own server-side exposure. The server filters the native tool list by current session, principal, campaign, and phase; the Agent selects only the exact tools needed for the current task.

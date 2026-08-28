@@ -2,6 +2,7 @@
 
 import asyncio
 import hashlib
+import importlib
 import json
 import os
 import re
@@ -10,16 +11,19 @@ import shutil
 import urllib.parse
 from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack, suppress
+from datetime import datetime
 from typing import Any, Mapping, Protocol
 from weakref import WeakKeyDictionary
 
 import httpx
+import httpx2
 from loguru import logger
 
 from nanobot.agent.auth_context import (
     AUTH_CONTEXT_META_KEY,
     AUTH_CONTEXT_RECEIPT_META_KEY,
     sign_auth_context,
+    sign_delegated_auth_context,
 )
 from nanobot.agent.domain_context import (
     DomainContextBinding,
@@ -27,6 +31,7 @@ from nanobot.agent.domain_context import (
     binding_from_metadata,
     principal_fingerprint,
 )
+from nanobot.agent.mcp_observability import record_mcp_event
 from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tools.context import current_request_context
 from nanobot.agent.tools.registry import ToolRegistry
@@ -77,6 +82,41 @@ _PostCallSyncCallback = Callable[
 ]
 _MCP_CONTEXT_TOOL_LIMIT = 48
 _MCP_EXPOSURE_REFRESH_TIMEOUT_SECONDS = 1.0
+
+
+def _mcp_field(value: Any, snake_name: str, camel_name: str, default: Any = None) -> Any:
+    """Read SDK v2 snake_case fields and legacy/test-double camelCase fields."""
+
+    if hasattr(value, snake_name):
+        return getattr(value, snake_name)
+    return getattr(value, camel_name, default)
+
+
+def _serialize_call_tool_result(result: Any) -> dict[str, Any]:
+    """Preserve the standard MCP result envelope at the Host boundary."""
+
+    dump = getattr(result, "model_dump", None)
+    if callable(dump):
+        return dump(mode="json", by_alias=True, exclude_none=True)
+    content = []
+    for block in getattr(result, "content", ()):
+        block_dump = getattr(block, "model_dump", None)
+        if callable(block_dump):
+            content.append(block_dump(mode="json", by_alias=True, exclude_none=True))
+        elif isinstance(block, Mapping):
+            content.append(dict(block))
+        else:
+            content.append({"type": "text", "text": str(block)})
+    payload: dict[str, Any] = {"content": content}
+    structured = _mcp_field(result, "structured_content", "structuredContent")
+    if structured is not None:
+        payload["structuredContent"] = structured
+    if _mcp_field(result, "is_error", "isError", False):
+        payload["isError"] = True
+    metadata = _mcp_field(result, "meta", "_meta")
+    if isinstance(metadata, Mapping):
+        payload["_meta"] = dict(metadata)
+    return payload
 
 
 def _first_string_field(value: Any, names: frozenset[str]) -> str | None:
@@ -305,6 +345,16 @@ def _is_session_terminated(exc: BaseException) -> bool:
     )
 
 
+def _mcp_error_details(exc: BaseException) -> tuple[int | str, str]:
+    error = getattr(exc, "error", None)
+    code = getattr(exc, "code", None)
+    message = getattr(exc, "message", None)
+    if error is not None:
+        code = getattr(error, "code", code)
+        message = getattr(error, "message", message)
+    return code if code is not None else "unknown", str(message or exc)
+
+
 async def _probe_http_url(url: str, timeout: float = 3.0) -> bool:
     """Quick TCP probe to check if an HTTP MCP server is reachable.
 
@@ -412,6 +462,30 @@ async def _validate_mcp_redirect_response(response: httpx.Response) -> None:
     if not ok:
         raise httpx.RequestError(
             f"Blocked unsafe MCP redirect {_redact_url(target)} ({error})",
+            request=response.request,
+        )
+
+
+async def _validate_mcp2_request_url(request: httpx2.Request) -> None:
+    """Apply the same per-request SSRF policy to the MCP v2 HTTP stack."""
+
+    ok, error = validate_url_target(str(request.url))
+    if not ok:
+        raise httpx2.RequestError(
+            f"Blocked unsafe MCP URL {_redact_url(str(request.url))} ({error})",
+            request=request,
+        )
+
+
+async def _reject_mcp2_redirect_response(response: httpx2.Response) -> None:
+    """Reject redirects so a validated MCP origin cannot redirect to a private target."""
+
+    location = response.headers.get("location")
+    if location and 300 <= response.status_code < 400:
+        target = str(response.request.url.join(location))
+        await response.aclose()
+        raise httpx2.RequestError(
+            f"MCP redirects are disabled; refused {_redact_url(target)}",
             request=response.request,
         )
 
@@ -580,7 +654,7 @@ def _image_block_data_url(block: Any, types: Any) -> str | None:
     """
     image_cls = getattr(types, "ImageContent", None)
     if image_cls is not None and isinstance(block, image_cls):
-        mime = getattr(block, "mimeType", None) or "image/png"
+        mime = _mcp_field(block, "mime_type", "mimeType", "image/png")
         return f"data:{mime};base64,{block.data}"
 
     embedded_cls = getattr(types, "EmbeddedResource", None)
@@ -588,9 +662,28 @@ def _image_block_data_url(block: Any, types: Any) -> str | None:
     if embedded_cls is not None and isinstance(block, embedded_cls):
         resource = getattr(block, "resource", None)
         if blob_cls is not None and isinstance(resource, blob_cls):
-            mime = getattr(resource, "mimeType", None) or ""
+            mime = _mcp_field(resource, "mime_type", "mimeType", "")
             if isinstance(mime, str) and mime.startswith("image/"):
                 return f"data:{mime};base64,{resource.blob}"
+    return None
+
+
+def _media_block_payload(block: Any, types: Any) -> tuple[str, str] | None:
+    """Return base64 data and MIME type for standard MCP image/audio blocks."""
+
+    for class_name, fallback in (("ImageContent", "image/png"), ("AudioContent", "audio/mpeg")):
+        content_cls = getattr(types, class_name, None)
+        if content_cls is not None and isinstance(block, content_cls):
+            mime = str(_mcp_field(block, "mime_type", "mimeType", fallback) or fallback)
+            return str(block.data), mime
+    embedded_cls = getattr(types, "EmbeddedResource", None)
+    blob_cls = getattr(types, "BlobResourceContents", None)
+    if embedded_cls is not None and isinstance(block, embedded_cls):
+        resource = getattr(block, "resource", None)
+        if blob_cls is not None and isinstance(resource, blob_cls):
+            mime = str(_mcp_field(resource, "mime_type", "mimeType", "") or "")
+            if mime.startswith(("image/", "audio/")):
+                return str(resource.blob), mime
     return None
 
 
@@ -640,11 +733,16 @@ def _host_media_envelope(
     audience = str(metadata.get("audience_projection") or "") or None
     attachment_role = str(metadata.get("attachment_role") or "")
     if not attachment_role:
-        attachment_role = "combat_grid" if audience else "image"
+        artifact_mime = str(artifact.get("mime") or metadata.get("mime_type") or "")
+        attachment_role = (
+            "audio" if artifact_mime.startswith("audio/") else "combat_grid" if audience else "image"
+        )
     fallback = str(metadata.get("fallback_text") or alt_text or caption or "")
     return HostMediaEnvelope(
         path=str(artifact.get("path") or ""),
-        mime_type=str(artifact.get("mime") or metadata.get("mime_type") or "image/png"),
+        mime_type=str(
+            artifact.get("mime") or metadata.get("mime_type") or "application/octet-stream"
+        ),
         caption=caption,
         alt_text=alt_text,
         attachment_role=attachment_role,
@@ -740,22 +838,33 @@ class MCPToolWrapper(_MCPWrapperBase):
         *,
         inject_principal: bool = False,
         auth_context_secret: str = "",
+        delegation_secret: str = "",
+        authorization_audience: str = "",
         session_store: Any | None = None,
         post_call_sync: _PostCallSyncCallback | None = None,
         call_lock: asyncio.Lock | None = None,
+        transport: str = "unknown",
+        protocol: str = "unknown",
     ):
         self._set_mcp_connection(session, server_name)
         self._original_name = tool_def.name
         self._name = _sanitize_mcp_tool_name(f"mcp_{server_name}_{tool_def.name}")
         self._description = tool_def.description or tool_def.name
-        raw_schema = tool_def.inputSchema or {"type": "object", "properties": {}}
+        raw_schema = _mcp_field(tool_def, "input_schema", "inputSchema") or {
+            "type": "object",
+            "properties": {},
+        }
         self._parameters = _normalize_schema_for_openai(raw_schema)
         self._tool_timeout = tool_timeout
         self._inject_principal = inject_principal
         self._auth_context_secret = auth_context_secret
+        self._delegation_secret = delegation_secret
+        self._authorization_audience = authorization_audience or server_name
         self._session_store = session_store
         self._post_call_sync = post_call_sync
         self._call_lock = call_lock
+        self._metrics_transport = transport
+        self._metrics_protocol = protocol
         meta = getattr(tool_def, "meta", None)
         if not isinstance(meta, dict):
             meta = {}
@@ -801,6 +910,27 @@ class MCPToolWrapper(_MCPWrapperBase):
                 self._parameters["required"] = [
                     item for item in required if item != self._principal_argument
                 ]
+        # These values come from the trusted Host request envelope. Keeping
+        # them out of the model schema prevents identity/revision selection by
+        # prompt text while preserving compatibility with explicit-argument servers.
+        self._trusted_arguments = frozenset(
+            name
+            for name in (
+                "room_turn_id",
+                "base_revision",
+                "idempotency_key",
+                "campaign_id",
+                "acting_character_id",
+            )
+            if name in properties
+        )
+        for name in self._trusted_arguments:
+            properties.pop(name, None)
+        required = self._parameters.get("required")
+        if isinstance(required, list):
+            self._parameters["required"] = [
+                item for item in required if item not in self._trusted_arguments
+            ]
 
     @property
     def name(self) -> str:
@@ -817,6 +947,8 @@ class MCPToolWrapper(_MCPWrapperBase):
     def _trusted_principal(self) -> str:
         # Wrappers are shared across sessions, so identity must remain task-local.
         ctx = current_request_context()
+        if ctx is not None and ctx.requester_principal:
+            return ctx.requester_principal
         actor_principal = ctx.actor_principal if ctx is not None else None
         if ctx is None or not (actor_principal or ctx.sender_id):
             # Local cron/CLI calls have no user identity. They remain explicitly
@@ -842,7 +974,8 @@ class MCPToolWrapper(_MCPWrapperBase):
         *,
         trusted_principal: str | None,
     ) -> dict[str, Any] | None:
-        if not self._auth_context_secret or trusted_principal is None:
+        secret = self._delegation_secret or self._auth_context_secret
+        if not secret or trusted_principal is None:
             return None
         request = current_request_context()
         channel = request.channel if request is not None else "local"
@@ -886,6 +1019,55 @@ class MCPToolWrapper(_MCPWrapperBase):
         if self._original_name == "exposure" and arguments.get("action") == "open":
             authorization_epoch = 0
         metadata = request.metadata if request is not None else {}
+        if (
+            request is not None
+            and request.room_turn_id
+            and request.campaign_id
+            and request.requester_principal
+            and request.resource_owner_principal
+            and request.acting_host_principal
+            and request.allowed_operations
+            and request.base_revision is not None
+        ):
+            if self._original_name not in request.allowed_operations:
+                raise PermissionError(
+                    f"trusted delegation does not allow MCP operation {self._original_name!r}"
+                )
+            expires_at = None
+            if request.delegation_expires_at:
+                expires_at = datetime.fromisoformat(
+                    request.delegation_expires_at.replace("Z", "+00:00")
+                )
+            metadata = request.metadata
+            delegation = sign_delegated_auth_context(
+                secret=secret,
+                issuer=str(metadata.get("delegation_issuer") or "sagasmith-web"),
+                target_service=self._server_name,
+                caller_principal=str(
+                    metadata.get("caller_principal") or "workload:sagasmith-agent"
+                ),
+                workload_identity=str(
+                    metadata.get("workload_identity") or "sagasmith-agent-hosted-worker"
+                ),
+                requester_principal=request.requester_principal,
+                resource_owner_principal=request.resource_owner_principal,
+                acting_host_principal=request.acting_host_principal,
+                acting_character_id=request.acting_character_ref or "",
+                authorized_audience=self._authorization_audience,
+                allowed_operations=request.allowed_operations,
+                conversation_principal=conversation_principal,
+                tenant_id=str(metadata.get("tenant_id") or ""),
+                campaign_id=request.campaign_id,
+                room_turn_id=request.room_turn_id,
+                base_revision=request.base_revision,
+                expires_at=expires_at,
+            )
+            meta: dict[str, Any] = {AUTH_CONTEXT_META_KEY: delegation}
+            for key in ("traceparent", "tracestate", "baggage"):
+                value = metadata.get(key)
+                if isinstance(value, str) and value.strip() and len(value) <= 8192:
+                    meta[key] = value.strip()
+            return meta
         return {
             AUTH_CONTEXT_META_KEY: sign_auth_context(
                 secret=self._auth_context_secret,
@@ -898,6 +1080,27 @@ class MCPToolWrapper(_MCPWrapperBase):
                 session_id=session_id,
                 authorization_epoch=authorization_epoch,
             )
+        }
+
+    def _inject_trusted_arguments(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        request = current_request_context()
+        if request is None:
+            return arguments
+        metadata = request.metadata
+        values: dict[str, Any] = {
+            "room_turn_id": request.room_turn_id,
+            "base_revision": request.base_revision,
+            "idempotency_key": metadata.get("idempotency_key"),
+            "campaign_id": request.campaign_id,
+            "acting_character_id": request.acting_character_ref,
+        }
+        return {
+            **arguments,
+            **{
+                name: values[name]
+                for name in self._trusted_arguments
+                if values.get(name) is not None
+            },
         }
 
     def _remember_authorization_epoch(self, payload: Any) -> None:
@@ -929,6 +1132,7 @@ class MCPToolWrapper(_MCPWrapperBase):
         if self._inject_principal and self._principal_argument is not None:
             trusted_principal = self._trusted_principal()
             kwargs = {**kwargs, self._principal_argument: trusted_principal}
+        kwargs = self._inject_trusted_arguments(kwargs)
         if self._call_lock is not None:
             async with self._call_lock:
                 return await self._execute_call(kwargs, trusted_principal=trusted_principal)
@@ -964,6 +1168,12 @@ class MCPToolWrapper(_MCPWrapperBase):
                             meta=meta,
                         )
             except asyncio.TimeoutError:
+                record_mcp_event(
+                    "tool",
+                    "timeout",
+                    transport=self._metrics_transport,
+                    protocol=self._metrics_protocol,
+                )
                 logger.warning("MCP tool '{}' timed out after {}s", self._name, self._tool_timeout)
                 return ToolResult.error(f"(MCP tool call timed out after {self._tool_timeout}s)")
             except asyncio.CancelledError:
@@ -971,6 +1181,12 @@ class MCPToolWrapper(_MCPWrapperBase):
                 # Re-raise only if our task was externally cancelled (e.g. /stop).
                 if task_is_cancelling():
                     raise
+                record_mcp_event(
+                    "tool",
+                    "cancelled",
+                    transport=self._metrics_transport,
+                    protocol=self._metrics_protocol,
+                )
                 logger.warning("MCP tool '{}' was cancelled by server/SDK", self._name)
                 return ToolResult.error("(MCP tool call was cancelled)")
             except Exception as exc:
@@ -984,6 +1200,12 @@ class MCPToolWrapper(_MCPWrapperBase):
                 if _is_transient(exc):
                     if not retried_transient:
                         retried_transient = True
+                        record_mcp_event(
+                            "tool",
+                            "retry",
+                            transport=self._metrics_transport,
+                            protocol=self._metrics_protocol,
+                        )
                         logger.warning(
                             "MCP tool '{}' hit transient error ({}), retrying once...",
                             self._name,
@@ -997,6 +1219,12 @@ class MCPToolWrapper(_MCPWrapperBase):
                         self._name,
                         type(exc).__name__,
                     )
+                    record_mcp_event(
+                        "tool",
+                        "error",
+                        transport=self._metrics_transport,
+                        protocol=self._metrics_protocol,
+                    )
                     return ToolResult.error(
                         f"(MCP tool call failed after retry: {type(exc).__name__})"
                     )
@@ -1005,6 +1233,12 @@ class MCPToolWrapper(_MCPWrapperBase):
                     self._name,
                     type(exc).__name__,
                     exc,
+                )
+                record_mcp_event(
+                    "tool",
+                    "error",
+                    transport=self._metrics_transport,
+                    protocol=self._metrics_protocol,
                 )
                 return ToolResult.error(f"(MCP tool call failed: {type(exc).__name__})")
             else:
@@ -1016,7 +1250,9 @@ class MCPToolWrapper(_MCPWrapperBase):
                     # instead of racing the notification transport.
                     force_tool_refresh = self._original_name == "exposure" and kwargs.get(
                         "action"
-                    ) in {"open", "set"} and not getattr(result, "isError", False)
+                    ) in {"open", "set"} and not _mcp_field(
+                        result, "is_error", "isError", False
+                    )
                     expected_present = frozenset(
                         str(tool_id)
                         for tool_id in (kwargs.get("add_tool_ids") or [])
@@ -1034,10 +1270,11 @@ class MCPToolWrapper(_MCPWrapperBase):
                     )
                 # Success — extract text and persist any image content as artifacts.
                 try:
+                    is_error = bool(_mcp_field(result, "is_error", "isError", False))
                     structured_content = (
                         None
-                        if getattr(result, "isError", False)
-                        else getattr(result, "structuredContent", None)
+                        if is_error
+                        else _mcp_field(result, "structured_content", "structuredContent")
                     )
                     authoritative_payload = _context_payload_from_result(
                         result.content,
@@ -1052,13 +1289,26 @@ class MCPToolWrapper(_MCPWrapperBase):
                             structured_content
                         ),
                     )
-                    if getattr(result, "isError", False):
-                        return ToolResult.error(rendered)
+                    mcp_result = _serialize_call_tool_result(result)
+                    if is_error:
+                        record_mcp_event(
+                            "tool",
+                            "error",
+                            transport=self._metrics_transport,
+                            protocol=self._metrics_protocol,
+                        )
+                        return ToolResult(rendered, is_error=True, mcp_result=mcp_result)
                     context_changed = self._persist_domain_context(
                         rendered,
                         kwargs,
                         trusted_principal=trusted_principal,
                         authoritative_payload=authoritative_payload,
+                    )
+                    record_mcp_event(
+                        "tool",
+                        "ok",
+                        transport=self._metrics_transport,
+                        protocol=self._metrics_protocol,
                     )
                     return ToolResult(
                         rendered,
@@ -1066,8 +1316,15 @@ class MCPToolWrapper(_MCPWrapperBase):
                         structured_content=structured_content,
                         audit_receipt=_auth_context_receipt_from_result(result.content),
                         media_envelopes=media_envelopes,
+                        mcp_result=mcp_result,
                     )
                 except Exception as exc:
+                    record_mcp_event(
+                        "tool",
+                        "error",
+                        transport=self._metrics_transport,
+                        protocol=self._metrics_protocol,
+                    )
                     logger.exception(
                         "MCP tool '{}' failed while rendering result: {}: {}",
                         self._name,
@@ -1163,13 +1420,15 @@ class MCPToolWrapper(_MCPWrapperBase):
                 if structured_content is None:
                     text_parts.append(block.text)
                 continue
-            data_url = _image_block_data_url(block, types)
-            if data_url is not None:
-                stored = self._store_image_block(data_url, arguments)
+            media_payload = _media_block_payload(block, types)
+            if media_payload is not None:
+                encoded, mime = media_payload
+                stored = self._store_media_block(encoded, mime, arguments)
                 if stored is not None:
                     artifacts.append(stored)
                 else:
-                    text_parts.append("(MCP tool returned an image that could not be stored)")
+                    kind = "an image" if mime.startswith("image/") else "media"
+                    text_parts.append(f"(MCP tool returned {kind} that could not be stored)")
                 continue
             text_parts.append(str(block))
 
@@ -1195,23 +1454,22 @@ class MCPToolWrapper(_MCPWrapperBase):
             text_parts.insert(0, json.dumps(structured_content, ensure_ascii=False, indent=2))
         return "\n".join(text_parts) or "(no output)", ()
 
-    def _store_image_block(
-        self, data_url: str, arguments: Mapping[str, Any]
+    def _store_media_block(
+        self, encoded: str, mime: str, arguments: Mapping[str, Any]
     ) -> dict[str, Any] | None:
-        """Persist one image data URL as an artifact; return its metadata or None."""
-        from nanobot.utils.artifacts import ArtifactError, store_generated_image_artifact
+        """Persist one standard MCP image/audio block as a Host artifact."""
+        from nanobot.utils.artifacts import ArtifactError, store_mcp_media_artifact
 
         try:
-            return store_generated_image_artifact(
-                data_url,
-                prompt=str(arguments.get("prompt") or ""),
-                model=str(arguments.get("model") or ""),
-                save_dir="generated",
+            return store_mcp_media_artifact(
+                encoded,
+                mime=mime,
+                save_dir="mcp",
                 provider=f"mcp:{self._server_name}",
             )
         except (ArtifactError, OSError) as exc:
             logger.warning(
-                "MCP tool '{}' returned an image that could not be stored: {}",
+                "MCP tool '{}' returned media that could not be stored: {}",
                 self._name,
                 exc,
             )
@@ -1379,7 +1637,10 @@ class MCPPromptWrapper(_MCPWrapperBase):
 
     async def execute(self, **kwargs: Any) -> str:
         from mcp import types
-        from mcp.shared.exceptions import McpError
+        try:
+            from mcp.shared.exceptions import MCPError
+        except ImportError:  # SDK v1 compatibility
+            from mcp.shared.exceptions import McpError as MCPError
 
         retried_transient = False
         refreshed_session = False
@@ -1399,7 +1660,7 @@ class MCPPromptWrapper(_MCPWrapperBase):
                     raise
                 logger.warning("MCP prompt '{}' was cancelled by server/SDK", self._name)
                 return "(MCP prompt call was cancelled)"
-            except McpError as exc:
+            except MCPError as exc:
                 if await self._refresh_session_after_termination(
                     exc,
                     refreshed_session,
@@ -1407,13 +1668,14 @@ class MCPPromptWrapper(_MCPWrapperBase):
                 ):
                     refreshed_session = True
                     continue
+                code, message = _mcp_error_details(exc)
                 logger.exception(
                     "MCP prompt '{}' failed: code={} message={}",
                     self._name,
-                    exc.error.code,
-                    exc.error.message,
+                    code,
+                    message,
                 )
-                return f"(MCP prompt call failed: {exc.error.message} [code {exc.error.code}])"
+                return f"(MCP prompt call failed: {message} [code {code}])"
             except Exception as exc:
                 if await self._refresh_session_after_termination(
                     exc,
@@ -1474,7 +1736,11 @@ async def connect_mcp_servers(
     entered the MCP SDK contexts alive so reconnect and shutdown can close
     AnyIO cancel scopes from their owning task.
     """
-    from mcp import ClientSession, StdioServerParameters, types
+    mcp_module = importlib.import_module("mcp")
+    types = mcp_module.types
+    stdio_parameters_cls = mcp_module.StdioServerParameters
+    mcp_client_cls = getattr(mcp_module, "Client", None)
+    legacy_client_session_cls = getattr(mcp_module, "ClientSession", None)
     from mcp.client.sse import sse_client
     from mcp.client.stdio import stdio_client
     from mcp.client.streamable_http import streamable_http_client
@@ -1488,6 +1754,9 @@ async def connect_mcp_servers(
         call_lock = asyncio.Lock()
         refresh_generation = 0
         synced_generation = 0
+        legacy_catalog = True
+        metrics_transport = "unknown"
+        metrics_protocol = "unknown"
 
         try:
             transport_type = cfg.type
@@ -1502,6 +1771,11 @@ async def connect_mcp_servers(
                     logger.warning("MCP server '{}': no command or url configured, skipping", name)
                     await server_stack.aclose()
                     return name, None
+            metrics_transport = (
+                "http" if transport_type == "streamableHttp" else str(transport_type)
+            )
+            if metrics_transport not in {"stdio", "sse", "http"}:
+                metrics_transport = "unknown"
 
             host_token = str((cfg.env or {}).get("SAGASMITH_NPC_HOST_TOKEN") or "").strip()
             sagasmith_stdio = (
@@ -1531,13 +1805,15 @@ async def connect_mcp_servers(
                     cfg.args,
                     child_env or None,
                 )
-                params = StdioServerParameters(
+                params = stdio_parameters_cls(
                     command=command,
                     args=args,
                     env=env,
                     cwd=cfg.cwd or None,
                 )
-                read, write = await server_stack.enter_async_context(stdio_client(params))
+                client_transport: Any = (
+                    params if mcp_client_cls is not None else stdio_client(params)
+                )
             elif transport_type == "sse":
                 if not await _probe_http_url(cfg.url):
                     logger.warning(
@@ -1568,8 +1844,14 @@ async def connect_mcp_servers(
                         **_pinned_transport_kwargs(),
                     )
 
-                read, write = await server_stack.enter_async_context(
-                    sse_client(cfg.url, httpx_client_factory=httpx_client_factory)
+                if cfg.protocol_mode != "legacy":
+                    logger.warning(
+                        "MCP server '{}': SSE is legacy-only; forcing initialize compatibility",
+                        name,
+                    )
+                client_transport = sse_client(
+                    cfg.url,
+                    httpx_client_factory=httpx_client_factory,
                 )
             elif transport_type == "streamableHttp":
                 if not await _probe_http_url(cfg.url):
@@ -1579,21 +1861,32 @@ async def connect_mcp_servers(
                     await server_stack.aclose()
                     return name, None
 
-                http_client = await server_stack.enter_async_context(
-                    httpx.AsyncClient(
-                        headers=cfg.headers or None,
-                        event_hooks={
-                            "request": [_validate_mcp_request_url],
-                            "response": [_validate_mcp_redirect_response],
-                        },
-                        follow_redirects=True,
-                        timeout=httpx.Timeout(30.0, connect=10.0),
-                        **_pinned_transport_kwargs(),
+                if mcp_client_cls is None:
+                    http_client = await server_stack.enter_async_context(
+                        httpx.AsyncClient(
+                            headers=cfg.headers or None,
+                            event_hooks={
+                                "request": [_validate_mcp_request_url],
+                                "response": [_validate_mcp_redirect_response],
+                            },
+                            follow_redirects=True,
+                            timeout=httpx.Timeout(30.0, connect=10.0),
+                            **_pinned_transport_kwargs(),
+                        )
                     )
-                )
-                read, write, _ = await server_stack.enter_async_context(
-                    streamable_http_client(cfg.url, http_client=http_client)
-                )
+                else:
+                    http_client = await server_stack.enter_async_context(
+                        httpx2.AsyncClient(
+                            headers=cfg.headers or None,
+                            event_hooks={
+                                "request": [_validate_mcp2_request_url],
+                                "response": [_reject_mcp2_redirect_response],
+                            },
+                            follow_redirects=False,
+                            timeout=httpx2.Timeout(30.0, connect=10.0),
+                        )
+                    )
+                client_transport = streamable_http_client(cfg.url, http_client=http_client)
             else:
                 logger.warning("MCP server '{}': unknown transport type '{}'", name, transport_type)
                 await server_stack.aclose()
@@ -1663,16 +1956,23 @@ async def connect_mcp_servers(
                     return []
                 async with refresh_lock:
                     listed = await session.list_tools()
+                    record_mcp_event(
+                        "catalog",
+                        "ok",
+                        transport=metrics_transport,
+                        protocol=metrics_protocol,
+                    )
                     enabled_tools = set(cfg.enabled_tools)
                     allow_all_tools = "*" in enabled_tools
                     desired: dict[str, Any] = {}
                     matched_enabled_tools: set[str] = set()
-                    available_raw_names = [tool_def.name for tool_def in listed.tools]
+                    tool_definitions = sorted(listed.tools, key=lambda item: item.name)
+                    available_raw_names = [tool_def.name for tool_def in tool_definitions]
                     available_wrapped_names = [
                         _sanitize_mcp_tool_name(f"mcp_{name}_{tool_def.name}")
-                        for tool_def in listed.tools
+                        for tool_def in tool_definitions
                     ]
-                    for tool_def in listed.tools:
+                    for tool_def in tool_definitions:
                         wrapped_name = _sanitize_mcp_tool_name(f"mcp_{name}_{tool_def.name}")
                         if (
                             not allow_all_tools
@@ -1713,9 +2013,15 @@ async def connect_mcp_servers(
                             tool_timeout=cfg.tool_timeout,
                             inject_principal=cfg.inject_principal,
                             auth_context_secret=cfg.auth_context_secret,
+                            delegation_secret=cfg.delegation_secret,
+                            authorization_audience=cfg.authorization_audience,
                             session_store=session_store,
-                            post_call_sync=wait_for_pending_tool_refresh,
+                            post_call_sync=(
+                                wait_for_pending_tool_refresh if legacy_catalog else None
+                            ),
                             call_lock=call_lock,
+                            transport=metrics_transport,
+                            protocol=metrics_protocol,
                         )
                         if reconnect is not None:
                             wrapper.set_reconnect_handler(reconnect)
@@ -1756,6 +2062,8 @@ async def connect_mcp_servers(
 
             async def handle_server_message(message: Any) -> None:
                 nonlocal refresh_generation, refresh_task
+                if not legacy_catalog:
+                    return
                 payload = _mcp_jsonrpc_payload(message)
                 if _payload_value(payload, "method") != "notifications/tools/list_changed":
                     return
@@ -1771,11 +2079,38 @@ async def connect_mcp_servers(
                         name=f"mcp-tools-refresh:{name}",
                     )
 
-            read = _filter_malformed_mcp_progress_notifications(read, name)
-            session = await server_stack.enter_async_context(
-                ClientSession(read, write, message_handler=handle_server_message)
+            if mcp_client_cls is None:
+                streams = await server_stack.enter_async_context(client_transport)
+                read, write = streams[0], streams[1]
+                read = _filter_malformed_mcp_progress_notifications(read, name)
+                assert legacy_client_session_cls is not None
+                session = await server_stack.enter_async_context(
+                    legacy_client_session_cls(
+                        read,
+                        write,
+                        message_handler=handle_server_message,
+                    )
+                )
+                await session.initialize()
+                legacy_catalog = True
+                metrics_protocol = "legacy"
+            else:
+                mode = "legacy" if transport_type == "sse" else cfg.protocol_mode
+                session = await server_stack.enter_async_context(
+                    mcp_client_cls(
+                        client_transport,
+                        mode=mode,
+                        message_handler=handle_server_message,
+                    )
+                )
+                legacy_catalog = str(session.protocol_version) != "2026-07-28"
+                metrics_protocol = "legacy" if legacy_catalog else "2026-07-28"
+            record_mcp_event(
+                "discover",
+                "ok",
+                transport=metrics_transport,
+                protocol=metrics_protocol,
             )
-            await session.initialize()
 
             available_raw_names = await sync_tools(warn_unmatched=True)
             enabled_tools = set(cfg.enabled_tools)
@@ -1845,6 +2180,8 @@ async def connect_mcp_servers(
                         tool_timeout=cfg.tool_timeout,
                         inject_principal=cfg.inject_principal,
                         auth_context_secret=cfg.auth_context_secret,
+                        delegation_secret=cfg.delegation_secret,
+                        authorization_audience=cfg.authorization_audience,
                         session_store=session_store,
                         host_token=host_token,
                     )
@@ -1902,9 +2239,21 @@ async def connect_mcp_servers(
             logger.info(
                 "MCP server '{}': connected, {} capabilities registered", name, registered_count
             )
+            record_mcp_event(
+                "connect",
+                "ok",
+                transport=metrics_transport,
+                protocol=metrics_protocol,
+            )
             return name, server_stack
 
         except Exception as e:
+            record_mcp_event(
+                "connect",
+                "error",
+                transport=metrics_transport,
+                protocol=metrics_protocol,
+            )
             hint = ""
             text = str(e).lower()
             if any(
@@ -1963,15 +2312,28 @@ async def connect_mcp_servers(
         return name, connection
 
     server_stacks: dict[str, MCPConnection] = {}
+    connect_limit = asyncio.Semaphore(4)
 
-    for name, cfg in mcp_servers.items():
+    async def bounded_connect(name: str, cfg: Any) -> tuple[str, MCPConnection | None]:
+        async with connect_limit:
+            return await connect_single_server(name, cfg)
+
+    results = await asyncio.gather(
+        *(bounded_connect(name, cfg) for name, cfg in mcp_servers.items()),
+        return_exceptions=True,
+    )
+    for (name, _cfg), result in zip(mcp_servers.items(), results, strict=True):
         try:
-            result = await connect_single_server(name, cfg)
-        except Exception as e:
-            logger.exception("MCP server '{}' connection failed: {}", name, e)
+            if isinstance(result, BaseException):
+                raise result
+            connected_name, connection = result
+        except BaseException as exc:
+            if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                raise
+            logger.exception("MCP server '{}' connection failed: {}", name, exc)
             continue
-        if result is not None and result[1] is not None:
-            server_stacks[result[0]] = result[1]
+        if connection is not None:
+            server_stacks[connected_name] = connection
 
     return server_stacks
 

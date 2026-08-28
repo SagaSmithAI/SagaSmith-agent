@@ -261,7 +261,14 @@ class ToolRegistry:
             assert tool is not None  # guarded by prepare_call()
             result = await tool.execute(**params)
             if is_tool_error_result(name, result):
-                return ToolResult.error(str(result) + hint)
+                return ToolResult(
+                    str(result) + hint,
+                    is_error=True,
+                    structured_content=result.structured_content,
+                    audit_receipt=result.audit_receipt,
+                    media_envelopes=result.media_envelopes,
+                    mcp_result=result.mcp_result,
+                )
             return result
         except Exception as e:
             return ToolResult.error(f"Error executing {name}: {str(e)}" + hint)

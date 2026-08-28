@@ -378,7 +378,25 @@ class MCPServerConfig(Base):
     auth_context_secret: str = Field(
         default="",
         min_length=0,
-    )  # Shared HMAC secret for model-invisible sagasmith.auth-context/v1 request metadata.
+    )  # Legacy shared HMAC secret for model-invisible sagasmith.auth-context/v1 metadata.
+    delegation_secret: str = Field(
+        default="",
+        min_length=0,
+    )  # Dedicated per-service HMAC secret for sagasmith.auth-context/v2 delegation.
+    authorization_audience: str = Field(
+        default="",
+        max_length=300,
+    )  # Exact MCP resource audience; never inferred from a browser/upstream token.
+    system_ids: list[str] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("systemIds", "systems", "system_ids"),
+        serialization_alias="systemIds",
+    )  # Campaign systems this MCP serves; Hosted workers select exactly one system.
+    protocol_mode: Literal["auto", "legacy", "2026-07-28"] = Field(
+        default="auto",
+        validation_alias=AliasChoices("protocolMode", "protocol_mode"),
+        serialization_alias="protocolMode",
+    )  # v2 Client dual-era negotiation; auto probes discover then falls back to initialize.
     session_scoped: bool = Field(
         default=False,
         validation_alias=AliasChoices("sessionScoped", "session_scoped"),

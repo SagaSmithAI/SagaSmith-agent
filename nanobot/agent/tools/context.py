@@ -33,6 +33,17 @@ class RequestContext:
     conversation_principal: str | None = None
     turn_id: str | None = None
     workspace: Path | None = None
+    room_turn_id: str | None = None
+    campaign_id: str | None = None
+    system_id: str | None = None
+    base_revision: int | None = None
+    delegation_expires_at: str | None = None
+    allowed_operations: tuple[str, ...] = ()
+    audience: tuple[str, ...] = ()
+    requester_principal: str | None = None
+    resource_owner_principal: str | None = None
+    acting_host_principal: str | None = None
+    acting_character_ref: str | None = None
 
 
 @runtime_checkable

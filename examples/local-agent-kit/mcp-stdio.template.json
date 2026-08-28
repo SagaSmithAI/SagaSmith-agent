@@ -1,6 +1,8 @@
 {
   "sagasmith_dnd": {
     "type": "stdio",
+    "protocolMode": "auto",
+    "systemIds": ["dnd5e"],
     "command": "replace-with-dnd-venv-python",
     "args": ["-m", "sagasmith_dnd_mcp.server"],
     "env": {
@@ -10,6 +12,8 @@
   },
   "sagasmith_coc": {
     "type": "stdio",
+    "protocolMode": "auto",
+    "systemIds": ["coc7e"],
     "command": "replace-with-coc-venv-python",
     "args": ["-m", "sagasmith_coc_mcp.server"],
     "env": {
@@ -19,6 +23,8 @@
   },
   "sagasmith_narrative": {
     "type": "stdio",
+    "protocolMode": "auto",
+    "systemIds": ["narrative"],
     "command": "replace-with-narrative-venv-python",
     "args": ["-m", "sagasmith_narrative_mcp.server"],
     "env": {

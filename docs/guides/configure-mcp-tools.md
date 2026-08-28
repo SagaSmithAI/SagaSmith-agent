@@ -19,9 +19,9 @@ the server's current tool list and exposes those tools as native model tools.
 }
 ```
 
-Use a fixed `enabledTools` list for a server with a fixed catalogue. Use `['*']` when a trusted
-server intentionally changes its native tool list with MCP `tools/list_changed`; nanobot refreshes
-the registry whenever it receives that notification.
+Use a fixed `enabledTools` list for a server with a fixed catalogue. With MCP 2026-07-28 the
+catalogue is deterministic for one authorization and the Host chooses a task-appropriate subset.
+`tools/list_changed` refresh remains only for explicitly legacy peers.
 
 ## SagaSmith local modes
 
@@ -32,9 +32,10 @@ uv run nanobot sagasmith configure --mode dnd
 uv run nanobot sagasmith configure --mode coc --mode narrative
 ```
 
-Each SagaSmith server uses `sessionScoped: true`. Nanobot then creates one MCP
-connection and one mutable native tool registry per logical Agent session, so
-campaign, principal, phase, and `tools/list_changed` cannot leak between chats.
+Each generated SagaSmith entry declares `systemIds`, `protocolMode: "auto"`, and
+`sessionScoped: true`. Hosted workers select only the current campaign system. Modern authority is
+per request and does not depend on that connection; the per-session connection is retained only
+for legacy interoperability and process isolation during rollout.
 
 ### D&D
 
@@ -61,6 +62,9 @@ tools and publishes selected domain tools after `exposure(set)`.
         "toolTimeout": 900,
         "injectPrincipal": true,
         "sessionScoped": true,
+        "systemIds": ["dnd5e"],
+        "protocolMode": "auto",
+        "authorizationAudience": "local",
         "enabledTools": ["*"],
         "exposeResourcesAndPrompts": true
       }
@@ -85,7 +89,7 @@ The seven always-available tools are `exposure`, `server_capabilities`, `storage
 `campaign_query`, `game_phase`, `resolution_presentation`, and `skill_query`. Do not configure
 retired exposure facades or a second host-side phase/profile filter.
 
-Use the protocol in this order:
+Legacy peers use the protocol in this order:
 
 1. Call `exposure(action="open", campaign_id=...)` for the current MCP session and principal.
 2. Call `exposure(action="search", query=...)` to discover a bounded domain capability.
@@ -94,8 +98,9 @@ Use the protocol in this order:
 5. Call `exposure(action="get")` to inspect the current session binding and loaded tool ids.
 
 The one localhost MCP process is the authority shared by Agent and D&D Workbench. Each MCP
-connection remains its own exposure session; campaign, principal, phase and loaded tools stay
-server-owned. A phase change can remove incompatible tools from the next native tool list.
+connection remains its own exposure session on the compatibility path. On the modern path the
+stable catalogue does not mutate; the Host exposes a task/phase subset to the model and the MCP
+revalidates role, phase, campaign and revision on every call.
 
 ## Pack authoring boundary
 
