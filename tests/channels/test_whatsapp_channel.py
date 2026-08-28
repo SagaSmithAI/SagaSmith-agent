@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from nanobot.bus.events import OutboundMessage
+from nanobot.bus.events import HostMediaEnvelope, OutboundMessage
 from nanobot.channels import whatsapp as whatsapp_module
 from nanobot.channels.whatsapp import WhatsAppChannel, WhatsAppConfig, _NeonizeAPI
 
@@ -222,6 +222,45 @@ async def test_send_media_dispatches_by_mimetype(monkeypatch) -> None:
         filename="report.pdf",
         mimetype="application/pdf",
     )
+
+
+@pytest.mark.asyncio
+async def test_send_image_uses_native_accessible_caption(monkeypatch, tmp_path) -> None:
+    _patch_neonize_api(monkeypatch)
+    client = SimpleNamespace(
+        send_message=AsyncMock(),
+        send_image=AsyncMock(),
+        send_video=AsyncMock(),
+        send_audio=AsyncMock(),
+        send_document=AsyncMock(),
+    )
+    ch = _make_channel()
+    ch._client = client
+    ch._connected = True
+    image = tmp_path / "combat.jpg"
+    image.write_bytes(b"jpg")
+
+    await ch.send(
+        OutboundMessage(
+            channel="whatsapp",
+            chat_id="12345@s.whatsapp.net",
+            content="",
+            media_envelopes=[
+                HostMediaEnvelope(
+                    path=str(image),
+                    caption="Round 3 positions",
+                    alt_text="A goblin stands north of the fighter.",
+                )
+            ],
+        )
+    )
+
+    client.send_image.assert_awaited_once_with(
+        ("12345", "s.whatsapp.net"),
+        str(image),
+        caption="Round 3 positions\n\nAlt: A goblin stands north of the fighter.",
+    )
+    assert ch.media_capabilities().atomic_caption is True
 
 
 @pytest.mark.asyncio

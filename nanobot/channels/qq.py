@@ -32,7 +32,7 @@ import aiohttp
 from loguru import logger
 from pydantic import Field
 
-from nanobot.bus.events import OutboundMessage
+from nanobot.bus.events import HostMediaCapabilities, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import Base
@@ -144,6 +144,12 @@ class QQChannel(BaseChannel):
 
     name = "qq"
     display_name = "QQ"
+    host_media_capabilities = HostMediaCapabilities(
+        atomic_caption=False,
+        native_alt_text=False,
+        max_file_bytes=20 * 1024 * 1024,
+        max_caption_chars=512,
+    )
 
     @classmethod
     def default_config(cls) -> dict[str, Any]:
@@ -244,7 +250,9 @@ class QQChannel(BaseChannel):
             is_group = chat_type == "group"
 
             # 1) Send media
-            for media_ref in msg.media or []:
+            explicit_paths = {item.path for item in msg.media_envelopes}
+            for envelope in msg.host_media():
+                media_ref = envelope.path
                 ok = await self._send_media(
                     chat_id=msg.chat_id,
                     media_ref=media_ref,
@@ -261,7 +269,18 @@ class QQChannel(BaseChannel):
                         chat_id=msg.chat_id,
                         is_group=is_group,
                         msg_id=msg_id,
-                        content=f"[Attachment send failed: {filename}]",
+                        content=(
+                            envelope.fallback_text
+                            if envelope.path in explicit_paths
+                            else f"[Attachment send failed: {filename}]"
+                        ),
+                    )
+                elif caption := (envelope.caption or envelope.alt_text)[:512]:
+                    await self._send_text_only(
+                        chat_id=msg.chat_id,
+                        is_group=is_group,
+                        msg_id=msg_id,
+                        content=caption,
                     )
 
             # 2) Send text
@@ -387,6 +406,10 @@ class QQChannel(BaseChannel):
                     self.logger.warning("outbound media file not found: {}", str(local_path))
                     return None, None
 
+                if local_path.stat().st_size > self.media_capabilities().max_file_bytes:
+                    self.logger.warning("outbound media exceeds channel limit: {}", local_path.name)
+                    return None, None
+
                 data = await asyncio.to_thread(local_path.read_bytes)
                 return data, local_path.name
             except Exception as e:
@@ -410,7 +433,16 @@ class QQChannel(BaseChannel):
                         media_ref,
                     )
                     return None, None
-                data = await resp.read()
+                max_bytes = self.media_capabilities().max_file_bytes or 0
+                declared = int(resp.headers.get("Content-Length") or 0)
+                if declared and declared > max_bytes:
+                    return None, None
+                chunks = bytearray()
+                async for chunk in resp.content.iter_chunked(256 * 1024):
+                    chunks.extend(chunk)
+                    if len(chunks) > max_bytes:
+                        return None, None
+                data = bytes(chunks)
                 if not data:
                     return None, None
                 filename = os.path.basename(urlparse(media_ref).path) or "file.bin"

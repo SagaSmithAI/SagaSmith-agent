@@ -13,7 +13,7 @@ from slack_sdk.socket_mode.websockets import SocketModeClient
 from slack_sdk.web.async_client import AsyncWebClient
 from slackify_markdown import slackify_markdown
 
-from nanobot.bus.events import OutboundMessage
+from nanobot.bus.events import HostMediaCapabilities, OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
@@ -61,6 +61,7 @@ class SlackConfig(Base):
 
 
 SLACK_MAX_MESSAGE_LEN = 39_000  # Slack API allows ~40k; leave margin
+SLACK_MAX_MEDIA_BYTES = 20 * 1024 * 1024
 SLACK_DOWNLOAD_TIMEOUT = 30.0
 # Abort Socket Mode WSS handshake after this many seconds. REST auth_test can still
 # succeed while WSS blocks (firewall / region). slack-sdk does not apply HTTP(S)_PROXY
@@ -81,6 +82,12 @@ class SlackChannel(BaseChannel):
 
     name = "slack"
     display_name = "Slack"
+    host_media_capabilities = HostMediaCapabilities(
+        atomic_caption=True,
+        native_alt_text=False,
+        max_file_bytes=SLACK_MAX_MEDIA_BYTES,
+        max_caption_chars=1024,
+    )
     _SLACK_ID_RE = re.compile(r"^[CDGUW][A-Z0-9]{2,}$")
     _SLACK_CHANNEL_REF_RE = re.compile(r"^<#([A-Z0-9]+)(?:\|[^>]+)?>$")
     _SLACK_USER_REF_RE = re.compile(r"^<@([A-Z0-9]+)(?:\|[^>]+)?>$")
@@ -192,15 +199,30 @@ class SlackChannel(BaseChannel):
                         kwargs["blocks"] = self._build_button_blocks(chunk, buttons)
                     await self._web_client.chat_postMessage(**kwargs)
 
-            for media_path in msg.media or []:
+            for envelope in msg.host_media():
+                media_path = envelope.path
                 try:
-                    await self._web_client.files_upload_v2(
+                    path = Path(media_path).expanduser()
+                    if envelope in msg.media_envelopes and not path.is_file():
+                        raise ValueError("host media file is missing")
+                    if path.is_file() and path.stat().st_size > SLACK_MAX_MEDIA_BYTES:
+                        raise ValueError("media file exceeds Slack channel limit")
+                    kwargs: dict[str, Any] = dict(
                         channel=target_chat_id,
                         file=media_path,
                         thread_ts=thread_ts_param,
                     )
+                    caption = envelope.caption or envelope.alt_text
+                    if caption:
+                        kwargs["initial_comment"] = caption[:1024]
+                    await self._web_client.files_upload_v2(**kwargs)
                 except Exception:
                     self.logger.exception("Failed to upload file {}", media_path)
+                    await self._web_client.chat_postMessage(
+                        channel=target_chat_id,
+                        text=envelope.fallback_text,
+                        thread_ts=thread_ts_param,
+                    )
 
             # Update reaction emoji when the final (non-progress) response is sent
             if not is_progress:

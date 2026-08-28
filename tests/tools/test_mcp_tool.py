@@ -1141,6 +1141,51 @@ async def test_execute_persists_image_block_as_artifact(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_execute_builds_host_only_accessible_media_envelope(tmp_path: Path) -> None:
+    from nanobot.config.loader import set_config_path
+
+    set_config_path(tmp_path / "config.json")
+    structured = {
+        "audience_projection": "party_public",
+        "suggested_caption": "Round 3 · the dragon advances",
+        "alt_text": "A ten by ten combat grid with the dragon at C4.",
+        "attachment_role": "combat_grid",
+        "image_checksum": "server-checksum",
+        "fallback_text": "Combat grid unavailable; the dragon is at C4.",
+        "mime_type": "image/png",
+        "authoritative_state": {"round": 3, "phase": "combat"},
+    }
+
+    async def call_tool(_name: str, arguments: dict) -> object:
+        return SimpleNamespace(
+            content=[_FakeImageContent(_PNG_B64, "image/png")],
+            structuredContent=structured,
+            isError=False,
+        )
+
+    wrapper = _make_wrapper(SimpleNamespace(call_tool=call_tool))
+    result = await wrapper.execute()
+
+    assert len(result.media_envelopes) == 1
+    envelope = result.media_envelopes[0]
+    assert envelope.caption == structured["suggested_caption"]
+    assert envelope.alt_text == structured["alt_text"]
+    assert envelope.attachment_role == "combat_grid"
+    assert envelope.audience_projection == "party_public"
+    assert envelope.fallback_text == structured["fallback_text"]
+    assert envelope.checksum != "server-checksum"  # host verifies the stored bytes itself
+    model_payload = json.loads(result)
+    assert "suggested_caption" not in model_payload
+    assert "alt_text" not in model_payload
+    assert json.loads(model_payload["text"]) == {
+        "mime_type": "image/png",
+        "authoritative_state": {"round": 3, "phase": "combat"},
+    }
+    assert envelope.path not in result
+    assert _PNG_B64 not in result
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("audience_projection", "context", "expects_media"),
     [
@@ -1163,6 +1208,15 @@ async def test_execute_persists_image_block_as_artifact(tmp_path: Path) -> None:
             True,
         ),
         (
+            "gm_only",
+            RequestContext(
+                channel="slack",
+                chat_id="table-1",
+                metadata={"chat_type": "channel"},
+            ),
+            False,
+        ),
+        (
             "caller",
             RequestContext(
                 channel="napcat",
@@ -1173,7 +1227,7 @@ async def test_execute_persists_image_block_as_artifact(tmp_path: Path) -> None:
             True,
         ),
     ],
-    ids=("group-caller-blocked", "group-party-public", "private-caller"),
+    ids=("group-caller-blocked", "group-party-public", "group-unknown-blocked", "private-caller"),
 )
 async def test_image_delivery_respects_audience_projection(
     tmp_path: Path,

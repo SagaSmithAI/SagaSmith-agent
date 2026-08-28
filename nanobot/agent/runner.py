@@ -19,6 +19,7 @@ from nanobot.agent.context_governance import (
 )
 from nanobot.agent.hook import AgentHook, AgentHookContext, AgentRunHookContext
 from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result
+from nanobot.bus.events import HostMediaEnvelope
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.utils.helpers import (
@@ -53,7 +54,7 @@ ToolAuditCallback = Callable[
     [dict[str, Any], list[dict[str, Any]]],
     None | Awaitable[None],
 ]
-HostMediaCallback = Callable[[list[str]], None | Awaitable[None]]
+HostMediaCallback = Callable[[list[HostMediaEnvelope]], None | Awaitable[None]]
 
 _DEFAULT_ERROR_MESSAGE = "Sorry, I encountered an error calling the AI model."
 _ARREARAGE_ERROR_MESSAGE = (
@@ -125,15 +126,32 @@ class AgentRunner:
         """Forward host-only media without allowing delivery failures to fail the turn."""
         if spec.host_media_callback is None:
             return
-        media = list(
-            dict.fromkeys(
-                path
-                for result in results
-                if not bool(getattr(result, "is_error", False))
-                for path in getattr(result, "media", ())
-                if isinstance(path, str) and path
-            )
-        )
+        media: list[HostMediaEnvelope] = []
+        seen_checksums: set[str] = set()
+        seen_paths: set[str] = set()
+        for result in results:
+            if bool(getattr(result, "is_error", False)):
+                continue
+            envelopes = getattr(result, "media_envelopes", ())
+            if not envelopes:
+                envelopes = tuple(
+                    HostMediaEnvelope(path=path)
+                    for path in getattr(result, "media", ())
+                    if isinstance(path, str) and path
+                )
+            for envelope in envelopes:
+                if not isinstance(envelope, HostMediaEnvelope):
+                    continue
+                path_key = HostMediaEnvelope(path=envelope.path).dedup_key
+                checksum_key = envelope.dedup_key if envelope.checksum else None
+                if path_key in seen_paths or (
+                    checksum_key is not None and checksum_key in seen_checksums
+                ):
+                    continue
+                seen_paths.add(path_key)
+                if checksum_key is not None:
+                    seen_checksums.add(checksum_key)
+                media.append(envelope)
         if not media:
             return
         try:

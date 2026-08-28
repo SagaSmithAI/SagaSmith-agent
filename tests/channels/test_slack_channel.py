@@ -14,7 +14,7 @@ try:
 except ImportError:
     pytest.skip("Slack dependencies not installed (slack-sdk)", allow_module_level=True)
 
-from nanobot.bus.events import OutboundMessage
+from nanobot.bus.events import HostMediaEnvelope, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.slack import SLACK_MAX_MESSAGE_LEN, SlackChannel, SlackConfig
 
@@ -57,15 +57,16 @@ class _FakeAsyncWebClient:
         channel: str,
         file: str,
         thread_ts: str | None = None,
+        initial_comment: str | None = None,
     ) -> None:
         self.file_upload_calls.append(
             {
                 "channel": channel,
                 "file": file,
                 "thread_ts": thread_ts,
+                "initial_comment": initial_comment,
             }
         )
-
     async def reactions_add(
         self,
         *,
@@ -115,6 +116,33 @@ class _FakeAsyncWebClient:
     async def conversations_open(self, **kwargs):
         self.conversations_open_calls.append(kwargs)
         return self._open_dm_response
+
+
+@pytest.mark.asyncio
+async def test_send_uploads_image_with_atomic_accessible_comment(tmp_path) -> None:
+    channel = SlackChannel(SlackConfig(enabled=True), MessageBus())
+    fake_web = _FakeAsyncWebClient()
+    channel._web_client = fake_web
+    image = tmp_path / "combat.png"
+    image.write_bytes(b"png")
+
+    await channel.send(
+        OutboundMessage(
+            channel="slack",
+            chat_id="C123",
+            content="",
+            media_envelopes=[
+                HostMediaEnvelope(
+                    path=str(image),
+                    caption="Round 3 positions",
+                    alt_text="A goblin stands north of the fighter.",
+                )
+            ],
+        )
+    )
+
+    assert fake_web.file_upload_calls[0]["initial_comment"] == "Round 3 positions"
+    assert channel.media_capabilities().atomic_caption is True
 
 
 @pytest.mark.asyncio

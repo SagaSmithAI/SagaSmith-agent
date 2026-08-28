@@ -14,7 +14,7 @@ from typing import Any, Literal, NamedTuple
 
 from pydantic import ConfigDict, Field
 
-from nanobot.bus.events import OutboundMessage
+from nanobot.bus.events import HostMediaCapabilities, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir, get_runtime_subdir
@@ -270,6 +270,13 @@ class WhatsAppChannel(BaseChannel):
 
     name = "whatsapp"
     display_name = "WhatsApp"
+    _MAX_MEDIA_BYTES = 16 * 1024 * 1024
+    host_media_capabilities = HostMediaCapabilities(
+        atomic_caption=True,
+        native_alt_text=False,
+        max_file_bytes=_MAX_MEDIA_BYTES,
+        max_caption_chars=1024,
+    )
 
     @classmethod
     def default_config(cls) -> dict[str, Any]:
@@ -389,8 +396,25 @@ class WhatsAppChannel(BaseChannel):
         if msg.content:
             await client.send_message(to, msg.content)
 
-        for media_path in msg.media or []:
-            await self._send_media(client, to, media_path)
+        explicit_paths = {item.path for item in msg.media_envelopes}
+        for envelope in msg.host_media():
+            path = Path(envelope.path).expanduser()
+            try:
+                if envelope.path in explicit_paths and not path.is_file():
+                    raise ValueError("host media file is missing")
+                if path.is_file() and path.stat().st_size > self._MAX_MEDIA_BYTES:
+                    raise ValueError("media file exceeds WhatsApp channel limit")
+                caption = envelope.caption
+                if envelope.alt_text and envelope.alt_text.casefold() not in caption.casefold():
+                    caption = (
+                        f"{caption}\n\nAlt: {envelope.alt_text}"
+                        if caption
+                        else envelope.alt_text
+                    )
+                await self._send_media(client, to, envelope.path, caption=caption[:1024])
+            except Exception:
+                self.logger.exception("Failed to send WhatsApp media")
+                await client.send_message(to, envelope.fallback_text)
 
     def _build_jid(self, raw: str) -> Any:
         api = _load_neonize()
@@ -403,14 +427,23 @@ class WhatsAppChannel(BaseChannel):
         server = match.group("server")
         return api.build_jid(user, server)
 
-    async def _send_media(self, client: Any, to: Any, media_path: str) -> None:
+    async def _send_media(
+        self,
+        client: Any,
+        to: Any,
+        media_path: str,
+        *,
+        caption: str = "",
+    ) -> None:
         path = str(Path(media_path).expanduser())
         mime, _ = mimetypes.guess_type(path)
         mimetype = mime or "application/octet-stream"
         if mimetype.startswith("image/"):
-            await client.send_image(to, path)
+            kwargs = {"caption": caption} if caption else {}
+            await client.send_image(to, path, **kwargs)
         elif mimetype.startswith("video/"):
-            await client.send_video(to, path)
+            kwargs = {"caption": caption} if caption else {}
+            await client.send_video(to, path, **kwargs)
         elif mimetype.startswith("audio/"):
             await client.send_audio(to, path)
         else:

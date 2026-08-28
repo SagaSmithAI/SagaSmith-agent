@@ -49,7 +49,7 @@ except ImportError as e:
         "Matrix dependencies not installed. Run: nanobot plugins enable matrix"
     ) from e
 
-from nanobot.bus.events import OutboundMessage
+from nanobot.bus.events import HostMediaCapabilities, OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
@@ -223,6 +223,14 @@ class MatrixChannel(BaseChannel):
 
     name = "matrix"
     display_name = "Matrix"
+
+    def media_capabilities(self) -> HostMediaCapabilities:
+        return HostMediaCapabilities(
+            atomic_caption=False,
+            native_alt_text=True,
+            max_file_bytes=max(int(self.config.max_media_bytes), 0),
+            max_caption_chars=1024,
+        )
     _STREAM_EDIT_INTERVAL = 2 # min seconds between edit_message_text calls
     monotonic_time = time.monotonic
 
@@ -394,12 +402,13 @@ class MatrixChannel(BaseChannel):
     def _build_outbound_attachment_content(
         *, filename: str, mime: str, size_bytes: int,
         mxc_url: str, encryption_info: dict[str, Any] | None = None,
+        description: str = "",
     ) -> dict[str, Any]:
         """Build Matrix content payload for an uploaded file/image/audio/video."""
         prefix = mime.split("/")[0]
         msgtype = {"image": "m.image", "audio": "m.audio", "video": "m.video"}.get(prefix, "m.file")
         content: dict[str, Any] = {
-            "msgtype": msgtype, "body": filename, "filename": filename,
+            "msgtype": msgtype, "body": description or filename, "filename": filename,
             "info": {"mimetype": mime, "size": size_bytes}, "m.mentions": {},
         }
         if encryption_info:
@@ -455,6 +464,7 @@ class MatrixChannel(BaseChannel):
     async def _upload_and_send_attachment(
         self, room_id: str, path: Path, limit_bytes: int,
         relates_to: dict[str, Any] | None = None,
+        description: str = "",
     ) -> str | None:
         """Upload one local file to Matrix and send it as a media message. Returns failure marker or None."""
         if not self.client:
@@ -496,6 +506,7 @@ class MatrixChannel(BaseChannel):
         content = self._build_outbound_attachment_content(
             filename=filename, mime=mime, size_bytes=size_bytes,
             mxc_url=mxc_url, encryption_info=encryption_info,
+            description=description,
         )
         if relates_to:
             content["m.relates_to"] = relates_to
@@ -511,21 +522,35 @@ class MatrixChannel(BaseChannel):
         if not self.client:
             return
         text = msg.content or ""
-        candidates = self._collect_outbound_media_candidates(msg.media)
+        envelopes = msg.host_media()
+        explicit_paths = {item.path for item in msg.media_envelopes}
         relates_to = self._build_thread_relates_to(msg.metadata)
         is_progress = isinstance(msg.event, ProgressEvent)
         try:
             failures: list[str] = []
-            if candidates:
+            if envelopes:
                 limit_bytes = await self._effective_media_limit_bytes()
-                for path in candidates:
-                    if fail := await self._upload_and_send_attachment(
+                for envelope in envelopes:
+                    kwargs: dict[str, Any] = dict(
                         room_id=msg.chat_id,
-                        path=path,
+                        path=Path(envelope.path),
                         limit_bytes=limit_bytes,
                         relates_to=relates_to,
-                    ):
-                        failures.append(fail)
+                    )
+                    if envelope.alt_text:
+                        kwargs["description"] = envelope.alt_text[:2048]
+                    if fail := await self._upload_and_send_attachment(**kwargs):
+                        failures.append(
+                            envelope.fallback_text
+                            if envelope.path in explicit_paths
+                            else fail
+                        )
+                    elif envelope.caption:
+                        text = (
+                            f"{text.rstrip()}\n{envelope.caption}"
+                            if text.strip()
+                            else envelope.caption
+                        )
             if failures:
                 text = f"{text.rstrip()}\n{chr(10).join(failures)}" if text.strip() else "\n".join(failures)
             if text.strip():

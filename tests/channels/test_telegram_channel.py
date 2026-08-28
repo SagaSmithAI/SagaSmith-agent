@@ -11,7 +11,7 @@ try:
 except ImportError:
     pytest.skip("Telegram dependencies not installed (python-telegram-bot)", allow_module_level=True)
 
-from nanobot.bus.events import OutboundMessage
+from nanobot.bus.events import HostMediaEnvelope, OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.telegram import (
@@ -438,6 +438,35 @@ async def test_send_text_retries_on_timeout() -> None:
 
     assert call_count == 3
     assert len(channel._app.bot.sent_messages) == 1
+
+
+@pytest.mark.asyncio
+async def test_send_photo_keeps_accessible_caption_atomic(tmp_path) -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    image = tmp_path / "combat.png"
+    image.write_bytes(b"png")
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="",
+            media_envelopes=[
+                HostMediaEnvelope(
+                    path=str(image),
+                    caption="Round 3",
+                    alt_text="Dragon at C4",
+                )
+            ],
+        )
+    )
+
+    assert channel._app.bot.sent_media[0]["caption"] == "Round 3\n\nAlt: Dragon at C4"
+    assert channel._app.bot.sent_messages == []
 
 
 @pytest.mark.asyncio

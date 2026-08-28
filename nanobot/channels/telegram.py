@@ -25,7 +25,7 @@ from telegram.error import BadRequest, NetworkError, TimedOut
 from telegram.ext import Application, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 from telegram.request import HTTPXRequest
 
-from nanobot.bus.events import OutboundMessage
+from nanobot.bus.events import HostMediaCapabilities, HostMediaEnvelope, OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
@@ -313,6 +313,9 @@ def _split_telegram_markdown_html(content: str, max_html_len: int) -> list[str]:
 
 
 _SEND_MAX_RETRIES = 3
+_TELEGRAM_PHOTO_MAX_BYTES = 10 * 1024 * 1024
+_TELEGRAM_FILE_MAX_BYTES = 50 * 1024 * 1024
+_TELEGRAM_CAPTION_MAX_LEN = 1024
 _SEND_RETRY_BASE_DELAY = 0.5  # seconds, doubled each retry
 _STREAM_EDIT_INTERVAL_DEFAULT = 0.6  # min seconds between edit_message_text calls
 
@@ -401,6 +404,12 @@ class TelegramChannel(BaseChannel):
 
     name = "telegram"
     display_name = "Telegram"
+    host_media_capabilities = HostMediaCapabilities(
+        atomic_caption=True,
+        native_alt_text=False,
+        max_file_bytes=_TELEGRAM_PHOTO_MAX_BYTES,
+        max_caption_chars=_TELEGRAM_CAPTION_MAX_LEN,
+    )
 
     # Commands registered with Telegram's command menu
     BOT_COMMANDS = [
@@ -744,7 +753,9 @@ class TelegramChannel(BaseChannel):
                 )
 
         # Send media files
-        for media_path in (msg.media or []):
+        explicit_paths = {item.path for item in msg.media_envelopes}
+        for envelope in msg.host_media():
+            media_path = envelope.path
             try:
                 media_type = self._get_media_type(media_path)
                 sender = {
@@ -762,6 +773,8 @@ class TelegramChannel(BaseChannel):
                 extra: dict[str, Any] = {}
                 if media_type == "video":
                     extra["supports_streaming"] = True
+                if caption := self._media_caption(envelope):
+                    extra["caption"] = caption
 
                 # Telegram Bot API accepts HTTP(S) URLs directly for media params.
                 if self._is_remote_media_url(media_path):
@@ -778,8 +791,16 @@ class TelegramChannel(BaseChannel):
                     )
                     continue
 
-                media_bytes = Path(media_path).read_bytes()
-                filename = Path(media_path).name
+                path = Path(media_path)
+                limit = (
+                    _TELEGRAM_PHOTO_MAX_BYTES
+                    if media_type == "photo"
+                    else _TELEGRAM_FILE_MAX_BYTES
+                )
+                if not path.is_file() or path.stat().st_size > limit:
+                    raise ValueError("media file is missing or exceeds the channel limit")
+                media_bytes = path.read_bytes()
+                filename = path.name
                 send_kwargs = {param: media_bytes, "filename": filename}
                 await self._call_with_retry(
                     sender,
@@ -790,11 +811,14 @@ class TelegramChannel(BaseChannel):
                     **send_kwargs,
                 )
             except Exception:
-                filename = media_path.rsplit("/", 1)[-1]
                 self.logger.exception("Failed to send media {}", media_path)
                 await self._app.bot.send_message(
                     chat_id=chat_id,
-                    text=f"[Failed to send: {filename}]",
+                    text=(
+                        envelope.fallback_text
+                        if envelope.path in explicit_paths
+                        else f"[Failed to send: {Path(media_path).name}]"
+                    ),
                     reply_parameters=reply_params,
                     **thread_kwargs,
                 )
@@ -831,6 +855,13 @@ class TelegramChannel(BaseChannel):
                     render_as_blockquote=render_as_blockquote,
                     reply_markup=reply_markup if is_last else None,
                 )
+
+    @staticmethod
+    def _media_caption(envelope: HostMediaEnvelope) -> str:
+        caption = envelope.caption
+        if envelope.alt_text and envelope.alt_text.casefold() not in caption.casefold():
+            caption = f"{caption}\n\nAlt: {envelope.alt_text}" if caption else envelope.alt_text
+        return caption[:_TELEGRAM_CAPTION_MAX_LEN]
 
     async def _call_with_retry(self, fn, *args, **kwargs):
         """Call an async Telegram API function with retry on pool/network timeout and RetryAfter."""

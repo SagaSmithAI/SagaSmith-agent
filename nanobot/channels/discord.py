@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import Field
 
-from nanobot.bus.events import OutboundMessage
+from nanobot.bus.events import HostMediaCapabilities, HostMediaEnvelope, OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
@@ -281,19 +281,19 @@ if DISCORD_AVAILABLE:
             sent_media = False
             failed_media: list[str] = []
 
-            for index, media_path in enumerate(msg.media or []):
+            for index, envelope in enumerate(msg.host_media()):
                 if await self._send_file(
                     channel,
-                    media_path,
+                    envelope,
                     reference=reference if index == 0 else None,
                     mention_settings=mention_settings,
                 ):
                     sent_media = True
                 else:
-                    failed_media.append(Path(media_path).name)
+                    failed_media.append(envelope.fallback_text)
 
             for index, chunk in enumerate(
-                self._build_chunks(msg.content or "", failed_media, sent_media)
+                self._build_chunks(msg.content or "", failed_media)
             ):
                 kwargs: dict[str, Any] = {"content": chunk}
                 if index == 0 and reference is not None and not sent_media:
@@ -304,26 +304,28 @@ if DISCORD_AVAILABLE:
         async def _send_file(
             self,
             channel: Messageable,
-            file_path: str,
+            envelope: HostMediaEnvelope,
             *,
             reference: discord.PartialMessage | None,
             mention_settings: discord.AllowedMentions,
         ) -> bool:
             """Send a file attachment via discord.py."""
-            path = Path(file_path)
-            if not path.is_file():
-                self._channel.logger.warning("file not found, skipping: {}", file_path)
-                return False
-
-            if path.stat().st_size > MAX_ATTACHMENT_BYTES:
-                self._channel.logger.warning("file too large (>20MB), skipping: {}", path.name)
-                return False
-
             try:
-                kwargs: dict[str, Any] = {"file": discord.File(path)}
+                path = Path(envelope.path)
+                if not path.is_file():
+                    self._channel.logger.warning("file not found, skipping: {}", envelope.path)
+                    return False
+                if path.stat().st_size > MAX_ATTACHMENT_BYTES:
+                    self._channel.logger.warning("file too large (>20MB), skipping: {}", path.name)
+                    return False
+                kwargs: dict[str, Any] = {
+                    "file": discord.File(path, description=envelope.alt_text or None),
+                    "allowed_mentions": discord.AllowedMentions.none(),
+                }
+                if envelope.caption:
+                    kwargs["content"] = envelope.caption[:MAX_MESSAGE_LEN]
                 if reference is not None:
                     kwargs["reference"] = reference
-                    kwargs["allowed_mentions"] = mention_settings
                 await channel.send(**kwargs)
                 self._channel.logger.info("file sent: {}", path.name)
                 return True
@@ -332,13 +334,19 @@ if DISCORD_AVAILABLE:
                 return False
 
         @staticmethod
-        def _build_chunks(content: str, failed_media: list[str], sent_media: bool) -> list[str]:
+        def _build_chunks(
+            content: str,
+            failed_media: list[str],
+            _sent_media: bool | None = None,
+        ) -> list[str]:
             """Build outbound text chunks, including attachment-failure fallback text."""
-            chunks = split_message(content, MAX_MESSAGE_LEN)
-            if chunks or not failed_media or sent_media:
-                return chunks
-            fallback = "\n".join(f"[attachment: {name} - send failed]" for name in failed_media)
-            return split_message(fallback, MAX_MESSAGE_LEN)
+            fallback = "\n".join(failed_media)
+            combined = (
+                f"{content.rstrip()}\n\n{fallback}"
+                if content.strip() and fallback
+                else content or fallback
+            )
+            return split_message(combined, MAX_MESSAGE_LEN)
 
         def _build_reply_context(
             self,
@@ -364,6 +372,12 @@ class DiscordChannel(BaseChannel):
     name = "discord"
     display_name = "Discord"
     _STREAM_EDIT_INTERVAL = 0.8
+    host_media_capabilities = HostMediaCapabilities(
+        atomic_caption=True,
+        native_alt_text=True,
+        max_file_bytes=MAX_ATTACHMENT_BYTES,
+        max_caption_chars=MAX_MESSAGE_LEN,
+    )
 
     @classmethod
     def default_config(cls) -> dict[str, Any]:

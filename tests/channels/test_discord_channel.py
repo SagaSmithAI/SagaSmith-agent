@@ -9,7 +9,7 @@ import pytest
 pytest.importorskip("discord")
 import discord
 
-from nanobot.bus.events import OutboundMessage
+from nanobot.bus.events import HostMediaEnvelope, OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.discord import (
@@ -1074,6 +1074,64 @@ async def test_client_send_outbound_reports_failed_attachments_when_no_text(tmp_
     )
 
     assert target.sent_payloads == [{"content": "[attachment: missing.txt - send failed]"}]
+
+
+@pytest.mark.asyncio
+async def test_client_media_failure_preserves_authoritative_text_and_fallback(tmp_path) -> None:
+    owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
+    client = DiscordBotClient(owner, intents=discord.Intents.none())
+    target = _FakeChannel(channel_id=123)
+    client.get_channel = lambda channel_id: target if channel_id == 123 else None  # type: ignore[method-assign]
+
+    await client.send_outbound(
+        OutboundMessage(
+            channel="discord",
+            chat_id="123",
+            content="Combat updated.",
+            media_envelopes=[
+                HostMediaEnvelope(
+                    path=str(tmp_path / "missing.png"),
+                    fallback_text="Grid unavailable; dragon remains at C4.",
+                )
+            ],
+        )
+    )
+
+    assert target.sent_payloads == [
+        {"content": "Combat updated.\n\nGrid unavailable; dragon remains at C4."}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_client_send_outbound_uses_atomic_native_media_caption(tmp_path) -> None:
+    owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
+    client = DiscordBotClient(owner, intents=discord.Intents.none())
+    target = _FakeChannel(channel_id=123)
+    client.get_channel = lambda channel_id: target if channel_id == 123 else None  # type: ignore[method-assign]
+    image = tmp_path / "combat.png"
+    image.write_bytes(b"png")
+
+    await client.send_outbound(
+        OutboundMessage(
+            channel="discord",
+            chat_id="123",
+            content="",
+            media_envelopes=[
+                HostMediaEnvelope(
+                    path=str(image),
+                    caption="Round 3",
+                    alt_text="Dragon at C4",
+                    audience_projection="party_public",
+                )
+            ],
+        )
+    )
+
+    assert target.sent_payloads[0]["content"] == "Round 3"
+    assert target.sent_payloads[0]["file_name"] == "combat.png"
+    assert target.sent_payloads[0]["allowed_mentions"].everyone is False
+    assert target.sent_payloads[0]["allowed_mentions"].users is False
+    assert owner.media_capabilities().native_alt_text is True
 
 
 @pytest.mark.asyncio

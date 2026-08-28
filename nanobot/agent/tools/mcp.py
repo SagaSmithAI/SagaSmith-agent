@@ -34,6 +34,7 @@ from nanobot.bus.events import (
     INBOUND_META_RUNTIME_CONTROL,
     RUNTIME_CONTROL_ACK,
     RUNTIME_CONTROL_MCP_RELOAD,
+    HostMediaEnvelope,
     InboundMessage,
 )
 from nanobot.runtime_context import RuntimeContextBlock, wrap_runtime_context_lines
@@ -612,13 +613,82 @@ def _request_is_shared_conversation() -> bool:
     return bool(parts & {"group", "room", "channel", "guild", "supergroup", "thread"})
 
 
-def _caller_media_delivery_blocked(structured_content: Any) -> bool:
-    """Protect caller-only render projections from automatic shared-chat delivery."""
-    return (
-        isinstance(structured_content, Mapping)
-        and str(structured_content.get("audience_projection") or "").casefold() == "caller"
-        and _request_is_shared_conversation()
+def _shared_media_delivery_blocked(structured_content: Any) -> bool:
+    """Only explicit party-public projections may cross into a shared chat."""
+    if not isinstance(structured_content, Mapping):
+        return False
+    projection = str(structured_content.get("audience_projection") or "").strip().casefold()
+    # Preserve ordinary MCP images that predate projection metadata.  Once a
+    # server opts into projection semantics, fail closed on unknown values.
+    return bool(projection and projection != "party_public" and _request_is_shared_conversation())
+
+
+def _host_media_envelope(
+    artifact: Mapping[str, Any],
+    structured_content: Any,
+) -> HostMediaEnvelope:
+    metadata = structured_content if isinstance(structured_content, Mapping) else {}
+    share_card = metadata.get("share_card")
+    share_card = share_card if isinstance(share_card, Mapping) else {}
+    caption = str(
+        metadata.get("suggested_caption")
+        or share_card.get("suggested_caption")
+        or metadata.get("caption")
+        or ""
     )
+    alt_text = str(metadata.get("alt_text") or share_card.get("alt_text") or "")
+    audience = str(metadata.get("audience_projection") or "") or None
+    attachment_role = str(metadata.get("attachment_role") or "")
+    if not attachment_role:
+        attachment_role = "combat_grid" if audience else "image"
+    fallback = str(metadata.get("fallback_text") or alt_text or caption or "")
+    return HostMediaEnvelope(
+        path=str(artifact.get("path") or ""),
+        mime_type=str(artifact.get("mime") or metadata.get("mime_type") or "image/png"),
+        caption=caption,
+        alt_text=alt_text,
+        attachment_role=attachment_role,
+        audience_projection=audience,
+        checksum=str(artifact.get("checksum") or metadata.get("image_checksum") or "") or None,
+        fallback_text=fallback,
+    )
+
+
+_HOST_ONLY_MEDIA_KEYS = frozenset(
+    {
+        "alt_text",
+        "artifact_path",
+        "attachment_role",
+        "audience_projection",
+        "base64",
+        "caption",
+        "checksum",
+        "data_url",
+        "fallback_text",
+        "file_path",
+        "image_base64",
+        "image_checksum",
+        "local_path",
+        "path",
+        "share_card",
+        "suggested_caption",
+    }
+)
+
+
+def _model_visible_image_payload(value: Any) -> Any:
+    """Remove transport-only image metadata while retaining authoritative game state."""
+    if isinstance(value, Mapping):
+        return {
+            str(key): _model_visible_image_payload(item)
+            for key, item in value.items()
+            if str(key).casefold() not in _HOST_ONLY_MEDIA_KEYS
+        }
+    if isinstance(value, (list, tuple)):
+        return [_model_visible_image_payload(item) for item in value]
+    if isinstance(value, str) and value.strip().casefold().startswith("data:image/"):
+        return "(host-only image data omitted)"
+    return value
 
 
 def _mcp_image_tool_result(
@@ -974,11 +1044,11 @@ class MCPToolWrapper(_MCPWrapperBase):
                         structured_content,
                     )
                     self._remember_authorization_epoch(authoritative_payload)
-                    rendered, media = self._render_call_result(
+                    rendered, media_envelopes = self._render_call_result(
                         result.content,
                         kwargs,
                         structured_content=structured_content,
-                        block_media_delivery=_caller_media_delivery_blocked(
+                        block_media_delivery=_shared_media_delivery_blocked(
                             structured_content
                         ),
                     )
@@ -995,7 +1065,7 @@ class MCPToolWrapper(_MCPWrapperBase):
                         context_barrier=context_changed,
                         structured_content=structured_content,
                         audit_receipt=_auth_context_receipt_from_result(result.content),
-                        media=media,
+                        media_envelopes=media_envelopes,
                     )
                 except Exception as exc:
                     logger.exception(
@@ -1074,7 +1144,7 @@ class MCPToolWrapper(_MCPWrapperBase):
         *,
         structured_content: Any = None,
         block_media_delivery: bool = False,
-    ) -> tuple[str, tuple[str, ...]]:
+    ) -> tuple[str, tuple[HostMediaEnvelope, ...]]:
         """Turn MCP content blocks into a tool result string.
 
         Structured MCP output is authoritative when present, avoiding an invalid
@@ -1086,11 +1156,7 @@ class MCPToolWrapper(_MCPWrapperBase):
         """
         from mcp import types
 
-        text_parts: list[str] = (
-            [json.dumps(structured_content, ensure_ascii=False, indent=2)]
-            if structured_content is not None
-            else []
-        )
+        text_parts: list[str] = []
         artifacts: list[dict[str, Any]] = []
         for block in content:
             if isinstance(block, types.TextContent):
@@ -1108,18 +1174,25 @@ class MCPToolWrapper(_MCPWrapperBase):
             text_parts.append(str(block))
 
         if artifacts:
+            if structured_content is not None:
+                visible = _model_visible_image_payload(structured_content)
+                if visible not in ({}, []):
+                    text_parts.insert(0, json.dumps(visible, ensure_ascii=False, indent=2))
             return (
                 _mcp_image_tool_result(
                     text_parts,
                     artifacts,
                     delivery_blocked=block_media_delivery,
                 ),
-                (
-                    ()
-                    if block_media_delivery
-                    else tuple(str(artifact["path"]) for artifact in artifacts)
+                ()
+                if block_media_delivery
+                else tuple(
+                    _host_media_envelope(artifact, structured_content)
+                    for artifact in artifacts
                 ),
             )
+        if structured_content is not None:
+            text_parts.insert(0, json.dumps(structured_content, ensure_ascii=False, indent=2))
         return "\n".join(text_parts) or "(no output)", ()
 
     def _store_image_block(
