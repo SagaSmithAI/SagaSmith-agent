@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
+import time
+from contextlib import asynccontextmanager
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -31,6 +35,48 @@ def test_summary_reports_stable_warm_call_statistics() -> None:
         "p95": 0.4,
         "max": 0.4,
     }
+
+
+def test_measure_session_uses_sdk_v2_call_result_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    @asynccontextmanager
+    async def fake_transport(_url: str):
+        yield object(), object(), None
+
+    class FakeSession:
+        def __init__(self, _read: object, _write: object) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+        async def initialize(self) -> None:
+            calls.append("initialize")
+
+        async def call_tool(self, name: str, _arguments: dict[str, object]):
+            calls.append(name)
+            return SimpleNamespace(is_error=False)
+
+    monkeypatch.setattr(benchmark, "streamable_http_client", fake_transport)
+    monkeypatch.setattr(benchmark, "ClientSession", FakeSession)
+
+    cold, warm = asyncio.run(
+        benchmark._measure_session(
+            "http://127.0.0.1:1/mcp",
+            started_at=time.perf_counter(),
+            iterations=2,
+        )
+    )
+
+    assert cold >= 0
+    assert len(warm) == 2
+    assert calls == ["initialize", "server_capabilities", "server_capabilities", "server_capabilities"]
 
 
 @pytest.mark.skipif(os.name != "nt", reason="exercises the Windows RSS implementation")

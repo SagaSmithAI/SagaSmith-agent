@@ -110,7 +110,7 @@ async def _measure_session(
         async with ClientSession(read, write) as session:
             await session.initialize()
             first = await session.call_tool("server_capabilities", {})
-            if first.isError:
+            if first.is_error:
                 raise StackError("server_capabilities failed during cold-start benchmark")
             cold_start = time.perf_counter() - started_at
             warm: list[float] = []
@@ -118,7 +118,7 @@ async def _measure_session(
                 before = time.perf_counter()
                 result = await session.call_tool("server_capabilities", {})
                 warm.append(time.perf_counter() - before)
-                if result.isError:
+                if result.is_error:
                     raise StackError("server_capabilities failed during warm benchmark")
     return cold_start, warm
 
