@@ -152,7 +152,8 @@ Hosted 路径采用三层筛选，避免把三个领域的全部低级工具一�
 2. MCP 为同一 authorization 提供稳定、确定排序、可缓存的目录，不依赖连接内的
    exposure 副作用改变 `tools/list`。
 3. Web 按 system、phase、caller 权限和当前任务传入具体 `allowed_operations`；Agent
-   校验这些 ID 确实存在后，只把对应 facade/workflow 子集放进本轮模型 registry。
+   校验这些 ID 确实存在后，只把对应 facade/workflow 子集放进本轮模型 registry。Hosted
+   请求若投影超过 16 个 operation 会被拒绝，避免授权配置失误把低命中率长目录灌入模型上下文。
 
 `enabledTools` 是静态部署允许列表，`allowed_operations` 是单轮投影，两者都不能替代
 领域 MCP 在每次调用时对 role、phase、campaign、revision 和幂等键的重新校验。
@@ -285,7 +286,9 @@ D&D 与 CoC Workbench 默认位于 8766 与 8768。非本机访问必须设置 b
 `--workspace-max-bytes`、`--workspace-max-count` 收紧。
 
 worker 在 workspace 中写入 `sagasmith.hosted-workspace/v1` marker，将规范路径与
-Host 管理的 ID 哈希为稳定 opaque owner。重试或进程重启可重新认领同一 owner；请求的
+Host 管理的 ID 哈希为稳定 opaque owner。root 级跨进程锁会把 active workspace 准入、
+marker 更新和清理串行化；已有 active marker 达到 `--workspace-max-count` 时，新建或重新
+激活会 fail closed，但相同 owner 与规范路径的重试或进程重启复用原槽位。请求的
 `terminal=true` 先标记终止，随后才进入 TTL/LRU 清理。清理只删除 root 下、marker
 schema/路径匹配且处于 `terminated` 状态的目录；未知目录、active workspace、symlink、
 损坏或不匹配 marker 都会保留。不要让多个 workspace 复用同一个 ID，也不要用玩家或

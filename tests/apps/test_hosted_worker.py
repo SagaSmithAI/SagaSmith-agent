@@ -8,10 +8,13 @@ from types import SimpleNamespace
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from mcp import types
 
 from nanobot.agent.mcp_observability import record_mcp_event
 from nanobot.agent.tools.base import ToolResult
+from nanobot.agent.tools.mcp import MCPToolWrapper, _serialize_call_tool_result
 from nanobot.apps.hosted_worker import (
+    MAX_HOSTED_MCP_OPERATIONS,
     _parse_worker_arguments,
     _workspace_lease_from_arguments,
     create_worker_app,
@@ -288,6 +291,24 @@ def test_hosted_worker_rejects_web_policy_groups_instead_of_tool_ids() -> None:
     assert "absent from the authorized MCP catalog" in response.json()["detail"]
 
 
+def test_hosted_worker_rejects_oversized_model_tool_projection() -> None:
+    loop = FakeLoop()
+    operations = [f"operation_{index}" for index in range(MAX_HOSTED_MCP_OPERATIONS + 1)]
+    with TestClient(create_worker_app(loop, "test-model", service_token=TOKEN)) as client:
+        response = client.post(
+            "/v1/chat/completions",
+            headers={"Authorization": f"Bearer {TOKEN}"},
+            json=request_json(
+                trusted_context=trusted_context(allowed_operations=operations)
+            ),
+        )
+
+    assert response.status_code == 422
+    error = response.json()["detail"][0]
+    assert error["loc"][-1] == "allowed_operations"
+    assert error["type"] == "too_long"
+
+
 def test_hosted_worker_accepts_web_envelope_with_exact_facade_tool_ids() -> None:
     loop = FakeLoop()
     loop.registry.register(
@@ -509,3 +530,179 @@ def test_hosted_worker_returns_standard_mcp_result_and_media_envelope() -> None:
     payload = response.json()
     assert payload["mcp_results"][0]["result"]["content"][0]["type"] == "image"
     assert payload["host_media"][0]["attachment_role"] == "combat_grid"
+
+
+def test_hosted_worker_preserves_audio_resource_and_embedded_blocks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifacts = {
+        "audio/ogg": {
+            "id": "audio-1",
+            "path": "D:/worker/artifacts/scene.ogg",
+            "mime": "audio/ogg",
+            "checksum": "audio-checksum",
+        },
+        "image/webp": {
+            "id": "grid-1",
+            "path": "D:/worker/artifacts/grid.webp",
+            "mime": "image/webp",
+            "checksum": "grid-checksum",
+        },
+    }
+
+    def store_artifact(_encoded, *, mime, **_kwargs):
+        return dict(artifacts[mime])
+
+    monkeypatch.setattr(
+        "nanobot.utils.artifacts.store_mcp_media_artifact",
+        store_artifact,
+    )
+    standard_result = types.CallToolResult(
+        content=[
+            types.TextContent(type="text", text="encounter ready"),
+            types.AudioContent(type="audio", data="YXVkaW8=", mimeType="audio/ogg"),
+            types.ResourceLink(
+                type="resource_link",
+                name="encounter-notes",
+                uri="sagasmith://campaign/encounter-notes",
+                mimeType="text/markdown",
+            ),
+            types.EmbeddedResource(
+                type="resource",
+                resource=types.TextResourceContents(
+                    uri="sagasmith://campaign/summary",
+                    mimeType="text/plain",
+                    text="A bounded encounter summary.",
+                ),
+            ),
+            types.EmbeddedResource(
+                type="resource",
+                resource=types.BlobResourceContents(
+                    uri="sagasmith://campaign/grid",
+                    mimeType="image/webp",
+                    blob="aW1hZ2U=",
+                ),
+            ),
+        ],
+        structuredContent={"audience_projection": "party_public"},
+    )
+    wrapper = MCPToolWrapper(
+        SimpleNamespace(),
+        "sagasmith_dnd",
+        types.Tool(
+            name="render_encounter",
+            description="Render a mixed-media encounter result.",
+            inputSchema={"type": "object", "properties": {}},
+        ),
+    )
+    rendered, envelopes = wrapper._render_call_result(
+        standard_result.content,
+        {},
+        structured_content=standard_result.structured_content,
+    )
+
+    class MixedMediaLoop(FakeLoop):
+        async def process_direct(self, **arguments):
+            result = ToolResult(
+                rendered,
+                structured_content=standard_result.structured_content,
+                mcp_result=_serialize_call_tool_result(standard_result),
+                media_envelopes=envelopes,
+            )
+            for hook in arguments["hooks"]:
+                await hook.after_execute_tool(
+                    None,
+                    SimpleNamespace(name="mcp_dnd_render_encounter"),
+                    None,
+                    None,
+                    result,
+                )
+            return SimpleNamespace(content="ok", metadata={"_agent_usage": {}})
+
+    with TestClient(
+        create_worker_app(MixedMediaLoop(), "test-model", service_token=TOKEN)
+    ) as client:
+        response = client.post(
+            "/v1/chat/completions",
+            headers={"Authorization": f"Bearer {TOKEN}"},
+            json=request_json(),
+        )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    content = payload["mcp_results"][0]["result"]["content"]
+    assert [block["type"] for block in content] == [
+        "text",
+        "audio",
+        "resource_link",
+        "resource",
+        "resource",
+    ]
+    assert content[1]["mimeType"] == "audio/ogg"
+    assert content[2]["uri"] == "sagasmith://campaign/encounter-notes"
+    assert content[3]["resource"]["text"] == "A bounded encounter summary."
+    assert content[4]["resource"]["mimeType"] == "image/webp"
+    assert {item["attachment_role"] for item in payload["host_media"]} == {
+        "audio",
+        "combat_grid",
+    }
+    assert {item["checksum"] for item in payload["host_media"]} == {
+        "audio-checksum",
+        "grid-checksum",
+    }
+
+
+def test_hosted_worker_preserves_structured_mcp_tool_error() -> None:
+    standard_error = types.CallToolResult(
+        isError=True,
+        content=[
+            types.TextContent(
+                type="text",
+                text="Revision 7 is stale; retry from revision 8.",
+            )
+        ],
+        structuredContent={
+            "error": {
+                "code": "stale_revision",
+                "message": "Revision 7 is stale; retry from revision 8.",
+                "retryable": True,
+                "expected_revision": 8,
+            }
+        },
+    )
+
+    class StructuredErrorLoop(FakeLoop):
+        async def process_direct(self, **arguments):
+            result = ToolResult(
+                "Revision 7 is stale; retry from revision 8.",
+                is_error=True,
+                mcp_result=_serialize_call_tool_result(standard_error),
+            )
+            for hook in arguments["hooks"]:
+                await hook.after_execute_tool(
+                    None,
+                    SimpleNamespace(name="mcp_dnd_combat_action"),
+                    None,
+                    None,
+                    result,
+                )
+            return SimpleNamespace(content="recoverable", metadata={"_agent_usage": {}})
+
+    with TestClient(
+        create_worker_app(StructuredErrorLoop(), "test-model", service_token=TOKEN)
+    ) as client:
+        response = client.post(
+            "/v1/chat/completions",
+            headers={"Authorization": f"Bearer {TOKEN}"},
+            json=request_json(),
+        )
+
+    assert response.status_code == 200, response.text
+    result = response.json()["mcp_results"][0]["result"]
+    assert result["isError"] is True
+    assert result["structuredContent"]["error"] == {
+        "code": "stale_revision",
+        "message": "Revision 7 is stale; retry from revision 8.",
+        "retryable": True,
+        "expected_revision": 8,
+    }

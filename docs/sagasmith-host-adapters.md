@@ -159,7 +159,9 @@ It includes `system_id`, so the worker connects only the matching `systemIds` MC
 `allowed_operations` contains exact MCP tool IDs such as `campaign_query` or `resolution`, never
 Web policy groups such as `campaign.read`. Web derives that exact allowlist from system, phase,
 caller permissions and task. Agent rejects unknown IDs before invoking the model and also enforces
-the same list when tools are called. The per-turn live registry sees legacy catalog updates while
+the same list when tools are called. The Hosted boundary rejects projections above 16 concrete
+operations; split a broader task into bounded workflow turns instead of expanding the model
+catalogue. The per-turn live registry sees legacy catalog updates while
 keeping transient response tools out of the underlying session registry.
 The response contains `mcp_results` with standard text/image/audio/resource/embedded-resource
 blocks and `host_media` envelopes for Web artifact ingestion. Activity callbacks reuse one HTTP
@@ -176,7 +178,10 @@ worker hashes it together with the canonical workspace path into an opaque marke
 or restart can reclaim the same workspace even when its ephemeral port changes. Never derive this
 ID from player/model input, and never reuse it for another workspace. `--workspace-ttl-seconds`,
 `--workspace-max-bytes`, and `--workspace-max-count` bound registered worker workspaces. Cleanup
-removes only terminated directories with a matching SagaSmith marker; unknown directories,
-symlinks and active workspaces are not deletion candidates. Roll back the
+and active-workspace admission share a root-scoped cross-process lock. A new or reactivated
+workspace fails closed at the active count limit; the same owner and canonical path can restart
+without consuming another slot. Cleanup removes only terminated directories with a matching
+SagaSmith marker; unknown directories, symlinks and active workspaces are not deletion candidates.
+Roll back the
 Agent image before changing the request contract; use `protocolMode: "legacy"` only for an MCP
 protocol rollback, not as a long-term authorization boundary.
