@@ -2,6 +2,13 @@
 
 Use this page after `nanobot agent -m "Hello!"` works locally. Deployment keeps long-running surfaces online: WebUI, chat apps, heartbeat, Dream, cron jobs, and channel connections.
 
+> This page deploys the user-operated Local Agent/gateway. SagaSmith Hosted Web uses the separate
+> non-root `Dockerfile.hosted` artifact and `sagasmith-agent-worker` supervisor contract. For its
+> trusted-context, current-system MCP selection, media preservation, workspace lifecycle, metrics,
+> upgrade, and rollback requirements, read the root [English](../README-en.md) or
+> [Chinese](../README.md) README and [`sagasmith-host-adapters.md`](./sagasmith-host-adapters.md).
+> Do not expose the Hosted Worker as a public generic OpenAI endpoint.
+
 ## Before You Deploy
 
 Check these once before Docker, systemd, or LaunchAgent:

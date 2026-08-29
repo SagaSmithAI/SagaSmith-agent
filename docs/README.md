@@ -10,6 +10,27 @@ Provider examples are concrete walkthroughs, not rankings or endorsements. Use t
 
 If you find a docs mistake, outdated command, or confusing step, please open an issue: <https://github.com/HKUDS/nanobot/issues>.
 
+## SagaSmith operator map
+
+The root [Chinese](../README.md) and [English](../README-en.md) READMEs are the
+source of truth for SagaSmith product topology, the Local/Hosted split, coordinated component
+lock, and production rollout order. Use these focused references for the security-sensitive
+boundaries:
+
+| Need | Source of truth |
+|---|---|
+| Install or verify the current Local Kit | [`guides/install-full-workspace-windows.md`](./guides/install-full-workspace-windows.md) / [中文](./guides/install-full-workspace-windows.zh-CN.md) |
+| Configure modern or legacy MCP transport | [`guides/configure-mcp-tools.md`](./guides/configure-mcp-tools.md) and [`configuration.md#mcp-model-context-protocol`](./configuration.md#mcp-model-context-protocol) |
+| Integrate Codex, Claude Code, OpenClaw, Hermes, or Hosted Web | [`sagasmith-host-adapters.md`](./sagasmith-host-adapters.md) |
+| Understand Host/domain ownership | [`architecture.md`](./architecture.md) |
+| Deploy the generic Local gateway | [`deployment.md`](./deployment.md) |
+| Inspect immutable component pins | [`../sagasmith-stack-lock.json`](../sagasmith-stack-lock.json) |
+
+The coordinated SagaSmith path targets MCP 2026-07-28. `protocolMode: "legacy"` is an explicit
+rollback adapter, not the release-lock authority model. Hosted Web uses the dedicated worker
+contract described in the root README; it is not the generic `nanobot gateway` deployment on this
+page.
+
 ## Pick a Track
 
 | You are | Start with | Then use |
@@ -37,7 +58,7 @@ full reference first.
 
 | Goal | Guide |
 |---|---|
-| Install the complete SagaSmith Windows source workspace | [`guides/install-full-workspace-windows.md`](./guides/install-full-workspace-windows.md) |
+| Install the complete SagaSmith Windows source workspace | [`guides/install-full-workspace-windows.md`](./guides/install-full-workspace-windows.md) / [中文](./guides/install-full-workspace-windows.zh-CN.md) |
 | Build a personal AI agent | [`guides/build-a-personal-ai-agent.md`](./guides/build-a-personal-ai-agent.md) |
 | Run a self-hosted AI agent | [`guides/self-hosted-ai-agent.md`](./guides/self-hosted-ai-agent.md) |
 | Use a browser AI agent WebUI | [`guides/ai-agent-webui.md`](./guides/ai-agent-webui.md) |

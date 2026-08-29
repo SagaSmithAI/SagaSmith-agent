@@ -1,5 +1,9 @@
 # nanobot WebUI Source
 
+> This is the browser UI bundled with the user-operated Local Agent. It is not
+> [SagaSmith Web](https://github.com/SagaSmithAI/SagaSmith-Web), which owns Hosted rooms, durable
+> room-turn jobs, quota settlement, artifact storage, and Hosted Worker supervision.
+
 This directory contains the React/TypeScript source for the nanobot WebUI. If
 you installed `nanobot-ai` from PyPI and only want to use the bundled browser UI,
 read the user guide in [`docs/webui.md`](../docs/webui.md). You do not need

@@ -2,6 +2,12 @@
 
 This directory contains built-in skills that extend nanobot's capabilities.
 
+SagaSmith D&D, CoC, and Narrative Skills are deliberately **not** bundled here. Their current
+versions live with the corresponding domain MCP repositories and are loaded through
+`agents.defaults.externalSkillsDirs`. Archived standalone Skill repositories are historical only
+and must not be used as installer or release-lock inputs. Keeping domain guidance beside its MCP
+prevents this Agent Host from becoming a second rules/runtime authority.
+
 ## Skill Format
 
 Each skill is a directory containing a `SKILL.md` file with:

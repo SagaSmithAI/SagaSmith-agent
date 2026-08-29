@@ -1,6 +1,6 @@
 # SagaSmith Agent
 
-[中文](README.md) · [English](README-en.md) · [官网](https://sagasmithai.github.io) · [平台总览](https://github.com/SagaSmithAI/.github/blob/main/profile/README.md) · [SagaSmith Web](https://github.com/SagaSmithAI/SagaSmith-service) · [内容目录](https://github.com/SagaSmithAI/SagaSmith-dnd-content-library)
+[中文](README.md) · [English](README-en.md) · [官网](https://sagasmithai.github.io) · [平台总览](https://github.com/SagaSmithAI/.github/blob/main/profile/README.md) · [SagaSmith Web](https://github.com/SagaSmithAI/SagaSmith-Web) · [内容目录](https://github.com/SagaSmithAI/SagaSmith-dnd-content-library)
 
 <p align="center"><img src="images/Sagasmith.png" alt="SagaSmith Agent" width="168"></p>
 
@@ -36,6 +36,19 @@ SagaSmith Agent 负责：
 - 用 `player_name` 或模型文本推断权限；
 - 在存在匹配 MCP 能力时绕过 MCP 调 CLI/临时脚本。
 
+## 先选择运行路径
+
+| 目标 | 入口 | 状态与权限边界 | 从这里开始 |
+|---|---|---|---|
+| 自己电脑上的完整主持 Agent | `sagasmith-agent-local` / `nanobot` | 本地用户拥有 config、workspace、Channels 和所选 MCP | [Local Kit 安装](#windows-完整安装与启动) |
+| SagaSmith Web 房间 | `sagasmith-agent-worker` | Web 是 Host/supervisor；worker 只接收一个可信 turn envelope 和一个玩家消息 | [Hosted Worker 契约](#hosted-worker-请求与结果契约) |
+| Codex、Claude Code 或其他本地 Host | `sagasmith-auth-bridge` | 每个 requester/conversation 使用独立可信绑定；桥接器为目标 MCP 重新签发委派 | [Host Adapter](docs/sagasmith-host-adapters.md) |
+| 通用 NanoBot 能力 | `nanobot` | 使用本仓库的 provider、channel、tool、WebUI 与 API 配置 | [文档索引](docs/README.md) |
+
+Local Kit 与 Hosted Worker 复用同一个 Agent loop 和 MCP handler，但不是同一个安全
+产品表面。Local 发行物允许用户选择本机能力；Hosted 发行物在构建后审计并移除
+Channels、WebUI、本地安装器以及 shell/filesystem/web/cron/subagent 等工具。
+
 ## Local 与 Hosted 双发行物
 
 仓库共享同一套 Agent loop、MCP client、Skills runtime 和 Auth Context 实现，但提供两个
@@ -52,6 +65,47 @@ Hosted 镜像构建时会删除 Channel、WebUI、本地安装器和 Local CLI �
 Codex、Claude Code、上游 Nanobot、OpenClaw、Hermes 通过同一签名身份桥接协议连接三套
 SagaSmith MCP；适配方式、信任边界和配置形状见
 [外部 Host Auth Adapter](docs/sagasmith-host-adapters.md)。
+
+### Hosted Worker 请求与结果契约
+
+Web 只向 `POST /v1/chat/completions` 发送一条 `role=user` 的文本消息；可信字段必须放在
+独立的 `trusted_context` 对象中，Pydantic 会拒绝额外字段、通配操作、重复操作、过期
+委派以及超过 15 分钟的委派。关键字段包括：
+
+```json
+{
+  "session_id": "service-session-id",
+  "messages": [{"role": "user", "content": "玩家输入"}],
+  "trusted_context": {
+    "caller_principal": "workload:sagasmith-web",
+    "workload_identity": "sagasmith-agent-hosted-worker",
+    "requester_principal": "user:requester",
+    "resource_owner_principal": "user:campaign-owner",
+    "acting_host_principal": "campaign:gm",
+    "acting_character_id": "character-id-or-empty",
+    "authorized_audience": "player",
+    "allowed_operations": ["campaign_query", "resolution"],
+    "room_turn_id": "durable-room-turn-id",
+    "campaign_id": "campaign-id",
+    "system_id": "dnd5e",
+    "base_revision": 42,
+    "expires_at": "replace-with-now-plus-at-most-15-minutes",
+    "idempotency_key": "stable-business-operation-key",
+    "conversation_principal": "room:conversation",
+    "tenant_id": "tenant-or-empty",
+    "traceparent": "",
+    "tracestate": "",
+    "baggage": ""
+  }
+}
+```
+
+浏览器 token、Web callback token 和其他 audience 的凭据都不会下传到领域 MCP；Agent
+针对目标服务、精确操作和剩余硬过期时间生成新委派。响应继续使用 OpenAI-compatible
+外壳，并额外返回 `structured_output`、有界 `tool_receipts`、原始标准 `mcp_results` 和
+Host-only `host_media`。`mcp_results[].result` 保留 MCP `CallToolResult` 的 text、image、
+audio、resource、embedded resource、`structuredContent` 与 `isError` 语义；Web 将
+`host_media` 转换为 artifact/对象存储 ID，而不是用私有 wire format 替代 MCP 结果。
 
 ## MCP 2026-07-28 与 Hosted 边界
 
@@ -89,6 +143,30 @@ exclusion 写入机器可读结果，因此这条证据不被扩张为所有 Pac
 ```
 
 现代目录不会因同一连接内其他请求的副作用而改变；authorization 仍可得到私有、确定的目录。legacy `tools/list_changed` 仅用于兼容和真实目录变化。目录筛选与 opaque handle 都不授予权限，模型不能靠构造参数提升权限。
+
+### 防止工具列表过长
+
+Hosted 路径采用三层筛选，避免把三个领域的全部低级工具一次性塞给模型：
+
+1. 依据可信 `system_id` 只连接当前战役系统的 MCP；没有匹配 `systemIds` 的服务不启动。
+2. MCP 为同一 authorization 提供稳定、确定排序、可缓存的目录，不依赖连接内的
+   exposure 副作用改变 `tools/list`。
+3. Web 按 system、phase、caller 权限和当前任务传入具体 `allowed_operations`；Agent
+   校验这些 ID 确实存在后，只把对应 facade/workflow 子集放进本轮模型 registry。
+
+`enabledTools` 是静态部署允许列表，`allowed_operations` 是单轮投影，两者都不能替代
+领域 MCP 在每次调用时对 role、phase、campaign、revision 和幂等键的重新校验。
+模型看不到的工具仍保留在稳定底层目录中，目录只有在 authorization/catalog 真正变化
+时刷新，而不会因为一次战斗写入全量失效。
+
+### MCP Tasks 只处理真正长工具
+
+当且仅当现代 `server/discover` 协商得到 `io.modelcontextprotocol/tasks` 且一次工具调用
+返回 `resultType: "task"` 时，Agent 才切换到 SEP-2663 claim/poll/update/cancel 流程。
+每次 `tasks/get`、`tasks/update`、`tasks/cancel` 都使用新签名的单操作委派和
+`Mcp-Name: <taskId>`；`taskId` 只是 opaque 名称，不是 capability。最终结果重新还原为
+原工具的标准 `CallToolResult`。普通工具仍受 `toolTimeout` 控制并同步返回；只有真正的
+import/OCR/compile/高分辨率 render 等长工具使用独立 `taskTimeout`。
 
 战役、principal、role、audience、branch 或 restore 变化时，Agent 会停止同一
 模型回复中余下的工具调用，丢弃旧模型消息、摘要、workspace/Dream memory、
@@ -199,6 +277,20 @@ D&D 与 CoC Workbench 默认位于 8766 与 8768。非本机访问必须设置 b
 
 > `config/config.json` 通常包含本机路径与密钥，不应提交。使用环境变量引用 provider secret。
 
+## Hosted workspace 生命周期
+
+`sagasmith-agent-worker` 必须由可信 supervisor 传入 `--workspace`、稳定且唯一的
+`--workspace-id` 与配置路径。默认策略为 TTL 86400 秒、单 workspace 1 GiB、同一 root
+最多 128 个登记 workspace，可通过 `--workspace-ttl-seconds`、
+`--workspace-max-bytes`、`--workspace-max-count` 收紧。
+
+worker 在 workspace 中写入 `sagasmith.hosted-workspace/v1` marker，将规范路径与
+Host 管理的 ID 哈希为稳定 opaque owner。重试或进程重启可重新认领同一 owner；请求的
+`terminal=true` 先标记终止，随后才进入 TTL/LRU 清理。清理只删除 root 下、marker
+schema/路径匹配且处于 `terminated` 状态的目录；未知目录、active workspace、symlink、
+损坏或不匹配 marker 都会保留。不要让多个 workspace 复用同一个 ID，也不要用玩家或
+模型文本生成 ID。
+
 ## 通用快速开始
 
 Python 3.11+：
@@ -270,6 +362,46 @@ bun install
 bun run build
 bun run test
 ```
+
+### 聚焦验证
+
+README、MCP/Hosted 配置或发布锁变更至少应运行：
+
+```bash
+uv run ruff check nanobot tests
+uv run pytest -q tests/apps/test_hosted_worker.py tests/tools/test_mcp_v2_contract.py \
+  tests/tools/test_mcp_tasks.py tests/test_sagasmith_local_stack.py
+uv run pytest -q tests/host_conformance
+```
+
+真实领域矩阵由 CI 的 `release-lock` 与 `latest-main` 两条 lane 运行；本地测试不得使用
+生产战役数据、真实用户文本或付费模型。`python -m nanobot.apps.hosted_audit` 只在仅安装
+`.[hosted]` 的干净 Hosted 镜像中运行；装有 Channel extras 的 Local/dev 环境会按设计失败。
+
+## 部署、升级与回滚
+
+1. 先读取 [`sagasmith-stack-lock.json`](sagasmith-stack-lock.json)，确认 schema 为
+   `sagasmith.release-lock/v3`、`release_status` 仍符合预期，并按其中的不可变 commit
+   部署 Core 与三个领域组件；不要从归档仓库或浮动 `main` 拼装正式栈。
+2. 先运行 `nanobot sagasmith install --verify-only` 与 `nanobot sagasmith doctor --json`，
+   再滚动替换领域 MCP、Agent Worker，最后替换 Web。保持旧镜像和旧 lock 可用，直到
+   新栈的真实 transport/identity/media/Tasks smoke 通过。
+3. 协议故障可把单个通用 MCP 配置临时设为 `protocolMode: "legacy"`；协调发行栈应优先
+   整体回滚到上一组已验证镜像和 lock。legacy 只是兼容适配，不恢复隐式 session 权限，
+   也不得启用已归档仓库。
+4. Hosted 请求契约不兼容时先回滚 Agent 镜像，再回滚 Web pin。不要在运行中改变
+   `workspace-id` 的归属，也不要用目录清空代替 marker/TTL/LRU 生命周期。
+
+Hosted Worker 的 `/health` 用于存活检查；`GET /metrics/mcp` 返回
+`sagasmith.host-mcp-metrics/v1`，只按 transport、协议时代、阶段、结果及固定目录数量桶
+聚合。`traceparent`、`tracestate`、`baggage` 随可信请求向 MCP 传播，但 user、campaign、
+run、tool name 和参数都不会成为 metric label。模型调用层的 Langfuse 是可选项，不能
+替代 worker/MCP 的低基数运行指标。
+
+上线前同时复核 [`SECURITY.md`](SECURITY.md)、
+[`docs/sagasmith-host-adapters.md`](docs/sagasmith-host-adapters.md) 和
+[`docs/deployment.md`](docs/deployment.md)。不要把 `SAGASMITH_WORKER_SERVICE_TOKEN`、
+MCP 签名 secret、provider key、可信 context 文件或填充后的 Local Kit 模板提交到 Git。
 
 常用文档：[Quick Start](docs/quick-start.md) · [Configuration](docs/configuration.md) · [Architecture](docs/architecture.md) · [MCP](docs/guides/configure-mcp-tools.md) · [Security](SECURITY.md)
 
