@@ -39,6 +39,11 @@ uv run nanobot sagasmith install
 确实存在于所有所选仓库时，才使用 `--release-ref <coordinated-tag>`。发布检出不会修改
 开发工作区。
 
+内置 v3 锁要求 MCP 2026-07-28、auth-context v2 与共享 authoritative-MCP 契约，且只
+包含 Core 和三个当前领域仓库。含未知组件（包括已归档拆分仓库）的 manifest 会在 clone
+前被拒绝。
+它是尚未发布的兼容锁，不会发布 package、image、tag 或 GitHub Release。
+
 配置器只维护 SagaSmith 自己的 MCP 与 Skills 字段；修改前备份现有配置，
 并保留 provider、secret、channel、无关 MCP 和无关 Skills 路径。
 
@@ -58,8 +63,10 @@ uv run nanobot sagasmith stop
 默认端口：Agent WebUI 8765、D&D Gateway 8766、D&D MCP 8767、
 CoC Gateway 8768、CoC MCP 8769。Narrative 由 Agent 按会话启动 stdio。
 
-每个 Agent 逻辑会话都有独立 SagaSmith MCP 连接和动态工具注册表，
-`tools/list_changed` 不会污染其他聊天的战役、阶段或身份上下文。
+现代 MCP 目录对同一 authorization 保持确定、有序并使用 private cache scope。Agent
+按当前 system、phase 与 task 只选择有界 facade 子集；每次调用仍由 MCP 独立校验身份、
+战役、角色、revision、expiry 与 allowed operation。只有显式 legacy 回滚适配器使用
+session-local exposure 与 `tools/list_changed`。
 
 ## 备份、恢复与升级
 
@@ -76,6 +83,10 @@ uv run nanobot sagasmith rollback --yes
 备份保留三个相互独立的领域数据目录和栈清单，不包含 provider secret、日志、
 原书或源码检出。升级会拒绝脏仓库，先备份，再仅快进更新、重装并验证；回滚同样
 拒绝脏仓库。
+
+若只需紧急回滚协议，可在保持相同锁定组件和签名授权的前提下，把受影响服务的
+`protocolMode` 设为 `legacy`。不得恢复已归档仓库，也不得把 `Mcp-Session-Id` 当成身份
+边界；兼容故障解决后应恢复 `2026-07-28`。
 
 卸载默认保留数据；只有显式 `--purge-data` 才删除领域数据：
 

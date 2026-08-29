@@ -387,6 +387,12 @@ class MCPServerConfig(Base):
         default="",
         max_length=300,
     )  # Exact MCP resource audience; never inferred from a browser/upstream token.
+    target_service: str = Field(
+        default="",
+        max_length=300,
+        validation_alias=AliasChoices("targetService", "target_service"),
+        serialization_alias="targetService",
+    )  # Exact MCP service identity used in v2 delegations; never model-selected.
     system_ids: list[str] = Field(
         default_factory=list,
         validation_alias=AliasChoices("systemIds", "systems", "system_ids"),

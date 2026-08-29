@@ -19,6 +19,11 @@ from .model import (
 
 LOOPBACK_CIDR = "127.0.0.1/32"
 OWNED_SERVERS = frozenset({"sagasmith_dnd", "sagasmith_coc", "sagasmith_narrative"})
+TARGET_SERVICES = {
+    "dnd5e": "sagasmith-dnd-mcp",
+    "coc7e": "sagasmith-coc-mcp",
+    "narrative": "sagasmith-narrative-mcp",
+}
 
 
 def _python_executable(repo: Path) -> Path:
@@ -95,7 +100,9 @@ def desired_servers(
     return result
 
 
-def _common_server(auth_context_secret: str, system_id: str) -> dict[str, Any]:
+def _common_server(
+    auth_context_secret: str, system_id: str, target_service: str
+) -> dict[str, Any]:
     return {
         "toolTimeout": 900,
         "enabledTools": ["*"],
@@ -103,8 +110,9 @@ def _common_server(auth_context_secret: str, system_id: str) -> dict[str, Any]:
         "injectPrincipal": True,
         "sessionScoped": True,
         "systemIds": [system_id],
-        "protocolMode": "auto",
-        "authorizationAudience": "local",
+        "targetService": target_service,
+        "protocolMode": "2026-07-28",
+        "authorizationAudience": target_service,
         **({"authContextSecret": auth_context_secret} if auth_context_secret else {}),
         **({"delegationSecret": auth_context_secret} if auth_context_secret else {}),
     }
@@ -115,7 +123,7 @@ def _http_server(url: str, auth_context_secret: str, system_id: str) -> dict[str
         "type": "streamableHttp",
         "url": url,
         "headers": {},
-        **_common_server(auth_context_secret, system_id),
+        **_common_server(auth_context_secret, system_id, TARGET_SERVICES[system_id]),
     }
 
 
@@ -132,7 +140,7 @@ def _stdio_server(
         "args": ["-m", module],
         "cwd": str(repo),
         "env": environment,
-        **_common_server(auth_context_secret, system_id),
+        **_common_server(auth_context_secret, system_id, TARGET_SERVICES[system_id]),
     }
 
 

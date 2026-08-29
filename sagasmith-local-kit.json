@@ -1,7 +1,7 @@
 {
   "schema": "sagasmith.local-agent-kit/v1",
   "product": "SagaSmith Local Agent Kit",
-  "authoritative_contract": "sagasmith.authoritative-mcp/v1",
+  "authoritative_contract": "sagasmith.authoritative-mcp/v2",
   "profiles": {
     "dnd-only": {
       "modes": ["dnd"],

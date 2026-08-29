@@ -1934,11 +1934,14 @@ Use `enabledTools` to register only a subset of tools from an MCP server:
 
 When a trusted server intentionally publishes a mutable tool catalogue, set
 `enabledTools` to `["*"]`. Nanobot handles MCP `tools/list_changed` notifications
-by refreshing that server's native tool wrappers. The server remains responsible
-for its session, authorization, and capability-selection boundary.
+by refreshing that server's native tool wrappers. On MCP 2026-07-28 this notification is for a
+real catalogue or authorization change, never a phase/action side effect. The Host may select a
+bounded model-visible subset, but the server remains responsible for per-request authorization,
+revision, phase, and operation checks.
 
 Python SDK v2 defaults to `protocolMode: "auto"`, which negotiates MCP 2026-07-28 and falls back
-to legacy initialize. Use `protocolMode: "legacy"` only as an operational rollback. Modern HTTP
+to legacy initialize. The bundled SagaSmith release lock requires `"2026-07-28"`; use
+`protocolMode: "legacy"` only as an operational rollback. Modern HTTP
 does not use `Mcp-Session-Id`; request `_meta` carries trace context and a short-lived,
 target-service-specific `sagasmith.auth-context/v2` delegation. `systemIds` scopes a Hosted Worker
 to the current campaign system. `delegationSecret` and `authorizationAudience` configure the

@@ -1,7 +1,9 @@
 {
   "sagasmith_dnd": {
     "type": "stdio",
-    "protocolMode": "auto",
+    "protocolMode": "2026-07-28",
+    "targetService": "sagasmith-dnd-mcp",
+    "authorizationAudience": "sagasmith-dnd-mcp",
     "systemIds": ["dnd5e"],
     "command": "replace-with-dnd-venv-python",
     "args": ["-m", "sagasmith_dnd_mcp.server"],
@@ -12,7 +14,9 @@
   },
   "sagasmith_coc": {
     "type": "stdio",
-    "protocolMode": "auto",
+    "protocolMode": "2026-07-28",
+    "targetService": "sagasmith-coc-mcp",
+    "authorizationAudience": "sagasmith-coc-mcp",
     "systemIds": ["coc7e"],
     "command": "replace-with-coc-venv-python",
     "args": ["-m", "sagasmith_coc_mcp.server"],
@@ -23,7 +27,9 @@
   },
   "sagasmith_narrative": {
     "type": "stdio",
-    "protocolMode": "auto",
+    "protocolMode": "2026-07-28",
+    "targetService": "sagasmith-narrative-mcp",
+    "authorizationAudience": "sagasmith-narrative-mcp",
     "systemIds": ["narrative"],
     "command": "replace-with-narrative-venv-python",
     "args": ["-m", "sagasmith_narrative_mcp.server"],

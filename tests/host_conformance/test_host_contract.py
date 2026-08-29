@@ -149,7 +149,15 @@ class _FakeDownstream:
 @pytest.mark.parametrize("mode", ["legacy", "2026-07-28"])
 async def test_auth_bridge_has_legacy_and_modern_equivalent_contract(mode: str) -> None:
     context = adapt_codex(profile_id="local-1", project_id="campaign-tools")
-    bridge = AuthBridge(server_config={}, context=context, secret=SECRET)
+    bridge = AuthBridge(
+        server_config={
+            "protocolMode": mode,
+            "targetService": "sagasmith-dnd-mcp",
+            "authorizationAudience": "sagasmith-dnd-mcp",
+        },
+        context=context,
+        secret=SECRET,
+    )
     downstream = _FakeDownstream()
     bridge.downstream = downstream  # type: ignore[assignment]
 
@@ -162,6 +170,12 @@ async def test_auth_bridge_has_legacy_and_modern_equivalent_contract(mode: str) 
 
     assert [tool.name for tool in listed.tools] == ["campaign_query", "exposure"]
     assert result.is_error is False
+    auth = downstream.calls[0][2]["sagasmith_auth_context"]
+    assert auth["schema"] == f"sagasmith.auth-context/{'v2' if mode == '2026-07-28' else 'v1'}"
+    if mode == "2026-07-28":
+        assert auth["target_service"] == "sagasmith-dnd-mcp"
+        assert auth["allowed_operations"] == ["exposure"]
+        assert auth["requester_principal"] == context.actor_principal
 
 
 @pytest.mark.asyncio

@@ -31,6 +31,7 @@ REQUIRED_ENV = "SAGASMITH_REAL_DOMAINS_REQUIRED"
 WORKSPACE_ENV = "SAGASMITH_REAL_DOMAIN_WORKSPACE"
 STATE_ROOT_ENV = "SAGASMITH_REAL_DOMAIN_STATE_ROOT"
 LANE_ENV = "SAGASMITH_REAL_DOMAIN_LANE"
+PROTOCOL_MODE_ENV = "SAGASMITH_REAL_DOMAIN_PROTOCOL_MODE"
 TRANSPORTS = (McpTransport.STDIO, McpTransport.STREAMABLE_HTTP)
 # A cold Windows D&D run has exceeded 60 seconds after completing its MCP calls.
 # Keep teardown bounded without turning that valid first-run cost into a failure.
@@ -84,6 +85,13 @@ def _required() -> bool:
     return os.environ.get(REQUIRED_ENV, "").strip().casefold() in {"1", "true", "yes"}
 
 
+def _protocol_mode() -> str:
+    mode = os.environ.get(PROTOCOL_MODE_ENV, "legacy").strip() or "legacy"
+    if mode not in {"legacy", "2026-07-28"}:
+        pytest.fail(f"unsupported real-domain protocol mode: {mode}")
+    return mode
+
+
 def _downstream_python(workspace: Path, domain: Domain) -> Path:
     candidate = workspace / domain.repo / ".venv" / (
         "Scripts/python.exe" if os.name == "nt" else "bin/python"
@@ -121,6 +129,8 @@ def _verify_required_ci_lane() -> None:
     lane = os.environ.get(LANE_ENV, "").strip()
     if not state_root or lane not in {"release-lock", "latest-main"}:
         pytest.fail("required real-domain lane metadata is incomplete")
+    if _protocol_mode() != "2026-07-28":
+        pytest.fail("required real-domain lanes must exercise MCP 2026-07-28")
     state_path = Path(state_root).expanduser().resolve() / "stack.json"
     try:
         state = json.loads(state_path.read_text(encoding="utf-8"))
@@ -236,12 +246,17 @@ def _http_bridge_target(domain: Domain) -> tuple[dict[str, object], str]:
         pytest.fail(f"cannot read installed streamable HTTP target for {domain.name}: {exc}")
     assert isinstance(server, dict)
     assert server["type"] == "streamableHttp"
+    assert server["targetService"] == f"sagasmith-{domain.name}-mcp"
+    assert server["authorizationAudience"] == server["targetService"]
     secret = str(server.get("authContextSecret") or "")
     assert len(secret.encode("utf-8")) >= 32
     return {
         "type": server["type"],
         "url": server["url"],
         "headers": server.get("headers") or {},
+        "protocolMode": _protocol_mode(),
+        "targetService": server["targetService"],
+        "authorizationAudience": server["authorizationAudience"],
     }, secret
 
 
@@ -266,6 +281,9 @@ def _stdio_bridge_target(
                 ]
             ),
         },
+        "protocolMode": _protocol_mode(),
+        "targetService": f"sagasmith-{domain.name}-mcp",
+        "authorizationAudience": f"sagasmith-{domain.name}-mcp",
     }, SECRET
 
 
@@ -312,8 +330,17 @@ async def _exercise(
             )
             assert not result.is_error, result.content
             receipt = result.content[0].meta["sagasmith_auth_context_receipt"]
-            assert receipt["actor_principal"] == context.actor_principal
+            principal_field = (
+                "requester_principal"
+                if _protocol_mode() == "2026-07-28"
+                else "actor_principal"
+            )
+            assert receipt[principal_field] == context.actor_principal
             assert receipt["conversation_principal"] == context.conversation_principal
-            assert receipt["authorization_epoch"] == 0
+            if _protocol_mode() == "2026-07-28":
+                assert receipt["target_service"] == f"sagasmith-{domain.name}-mcp"
+                assert receipt["allowed_operations"] == ["exposure"]
+            else:
+                assert receipt["authorization_epoch"] == 0
             await session.list_resources()
             await session.list_prompts()

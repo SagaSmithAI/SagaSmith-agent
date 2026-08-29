@@ -38,7 +38,14 @@ PROFILE_MODES: dict[InstallProfile, tuple[InstallMode, ...]] = {
     InstallProfile.MULTI_SYSTEM: ALL_MODES,
 }
 STACK_SCHEMA = "sagasmith.local-stack/v1"
-RELEASE_LOCK_SCHEMA = "sagasmith.release-lock/v2"
+RELEASE_LOCK_SCHEMA = "sagasmith.release-lock/v3"
+RELEASE_LOCK_STATUS = "compatibility-lock-not-published"
+RELEASE_COMPATIBILITY = {
+    "mcp_protocol": "2026-07-28",
+    "legacy_protocol": "fallback-only",
+    "auth_context": "sagasmith.auth-context/v2",
+    "authority": "sagasmith.authoritative-mcp/v2",
+}
 
 
 @dataclass(frozen=True)
@@ -284,10 +291,53 @@ def load_release_revisions(path: Path, modes: tuple[InstallMode, ...]) -> dict[s
         raise ValueError(f"cannot read SagaSmith release lock {path}: {exc}") from exc
     if not isinstance(value, dict) or value.get("schema") != RELEASE_LOCK_SCHEMA:
         raise ValueError(f"unsupported SagaSmith release lock: {path}")
+    if value.get("compatibility") != RELEASE_COMPATIBILITY:
+        raise ValueError(
+            "SagaSmith release lock requires the MCP 2026-07-28 modern compatibility contract"
+        )
+    if value.get("release_status") != RELEASE_LOCK_STATUS:
+        raise ValueError("SagaSmith release lock must identify itself as an unpublished lock")
     shared = value.get("shared")
     profiles = value.get("profiles")
     if not isinstance(shared, dict) or not isinstance(profiles, dict):
         raise ValueError("SagaSmith release lock requires shared and profiles objects")
+    expected_profiles = {mode.value for mode in InstallMode}
+    if set(profiles) != expected_profiles:
+        raise ValueError("SagaSmith release lock must declare exactly the current domain profiles")
+    expected_components = {
+        component.repository
+        for component in COMPONENTS
+        if component.repository != "SagaSmith-agent"
+    }
+    declared_components = set(shared)
+    for profile in profiles.values():
+        if not isinstance(profile, dict):
+            raise ValueError("SagaSmith release lock profiles must be objects")
+        declared_components.update(profile)
+    unexpected = declared_components - expected_components
+    if unexpected:
+        raise ValueError(
+            "SagaSmith release lock contains unsupported release inputs: "
+            + ", ".join(sorted(unexpected))
+        )
+    missing = expected_components - declared_components
+    if missing:
+        raise ValueError(
+            "SagaSmith release lock is missing current release inputs: "
+            + ", ".join(sorted(missing))
+        )
+    expected_layout = {
+        "shared": {"sagasmith-core"},
+        "dnd": {"sagasmith-dnd"},
+        "coc": {"sagasmith-coc"},
+        "narrative": {"sagasmith-narrative"},
+    }
+    actual_layout = {
+        "shared": set(shared),
+        **{name: set(profiles[name]) for name in sorted(expected_profiles)},
+    }
+    if actual_layout != expected_layout:
+        raise ValueError("SagaSmith release lock component/profile layout is invalid")
     raw_components = dict(shared)
     for mode in modes:
         profile = profiles.get(mode.value)

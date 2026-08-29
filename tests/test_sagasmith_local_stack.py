@@ -18,6 +18,8 @@ from nanobot.sagasmith_local.configuration import (
 )
 from nanobot.sagasmith_local.model import (
     PROFILE_MODES,
+    RELEASE_COMPATIBILITY,
+    RELEASE_LOCK_STATUS,
     InstallMode,
     InstallProfile,
     McpTransport,
@@ -136,9 +138,15 @@ def test_release_lock_selects_exact_revisions_for_each_mode(tmp_path: Path) -> N
     lock.write_text(
         json.dumps(
             {
-                "schema": "sagasmith.release-lock/v2",
+                "schema": "sagasmith.release-lock/v3",
+                "release_status": RELEASE_LOCK_STATUS,
+                "compatibility": RELEASE_COMPATIBILITY,
                 "shared": {"sagasmith-core": "a" * 40},
-                "profiles": {"coc": {"sagasmith-coc": "a" * 40}},
+                "profiles": {
+                    "dnd": {"sagasmith-dnd": "b" * 40},
+                    "coc": {"sagasmith-coc": "a" * 40},
+                    "narrative": {"sagasmith-narrative": "c" * 40},
+                },
             }
         ),
         encoding="utf-8",
@@ -155,9 +163,15 @@ def test_release_lock_rejects_missing_or_moving_component_refs(tmp_path: Path) -
     lock.write_text(
         json.dumps(
             {
-                "schema": "sagasmith.release-lock/v2",
+                "schema": "sagasmith.release-lock/v3",
+                "release_status": RELEASE_LOCK_STATUS,
+                "compatibility": RELEASE_COMPATIBILITY,
                 "shared": {"sagasmith-core": "main"},
-                "profiles": {"dnd": {}},
+                "profiles": {
+                    "dnd": {"sagasmith-dnd": "a" * 40},
+                    "coc": {"sagasmith-coc": "a" * 40},
+                    "narrative": {"sagasmith-narrative": "a" * 40},
+                },
             }
         ),
         encoding="utf-8",
@@ -165,6 +179,51 @@ def test_release_lock_rejects_missing_or_moving_component_refs(tmp_path: Path) -
 
     with pytest.raises(ValueError, match="invalid revision|missing component"):
         load_release_revisions(lock, (InstallMode.DND,))
+
+
+def test_release_lock_rejects_archived_or_unknown_component_inputs(tmp_path: Path) -> None:
+    lock = tmp_path / "stack-lock.json"
+    lock.write_text(
+        json.dumps(
+            {
+                "schema": "sagasmith.release-lock/v3",
+                "release_status": RELEASE_LOCK_STATUS,
+                "compatibility": RELEASE_COMPATIBILITY,
+                "shared": {
+                    "sagasmith-core": "a" * 40,
+                    "sagasmith-dnd-mcp": "b" * 40,
+                },
+                "profiles": {
+                    "dnd": {"sagasmith-dnd": "c" * 40},
+                    "coc": {"sagasmith-coc": "d" * 40},
+                    "narrative": {"sagasmith-narrative": "e" * 40},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="unsupported release inputs.*sagasmith-dnd-mcp"):
+        load_release_revisions(lock, tuple(InstallMode))
+
+
+def test_bundled_release_lock_is_modern_and_contains_only_current_inputs() -> None:
+    root = Path(__file__).parents[1]
+    lock = json.loads((root / "sagasmith-stack-lock.json").read_text(encoding="utf-8"))
+
+    assert lock["schema"] == "sagasmith.release-lock/v3"
+    assert lock["release_status"] == RELEASE_LOCK_STATUS
+    assert lock["lock"] == "2026.8.29-mcp-modern-compatibility"
+    assert lock["generated_at"] == "2026-08-29T16:15:43.0395722+08:00"
+    assert "release" not in lock
+    assert "released_at" not in lock
+    assert lock["compatibility"] == RELEASE_COMPATIBILITY
+    assert load_release_revisions(root / "sagasmith-stack-lock.json", tuple(InstallMode)) == {
+        "sagasmith-coc": "492be2073a2b9bb3191111c470514e63c088d59f",
+        "sagasmith-core": "0ac316655687757203a9df1b2eb81669ec1d2d78",
+        "sagasmith-dnd": "dd31d809cf406d9af99eb6c3fea176c33e16fee2",
+        "sagasmith-narrative": "c15fb2400407986b457d5406b76f9c3dae5b5358",
+    }
 
 
 def test_config_reconciler_owns_only_sagasmith_entries(tmp_path: Path) -> None:
@@ -248,7 +307,20 @@ def test_every_domain_supports_each_local_transport(
     assert servers["sagasmith_dnd"]["systemIds"] == ["dnd5e"]
     assert servers["sagasmith_coc"]["systemIds"] == ["coc7e"]
     assert servers["sagasmith_narrative"]["systemIds"] == ["narrative"]
-    assert {item["protocolMode"] for item in servers.values()} == {"auto"}
+    assert servers["sagasmith_dnd"]["targetService"] == "sagasmith-dnd-mcp"
+    assert servers["sagasmith_coc"]["targetService"] == "sagasmith-coc-mcp"
+    assert (
+        servers["sagasmith_narrative"]["targetService"]
+        == "sagasmith-narrative-mcp"
+    )
+    assert {
+        item["authorizationAudience"] for item in servers.values()
+    } == {
+        "sagasmith-dnd-mcp",
+        "sagasmith-coc-mcp",
+        "sagasmith-narrative-mcp",
+    }
+    assert {item["protocolMode"] for item in servers.values()} == {"2026-07-28"}
     if transport == McpTransport.STREAMABLE_HTTP:
         assert servers["sagasmith_narrative"]["url"].endswith(":8770/mcp")
     else:
@@ -260,7 +332,7 @@ def test_distribution_manifest_declares_all_profiles_and_templates() -> None:
     root = Path(__file__).parents[1]
     manifest = json.loads((root / "sagasmith-local-kit.json").read_text(encoding="utf-8"))
     assert manifest["schema"] == "sagasmith.local-agent-kit/v1"
-    assert manifest["authoritative_contract"] == "sagasmith.authoritative-mcp/v1"
+    assert manifest["authoritative_contract"] == "sagasmith.authoritative-mcp/v2"
     assert set(manifest["profiles"]) == {
         "dnd-only",
         "coc-only",
@@ -270,6 +342,22 @@ def test_distribution_manifest_declares_all_profiles_and_templates() -> None:
     assert set(manifest["transports"]) == {"mixed", "stdio", "streamable-http"}
     for relative in manifest["templates"].values():
         assert (root / relative).is_file()
+    for template_name in ("stdio", "streamable-http"):
+        template = json.loads(
+            (root / manifest["templates"][template_name]).read_text(encoding="utf-8")
+        )
+        assert {server["protocolMode"] for server in template.values()} == {
+            "2026-07-28"
+        }
+        assert {server["targetService"] for server in template.values()} == {
+            "sagasmith-dnd-mcp",
+            "sagasmith-coc-mcp",
+            "sagasmith-narrative-mcp",
+        }
+        assert all(
+            server["authorizationAudience"] == server["targetService"]
+            for server in template.values()
+        )
 
 
 def _ci_workflow() -> dict:
@@ -288,6 +376,7 @@ def test_ci_runs_required_real_domains_against_lock_and_latest_mains() -> None:
     assert job["runs-on"] == "ubuntu-latest"
     assert job["strategy"]["matrix"]["lane"] == ["release-lock", "latest-main"]
     steps = _named_steps(job)
+    release_contract = steps["Verify modern release contract and active inputs"]
     copy = steps["Copy valid Agent config into lane state"]
     exact = steps["Materialize exact release lock"]
     floating = steps["Materialize latest domain mains"]
@@ -297,6 +386,8 @@ def test_ci_runs_required_real_domains_against_lock_and_latest_mains() -> None:
     conformance = steps["Run all 42 signed-host/domain/transport combinations"]
     diagnostics = steps["Dump Local Kit logs after a failure"]
     stop = steps["Stop Streamable HTTP MCPs"]
+    assert "bundled_release_lock_is_modern" in release_contract["run"]
+    assert "archived_or_unknown_component_inputs" in release_contract["run"]
     assert copy["env"]["TARGET_CONFIG"] == (
         "${{ runner.temp }}/sagasmith-real-domains/${{ matrix.lane }}/config.json"
     )
@@ -316,6 +407,7 @@ def test_ci_runs_required_real_domains_against_lock_and_latest_mains() -> None:
     assert "--transport streamable-http" in doctor["run"]
     assert conformance["env"]["SAGASMITH_REAL_DOMAINS_REQUIRED"] == "1"
     assert conformance["env"]["SAGASMITH_REAL_DOMAIN_LANE"] == "${{ matrix.lane }}"
+    assert conformance["env"]["SAGASMITH_REAL_DOMAIN_PROTOCOL_MODE"] == "2026-07-28"
     assert conformance["run"] == (
         "uv run python -m pytest -q tests/host_conformance/test_real_domains.py"
     )

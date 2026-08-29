@@ -849,6 +849,7 @@ class MCPToolWrapper(_MCPWrapperBase):
         auth_context_secret: str = "",
         delegation_secret: str = "",
         authorization_audience: str = "",
+        target_service: str = "",
         session_store: Any | None = None,
         post_call_sync: _PostCallSyncCallback | None = None,
         call_lock: asyncio.Lock | None = None,
@@ -869,6 +870,7 @@ class MCPToolWrapper(_MCPWrapperBase):
         self._auth_context_secret = auth_context_secret
         self._delegation_secret = delegation_secret
         self._authorization_audience = authorization_audience or server_name
+        self._target_service = target_service or server_name
         self._session_store = session_store
         self._post_call_sync = post_call_sync
         self._call_lock = call_lock
@@ -1051,7 +1053,7 @@ class MCPToolWrapper(_MCPWrapperBase):
             delegation = sign_delegated_auth_context(
                 secret=secret,
                 issuer=str(metadata.get("delegation_issuer") or "sagasmith-web"),
-                target_service=self._server_name,
+                target_service=self._target_service,
                 caller_principal=str(
                     metadata.get("caller_principal") or "workload:sagasmith-agent"
                 ),
@@ -1077,6 +1079,43 @@ class MCPToolWrapper(_MCPWrapperBase):
                 if isinstance(value, str) and value.strip() and len(value) <= 8192:
                     meta[key] = value.strip()
             return meta
+        if self._metrics_protocol == "2026-07-28":
+            base_revision = (
+                request.base_revision
+                if request is not None and request.base_revision is not None
+                else arguments.get("base_revision", arguments.get("expected_revision", 0))
+            )
+            if (
+                isinstance(base_revision, bool)
+                or not isinstance(base_revision, int)
+                or base_revision < 0
+            ):
+                base_revision = 0
+            local_campaign_id = campaign_id or f"local:{conversation_principal}"
+            room_turn_id = (
+                request.room_turn_id or request.turn_id or request.message_id
+                if request is not None
+                else ""
+            ) or f"{session_id}:local"
+            return {
+                AUTH_CONTEXT_META_KEY: sign_delegated_auth_context(
+                    secret=secret,
+                    issuer="sagasmith-agent-local",
+                    target_service=self._target_service,
+                    caller_principal="workload:sagasmith-agent",
+                    workload_identity="sagasmith-agent-local",
+                    requester_principal=trusted_principal,
+                    resource_owner_principal=trusted_principal,
+                    acting_host_principal=trusted_principal,
+                    authorized_audience=self._authorization_audience,
+                    allowed_operations=(self._original_name,),
+                    conversation_principal=conversation_principal,
+                    tenant_id=str(metadata.get("tenant_id") or ""),
+                    campaign_id=local_campaign_id,
+                    room_turn_id=room_turn_id,
+                    base_revision=base_revision,
+                )
+            }
         return {
             AUTH_CONTEXT_META_KEY: sign_auth_context(
                 secret=self._auth_context_secret,
@@ -1138,9 +1177,10 @@ class MCPToolWrapper(_MCPWrapperBase):
 
     async def execute(self, **kwargs: Any) -> str:
         trusted_principal: str | None = None
-        if self._inject_principal and self._principal_argument is not None:
+        if self._inject_principal:
             trusted_principal = self._trusted_principal()
-            kwargs = {**kwargs, self._principal_argument: trusted_principal}
+            if self._principal_argument is not None:
+                kwargs = {**kwargs, self._principal_argument: trusted_principal}
         kwargs = self._inject_trusted_arguments(kwargs)
         if self._call_lock is not None:
             async with self._call_lock:
@@ -2024,6 +2064,7 @@ async def connect_mcp_servers(
                             auth_context_secret=cfg.auth_context_secret,
                             delegation_secret=cfg.delegation_secret,
                             authorization_audience=cfg.authorization_audience,
+                            target_service=cfg.target_service,
                             session_store=session_store,
                             post_call_sync=(
                                 wait_for_pending_tool_refresh if legacy_catalog else None
@@ -2191,6 +2232,7 @@ async def connect_mcp_servers(
                         auth_context_secret=cfg.auth_context_secret,
                         delegation_secret=cfg.delegation_secret,
                         authorization_audience=cfg.authorization_audience,
+                        target_service=cfg.target_service,
                         session_store=session_store,
                         host_token=host_token,
                     )

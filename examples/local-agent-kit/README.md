@@ -4,6 +4,9 @@ These credential-free templates cover the two supported local MCP transports.
 Copy them outside the repository, replace local paths and identities, then keep
 the resulting files owner-readable.
 
+The templates target the coordinated MCP 2026-07-28 release lock. Use `protocolMode: "legacy"`
+only as a temporary compatibility rollback; archived split repositories are not inputs.
+
 - `bot-config.template.json` is a SagaSmith Agent channel starting point for
   Discord, QQ, or Telegram. Enable only installed channel extras and replace
   the allowlists before starting a bot.
