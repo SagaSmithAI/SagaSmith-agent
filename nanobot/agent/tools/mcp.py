@@ -32,6 +32,13 @@ from nanobot.agent.domain_context import (
     principal_fingerprint,
 )
 from nanobot.agent.mcp_observability import record_mcp_event
+from nanobot.agent.mcp_tasks import (
+    TasksExtension,
+    TaskTimeoutControl,
+    task_authorization_context,
+    task_authorization_from_meta,
+    task_timeout_context,
+)
 from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tools.context import current_request_context
 from nanobot.agent.tools.registry import ToolRegistry
@@ -844,6 +851,7 @@ class MCPToolWrapper(_MCPWrapperBase):
         server_name: str,
         tool_def,
         tool_timeout: int = 30,
+        task_timeout: int = 900,
         *,
         inject_principal: bool = False,
         auth_context_secret: str = "",
@@ -866,6 +874,7 @@ class MCPToolWrapper(_MCPWrapperBase):
         }
         self._parameters = _normalize_schema_for_openai(raw_schema)
         self._tool_timeout = tool_timeout
+        self._task_timeout = task_timeout
         self._inject_principal = inject_principal
         self._auth_context_secret = auth_context_secret
         self._delegation_secret = delegation_secret
@@ -1215,22 +1224,36 @@ class MCPToolWrapper(_MCPWrapperBase):
                 # Keep MCP SDK requests in the wrapper's task. asyncio.wait_for
                 # creates a child task, which can break AnyIO session ownership
                 # across a tools/call -> tools/list_changed -> tools/list handoff.
-                async with asyncio.timeout(self._tool_timeout):
+                timeout_control: TaskTimeoutControl | None = None
+                async with asyncio.timeout(self._tool_timeout) as call_timeout:
+                    timeout_control = TaskTimeoutControl(call_timeout, self._task_timeout)
                     meta = self._auth_context_meta(
                         kwargs,
                         trusted_principal=trusted_principal,
                     )
-                    if meta is None:
-                        result = await self._session.call_tool(
-                            self._original_name,
-                            arguments=kwargs,
-                        )
-                    else:
-                        result = await self._session.call_tool(
-                            self._original_name,
-                            arguments=kwargs,
-                            meta=meta,
-                        )
+                    request = current_request_context()
+                    task_authorization = task_authorization_from_meta(
+                        secret=self._delegation_secret or self._auth_context_secret,
+                        meta=meta,
+                        hard_expires_at=(
+                            request.delegation_expires_at if request is not None else None
+                        ),
+                    )
+                    with (
+                        task_authorization_context(task_authorization),
+                        task_timeout_context(timeout_control),
+                    ):
+                        if meta is None:
+                            result = await self._session.call_tool(
+                                self._original_name,
+                                arguments=kwargs,
+                            )
+                        else:
+                            result = await self._session.call_tool(
+                                self._original_name,
+                                arguments=kwargs,
+                                meta=meta,
+                            )
             except asyncio.TimeoutError:
                 record_mcp_event(
                     "tool",
@@ -1238,8 +1261,13 @@ class MCPToolWrapper(_MCPWrapperBase):
                     transport=self._metrics_transport,
                     protocol=self._metrics_protocol,
                 )
-                logger.warning("MCP tool '{}' timed out after {}s", self._name, self._tool_timeout)
-                return ToolResult.error(f"(MCP tool call timed out after {self._tool_timeout}s)")
+                timeout_seconds = (
+                    self._task_timeout
+                    if timeout_control is not None and timeout_control.claimed
+                    else self._tool_timeout
+                )
+                logger.warning("MCP tool '{}' timed out after {}s", self._name, timeout_seconds)
+                return ToolResult.error(f"(MCP tool call timed out after {timeout_seconds}s)")
             except asyncio.CancelledError:
                 # MCP SDK's anyio cancel scopes can leak CancelledError on timeout/failure.
                 # Re-raise only if our task was externally cancelled (e.g. /stop).
@@ -2075,6 +2103,7 @@ async def connect_mcp_servers(
                             name,
                             tool_def,
                             tool_timeout=cfg.tool_timeout,
+                            task_timeout=getattr(cfg, "task_timeout", 900),
                             inject_principal=cfg.inject_principal,
                             auth_context_secret=cfg.auth_context_secret,
                             delegation_secret=cfg.delegation_secret,
@@ -2160,14 +2189,31 @@ async def connect_mcp_servers(
                 legacy_catalog = True
                 metrics_protocol = "legacy"
             else:
-                mode = "legacy" if transport_type == "sse" else cfg.protocol_mode
+                configured_mode = "legacy" if transport_type == "sse" else cfg.protocol_mode
+                # SDK pinned-modern mode synthesizes a discover result and therefore
+                # cannot observe real server extension capabilities. Probe the peer,
+                # then enforce the configured version instead of trusting synthetic
+                # capabilities or silently accepting a legacy fallback.
+                mode = "auto" if configured_mode == "2026-07-28" else configured_mode
                 session = await server_stack.enter_async_context(
                     mcp_client_cls(
                         client_transport,
                         mode=mode,
                         message_handler=handle_server_message,
+                        extensions=(
+                            [TasksExtension()]
+                            if cfg.delegation_secret or cfg.auth_context_secret
+                            else None
+                        ),
                     )
                 )
+                if (
+                    configured_mode == "2026-07-28"
+                    and str(session.protocol_version) != "2026-07-28"
+                ):
+                    raise RuntimeError(
+                        f"MCP server {name!r} does not support required protocol 2026-07-28"
+                    )
                 legacy_catalog = str(session.protocol_version) != "2026-07-28"
                 metrics_protocol = "legacy" if legacy_catalog else "2026-07-28"
             record_mcp_event(

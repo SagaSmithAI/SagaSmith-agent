@@ -1402,6 +1402,59 @@ async def test_connect_mcp_servers_enabled_tools_defaults_to_all(
 
 
 @pytest.mark.asyncio
+async def test_required_modern_connection_uses_real_auto_discovery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: dict[str, object] = {}
+    session = _make_fake_session(["demo"])
+    session.protocol_version = "2026-07-28"
+    session.server_capabilities = SimpleNamespace(
+        extensions={"io.modelcontextprotocol/tasks": {}}
+    )
+
+    class _FakeModernClient:
+        def __init__(
+            self,
+            _transport: object,
+            *,
+            mode: str,
+            message_handler: object,
+            extensions: object,
+        ) -> None:
+            observed.update(
+                mode=mode,
+                message_handler=message_handler,
+                extensions=extensions,
+            )
+
+        async def __aenter__(self) -> object:
+            return session
+
+        async def __aexit__(self, exc_type, exc, tb) -> bool:
+            return False
+
+    monkeypatch.setattr(sys.modules["mcp"], "Client", _FakeModernClient, raising=False)
+    registry = ToolRegistry()
+    stacks = await connect_mcp_servers(
+        {
+            "test": MCPServerConfig(
+                command="fake",
+                protocol_mode="2026-07-28",
+                auth_context_secret="modern-discovery-secret-at-least-32-bytes",
+            )
+        },
+        registry,
+    )
+    for stack in stacks.values():
+        await stack.aclose()
+
+    assert observed["mode"] == "auto"
+    extensions = observed["extensions"]
+    assert isinstance(extensions, list) and len(extensions) == 1
+    assert registry.tool_names == ["mcp_test_demo"]
+
+
+@pytest.mark.asyncio
 async def test_tools_list_changed_refreshes_native_registry(
     fake_mcp_runtime: dict[str, object | None],
 ) -> None:

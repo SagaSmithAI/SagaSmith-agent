@@ -1895,7 +1895,10 @@ Two transport modes are supported:
 > [!IMPORTANT]
 > HTTP/SSE MCP URLs are validated before probing or connecting, and every outgoing MCP HTTP request is validated again before redirects are followed. `localhost`, `127.0.0.1`, RFC1918/private IPs, CGNAT/Tailscale ranges, link-local addresses, and cloud metadata endpoints are blocked by default. This can break previously working local or private HTTP MCP configs until the endpoint is explicitly allowed with `tools.ssrfWhitelist`, preferably with a single-host CIDR such as `127.0.0.1/32`, `::1/128`, or `192.168.1.50/32`. Stdio MCP servers are not affected.
 
-Use `toolTimeout` to override the default 30s per-call timeout for slow servers:
+Use `toolTimeout` to override the default 30s synchronous per-call timeout for slow servers.
+For MCP 2026-07-28 servers that return a SEP-2663 task handle, `taskTimeout` replaces that
+deadline only after the handle is claimed; its default is 900s. Short tools never receive the
+longer task deadline.
 
 ```json
 {
@@ -1903,7 +1906,8 @@ Use `toolTimeout` to override the default 30s per-call timeout for slow servers:
     "mcpServers": {
       "my-slow-server": {
         "url": "https://example.com/mcp/",
-        "toolTimeout": 120
+        "toolTimeout": 120,
+        "taskTimeout": 900
       }
     }
   }

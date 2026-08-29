@@ -23,6 +23,13 @@ from nanobot.agent.auth_context import (
     sign_auth_context,
     sign_delegated_auth_context,
 )
+from nanobot.agent.mcp_tasks import (
+    TasksExtension,
+    TaskTimeoutControl,
+    task_authorization_context,
+    task_authorization_from_meta,
+    task_timeout_context,
+)
 from nanobot.sagasmith_hosts.contract import TrustedHostContext
 
 
@@ -270,11 +277,29 @@ class AuthBridge:
             if modern or self._principal_argument(tool)
             else None
         )
-        result = await self.downstream.call_tool(
-            name,
-            arguments=trusted,
-            **({"meta": meta} if meta is not None else {}),
+        task_authorization = task_authorization_from_meta(
+            secret=self.secret,
+            meta=meta,
+            hard_expires_at=(
+                str(meta[AUTH_CONTEXT_META_KEY].get("expires_at") or "")
+                if isinstance(meta, Mapping)
+                and isinstance(meta.get(AUTH_CONTEXT_META_KEY), Mapping)
+                else None
+            ),
         )
+        tool_timeout = int(self.server_config.get("toolTimeout") or 60)
+        task_timeout = int(self.server_config.get("taskTimeout") or 900)
+        async with asyncio.timeout(tool_timeout) as call_timeout:
+            timeout_control = TaskTimeoutControl(call_timeout, task_timeout)
+            with (
+                task_authorization_context(task_authorization),
+                task_timeout_context(timeout_control),
+            ):
+                result = await self.downstream.call_tool(
+                    name,
+                    arguments=trusted,
+                    **({"meta": meta} if meta is not None else {}),
+                )
         self.authorization_epoch = _epoch_from_result(
             name, _result_payload(result), self.authorization_epoch
         )
@@ -373,10 +398,26 @@ class AuthBridge:
             client_transport = streamable_http_client(url, http_client=client)
         else:
             raise ValueError(f"unsupported downstream MCP transport: {transport}")
-        mode = str(self.server_config.get("protocolMode") or "legacy")
+        configured_mode = str(self.server_config.get("protocolMode") or "legacy")
+        # Pinned-modern SDK mode synthesizes discovery and consequently drops
+        # extension capabilities. Negotiate with the peer, then fail closed if
+        # the required modern version is unavailable.
+        mode = "auto" if configured_mode == "2026-07-28" else configured_mode
         self.downstream = await stack.enter_async_context(
-            Client(client_transport, mode=mode, message_handler=self._server_message)
+            Client(
+                client_transport,
+                mode=mode,
+                message_handler=self._server_message,
+                extensions=(
+                    [TasksExtension()] if configured_mode == "2026-07-28" else None
+                ),
+            )
         )
+        if (
+            configured_mode == "2026-07-28"
+            and str(self.downstream.session.protocol_version) != "2026-07-28"
+        ):
+            raise RuntimeError("downstream MCP does not support required protocol 2026-07-28")
         await self._list_tools()
 
     async def run(self) -> None:
