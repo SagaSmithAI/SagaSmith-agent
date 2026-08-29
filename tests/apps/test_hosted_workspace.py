@@ -4,7 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from nanobot.apps.hosted_workspace import HostedWorkspaceLease, HostedWorkspacePolicy
+from nanobot.apps.hosted_workspace import (
+    HostedWorkspaceError,
+    HostedWorkspaceLease,
+    HostedWorkspacePolicy,
+    derive_workspace_owner,
+)
 
 
 def lease(root: Path, name: str, *, max_workspaces: int = 2) -> HostedWorkspaceLease:
@@ -59,3 +64,46 @@ def test_capacity_rejects_oversized_registered_workspace(tmp_path: Path) -> None
 
     with pytest.raises(RuntimeError, match="exceeds"):
         current.enforce_capacity()
+
+
+def test_host_managed_owner_is_stable_across_worker_restart(tmp_path: Path) -> None:
+    workspace = tmp_path / "conversation-a"
+    policy = HostedWorkspacePolicy(root=tmp_path, ttl_seconds=60)
+    owner = derive_workspace_owner(workspace, "host-workspace-019")
+    first_worker = HostedWorkspaceLease(policy, workspace, owner=owner)
+    first_marker = first_worker.register(now=1)
+
+    restarted_worker = HostedWorkspaceLease(
+        policy,
+        workspace,
+        owner=derive_workspace_owner(workspace, "host-workspace-019"),
+    )
+    restarted_marker = restarted_worker.register(now=2)
+
+    assert restarted_marker["owner"] == owner
+    assert restarted_marker["workspace_id"] == first_marker["workspace_id"]
+    assert restarted_marker["created_at"] == 1
+    assert restarted_marker["last_access_at"] == 2
+
+
+def test_workspace_owner_is_path_bound_and_rejects_another_host_owner(tmp_path: Path) -> None:
+    workspace = tmp_path / "conversation-a"
+    policy = HostedWorkspacePolicy(root=tmp_path, ttl_seconds=60)
+    first_owner = derive_workspace_owner(workspace, "host-workspace-019")
+    other_owner = derive_workspace_owner(workspace, "host-workspace-020")
+    HostedWorkspaceLease(policy, workspace, owner=first_owner).register(now=1)
+
+    assert first_owner != other_owner
+    assert first_owner != derive_workspace_owner(
+        tmp_path / "conversation-b", "host-workspace-019"
+    )
+    with pytest.raises(HostedWorkspaceError, match="another owner"):
+        HostedWorkspaceLease(policy, workspace, owner=other_owner).register(now=2)
+
+
+@pytest.mark.parametrize("workspace_id", ["", " leading", "trailing ", "line\nbreak"])
+def test_workspace_owner_rejects_ambiguous_host_identity(
+    tmp_path: Path, workspace_id: str
+) -> None:
+    with pytest.raises(ValueError, match="workspace ID"):
+        derive_workspace_owner(tmp_path / "conversation", workspace_id)

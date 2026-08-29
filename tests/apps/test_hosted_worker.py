@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from types import SimpleNamespace
 
 import httpx
@@ -10,10 +11,43 @@ from fastapi.testclient import TestClient
 
 from nanobot.agent.mcp_observability import record_mcp_event
 from nanobot.agent.tools.base import ToolResult
-from nanobot.apps.hosted_worker import create_worker_app
+from nanobot.apps.hosted_worker import (
+    _parse_worker_arguments,
+    _workspace_lease_from_arguments,
+    create_worker_app,
+)
 from nanobot.bus.events import HostMediaEnvelope
 
 TOKEN = "hosted-worker-test-token-at-least-32-bytes"
+
+
+def worker_arguments(*, port: int, include_workspace_id: bool = True) -> list[str]:
+    arguments = [
+        "--port",
+        str(port),
+        "--workspace",
+        "/workspace/conversation-a",
+    ]
+    if include_workspace_id:
+        arguments.extend(["--workspace-id", "host-workspace-019"])
+    return [*arguments, "--config", "/config/config.json"]
+
+
+def test_hosted_worker_reuses_host_owner_when_retry_changes_port() -> None:
+    first_arguments = _parse_worker_arguments(worker_arguments(port=41001))
+    retry_arguments = _parse_worker_arguments(worker_arguments(port=41999))
+    workspace = Path("/workspace/conversation-a")
+
+    first_lease = _workspace_lease_from_arguments(workspace, first_arguments)
+    retry_lease = _workspace_lease_from_arguments(workspace, retry_arguments)
+
+    assert first_arguments.workspace_id == "host-workspace-019"
+    assert first_lease.owner == retry_lease.owner
+
+
+def test_hosted_worker_requires_host_managed_stable_workspace_id() -> None:
+    with pytest.raises(SystemExit):
+        _parse_worker_arguments(worker_arguments(port=41002, include_workspace_id=False))
 
 
 def trusted_context(**overrides):

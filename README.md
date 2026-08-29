@@ -62,7 +62,9 @@ workload、requester、资源 owner、acting host/character、audience、具体�
 `room_turn_id`、`base_revision` 和硬过期时间绑定的 `sagasmith.auth-context/v2`。
 Hosted Worker 要求独立的 `SAGASMITH_WORKER_SERVICE_TOKEN`，玩家文本与可信上下文分字段，
 并只连接当前 `system_id` 对应的 MCP。标准 MCP text/image/audio/resource/embedded-resource
-结果保持不变，同时生成供 Web artifact 管道消费的 `host_media`。
+结果保持不变，同时生成供 Web artifact 管道消费的 `host_media`。可信 supervisor 还必须为持久
+workspace 传入稳定且唯一的 `--workspace-id`；worker 将它与规范路径绑定为 opaque owner，
+从而让重试和重启在端口变化后仍安全复用原 workspace。
 
 同一最新托管栈中的 D&D 与 CoC 参考战役已通过隔离客户端并发完成，未记录到回归
 缺口；D&D 路径记录了一个合法结局。目录 runner 会把发现的全部模组、实际运行项和

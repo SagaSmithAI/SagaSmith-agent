@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -13,10 +14,25 @@ from typing import Any
 
 MARKER_NAME = ".sagasmith-hosted-workspace.json"
 MARKER_SCHEMA = "sagasmith.hosted-workspace/v1"
+OWNER_NAMESPACE = "sagasmith.hosted-workspace-owner/v1"
 
 
 class HostedWorkspaceError(RuntimeError):
     """Raised when a Hosted workspace violates its lifecycle policy."""
+
+
+def derive_workspace_owner(workspace: Path, workspace_id: str) -> str:
+    """Derive a stable opaque owner from Host-managed workspace identity and path."""
+
+    if workspace_id != workspace_id.strip() or not workspace_id:
+        raise ValueError("workspace ID must be non-empty without surrounding whitespace")
+    if len(workspace_id.encode("utf-8")) > 512:
+        raise ValueError("workspace ID must not exceed 512 UTF-8 bytes")
+    if any(ord(character) < 32 or ord(character) == 127 for character in workspace_id):
+        raise ValueError("workspace ID must not contain control characters")
+    namespace_path = os.path.normcase(str(workspace.expanduser().resolve(strict=False)))
+    material = f"{OWNER_NAMESPACE}\0{namespace_path}\0{workspace_id}".encode("utf-8")
+    return f"workspace:{hashlib.sha256(material).hexdigest()}"
 
 
 @dataclass(frozen=True, slots=True)
