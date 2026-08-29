@@ -135,7 +135,8 @@ domains:
    authorization; in-connection exposure side effects do not mutate `tools/list`.
 3. Web derives concrete `allowed_operations` from system, phase, caller permissions, and the task.
    Agent verifies that every ID exists, then projects only that facade/workflow subset into the
-   turn's model registry.
+   turn's model registry. Hosted requests are rejected when this projection exceeds 16 operations,
+   so an authorization mistake cannot flood the model context with a low-hit-rate catalogue.
 
 `enabledTools` is a deployment allowlist and `allowed_operations` is a per-turn projection. Neither
 replaces the domain MCP's per-call role, phase, campaign, revision, and idempotency checks. Tools

@@ -152,7 +152,8 @@ Hosted 路径采用三层筛选，避免把三个领域的全部低级工具一�
 2. MCP 为同一 authorization 提供稳定、确定排序、可缓存的目录，不依赖连接内的
    exposure 副作用改变 `tools/list`。
 3. Web 按 system、phase、caller 权限和当前任务传入具体 `allowed_operations`；Agent
-   校验这些 ID 确实存在后，只把对应 facade/workflow 子集放进本轮模型 registry。
+   校验这些 ID 确实存在后，只把对应 facade/workflow 子集放进本轮模型 registry。Hosted
+   请求若投影超过 16 个 operation 会被拒绝，避免授权配置失误把低命中率长目录灌入模型上下文。
 
 `enabledTools` 是静态部署允许列表，`allowed_operations` 是单轮投影，两者都不能替代
 领域 MCP 在每次调用时对 role、phase、campaign、revision 和幂等键的重新校验。

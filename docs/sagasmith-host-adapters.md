@@ -159,7 +159,9 @@ It includes `system_id`, so the worker connects only the matching `systemIds` MC
 `allowed_operations` contains exact MCP tool IDs such as `campaign_query` or `resolution`, never
 Web policy groups such as `campaign.read`. Web derives that exact allowlist from system, phase,
 caller permissions and task. Agent rejects unknown IDs before invoking the model and also enforces
-the same list when tools are called. The per-turn live registry sees legacy catalog updates while
+the same list when tools are called. The Hosted boundary rejects projections above 16 concrete
+operations; split a broader task into bounded workflow turns instead of expanding the model
+catalogue. The per-turn live registry sees legacy catalog updates while
 keeping transient response tools out of the underlying session registry.
 The response contains `mcp_results` with standard text/image/audio/resource/embedded-resource
 blocks and `host_media` envelopes for Web artifact ingestion. Activity callbacks reuse one HTTP

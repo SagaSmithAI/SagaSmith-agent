@@ -30,6 +30,8 @@ from nanobot.apps.hosted_workspace import (
     derive_workspace_owner,
 )
 
+MAX_HOSTED_MCP_OPERATIONS = 16
+
 
 class WorkerTrustedContext(BaseModel):
     """Web-issued authority data, kept structurally separate from player text."""
@@ -42,7 +44,14 @@ class WorkerTrustedContext(BaseModel):
     acting_host_principal: str = Field(min_length=1, max_length=300)
     acting_character_id: str = Field(default="", max_length=300)
     authorized_audience: str = Field(min_length=1, max_length=300)
-    allowed_operations: list[str] = Field(min_length=1, max_length=100)
+    allowed_operations: list[str] = Field(
+        min_length=1,
+        max_length=MAX_HOSTED_MCP_OPERATIONS,
+        description=(
+            "Concrete MCP facade operations selected by the trusted Web Host for this turn. "
+            "The bounded projection protects model tool-selection quality."
+        ),
+    )
     room_turn_id: str = Field(min_length=1, max_length=300)
     campaign_id: str = Field(min_length=1, max_length=300)
     system_id: str = Field(min_length=1, max_length=100)
