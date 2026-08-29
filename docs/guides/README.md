@@ -14,6 +14,7 @@ edge cases.
 | Run long-running tasks | [Long-running AI agent](./long-running-ai-agent.md) |
 | Add memory | [AI agent memory](./ai-agent-memory.md) |
 | Deploy a gateway | [Deploy a long-running nanobot AI agent gateway](./deploy-nanobot-gateway.md) |
+| Install the coordinated SagaSmith Local Kit | [Full Windows workspace](./install-full-workspace-windows.md) / [中文](./install-full-workspace-windows.zh-CN.md) |
 
 ## Connect and integrate
 
@@ -43,3 +44,8 @@ edge cases.
 | Add Langfuse tracing | [Configure Langfuse observability](./configure-langfuse-observability.md) |
 | Secure local tools | [Secure a local AI agent](./secure-local-ai-agent.md) |
 | Deploy the gateway | [Deploy nanobot gateway](./deploy-nanobot-gateway.md) |
+
+For SagaSmith MCP 2026-07-28 identity, Tasks, Hosted Worker, component-lock, and rollback details,
+start from the root [English](../../README-en.md) or [Chinese](../../README.md) README and the
+[external Host adapter contract](../sagasmith-host-adapters.md). The generic MCP guides do not
+grant campaign authority and must not be used to pass browser or cross-audience tokens downstream.

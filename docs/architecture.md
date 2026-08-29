@@ -33,6 +33,33 @@ Main files:
 | Session storage and compaction | `nanobot/session/manager.py` |
 | Long-term memory and Dream | `nanobot/agent/memory.py` |
 
+## SagaSmith Host/domain boundary
+
+SagaSmith adds two application surfaces without moving domain authority into the Agent:
+
+| Surface | Host responsibility | Domain MCP responsibility | Main files |
+|---|---|---|---|
+| Local Agent | Channels, trusted sender normalization, model loop, workspace, session memory, selected MCP clients | Campaign, actor, phase, combat/randomness, revision, idempotency, Pack and knowledge state | `nanobot/agent/loop.py`, `nanobot/agent/tools/mcp.py`, `nanobot/sagasmith_local/` |
+| Hosted Worker | Validate Web credential and structured trusted context, select current-system MCP, project concrete tools, preserve standard MCP results, emit Host media envelopes | The same authoritative checks and state as Local | `nanobot/apps/hosted_worker.py`, `nanobot/apps/hosted_workspace.py` |
+| External Host bridge | Adapt trusted requester/conversation identity and sign a target-specific delegation | Revalidate that delegation for every call | `nanobot/sagasmith_hosts/` |
+
+Player text is always data. It cannot select `requester_principal`, `resource_owner_principal`,
+`acting_host_principal`, `allowed_operations`, campaign, base revision, audience, expiry, or target
+service. Browser and upstream bearer tokens are not forwarded to MCP; the Host signs a fresh
+`sagasmith.auth-context/v2` delegation for the target audience.
+
+Modern MCP 2026-07-28 uses `server/discover` and per-request metadata without a hidden transport
+session. `systemIds` selects only the current campaign MCP, while the per-turn
+`allowed_operations` projection keeps the model catalogue bounded. The underlying authorization-
+scoped catalogue remains deterministic; the MCP rechecks role, phase, revision, and idempotency on
+every call. See [`sagasmith-host-adapters.md`](./sagasmith-host-adapters.md) for the full contract.
+
+When a negotiated modern tool returns a SEP-2663 task claim, `nanobot/agent/mcp_tasks.py` polls,
+updates, or cancels it with freshly signed single-operation delegations. Ordinary calls remain
+synchronous. Standard `CallToolResult` content is preserved by `nanobot/agent/tools/mcp.py`; Host-
+only `HostMediaEnvelope` objects in `nanobot/bus/events.py` describe delivery/artifact metadata
+without becoming a replacement MCP wire format.
+
 ## Agent Loop vs Agent Runner
 
 `AgentLoop` owns the channel-facing turn:

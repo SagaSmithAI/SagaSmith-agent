@@ -1,6 +1,6 @@
 # SagaSmith Agent
 
-[中文](README.md) · [English](README-en.md) · [Website](https://sagasmithai.github.io) · [Platform overview](https://github.com/SagaSmithAI/.github/blob/main/profile/README.md) · [SagaSmith Web](https://github.com/SagaSmithAI/SagaSmith-service) · [Content catalog](https://github.com/SagaSmithAI/SagaSmith-dnd-content-library)
+[中文](README.md) · [English](README-en.md) · [Website](https://sagasmithai.github.io) · [Platform overview](https://github.com/SagaSmithAI/.github/blob/main/profile/README.md) · [SagaSmith Web](https://github.com/SagaSmithAI/SagaSmith-Web) · [Content catalog](https://github.com/SagaSmithAI/SagaSmith-dnd-content-library)
 
 <p align="center"><img src="images/Sagasmith.png" alt="SagaSmith Agent" width="168"></p>
 
@@ -23,6 +23,31 @@ SagaSmith Agent owns trusted channel identity, the multi-turn agent loop, worksp
 
 It does **not** write D&D/CoC databases directly, reimplement rules/combat/module parsing, infer permission from display names, or bypass a matching MCP workflow with a CLI or temporary script.
 
+## Choose the runtime first
+
+| Goal | Entrypoint | State and authority boundary | Start here |
+|---|---|---|---|
+| A complete GM Agent on your computer | `sagasmith-agent-local` / `nanobot` | The local user owns config, workspace, Channels, and selected MCPs | [Local Kit install](#install-and-start-the-full-windows-workspace) |
+| A SagaSmith Web room | `sagasmith-agent-worker` | Web is the Host/supervisor; the worker accepts one trusted turn envelope and one player message | [Hosted Worker contract](#hosted-worker-request-and-result-contract) |
+| Codex, Claude Code, or another local Host | `sagasmith-auth-bridge` | One trusted binding per requester/conversation; the bridge re-signs for the target MCP | [Host adapters](docs/sagasmith-host-adapters.md) |
+| Generic NanoBot features | `nanobot` | Use this repository's providers, channels, tools, WebUI, and API configuration | [Documentation map](docs/README.md) |
+
+Local Kit and Hosted Worker share the Agent loop and MCP handlers, but they are not the same
+security surface. Local lets its owner opt into local capabilities. The Hosted distribution is
+audited after build and excludes Channels, WebUI, the local installer, and shell/filesystem/web/
+cron/subagent tools.
+
+## Local and Hosted distributions
+
+- `sagasmith-agent-local` / `Dockerfile` is the complete user-operated Agent with Channels,
+  WebUI, local stack management, and explicitly configured local tools.
+- `sagasmith-agent-worker` / `Dockerfile.hosted` is the per-session Web worker. Its config must
+  set `tools.distribution="hosted"`; it loads only the selected session MCP tools and the
+  structured-response/activity tools injected by Web.
+
+The Hosted image is non-root and contains neither channel SDKs nor a second copy of Agent core.
+CI builds and audits the Local and Hosted artifacts separately.
+
 ## MCP 2026-07-28 and the Hosted boundary
 
 The bundled release lock requires Python SDK v2 and MCP 2026-07-28. Generic MCP configuration
@@ -36,6 +61,49 @@ Standard MCP text/image/audio/resource/embedded-resource results are retained wh
 envelopes feed the Web artifact pipeline. Its trusted supervisor also supplies a stable, unique
 `--workspace-id`; the worker binds an opaque owner to that ID and the canonical workspace path so
 retries and restarts safely reuse persisted state without relying on an ephemeral port.
+
+### Hosted Worker request and result contract
+
+Web sends exactly one `role=user` text message to `POST /v1/chat/completions`. Authority fields
+must remain in the separate `trusted_context` object. Pydantic rejects extra fields, wildcards,
+duplicate operations, expired delegations, and delegations longer than 15 minutes. The required
+shape is represented by this credential-free example:
+
+```json
+{
+  "session_id": "service-session-id",
+  "messages": [{"role": "user", "content": "player text"}],
+  "trusted_context": {
+    "caller_principal": "workload:sagasmith-web",
+    "workload_identity": "sagasmith-agent-hosted-worker",
+    "requester_principal": "user:requester",
+    "resource_owner_principal": "user:campaign-owner",
+    "acting_host_principal": "campaign:gm",
+    "acting_character_id": "character-id-or-empty",
+    "authorized_audience": "player",
+    "allowed_operations": ["campaign_query", "resolution"],
+    "room_turn_id": "durable-room-turn-id",
+    "campaign_id": "campaign-id",
+    "system_id": "dnd5e",
+    "base_revision": 42,
+    "expires_at": "replace-with-now-plus-at-most-15-minutes",
+    "idempotency_key": "stable-business-operation-key",
+    "conversation_principal": "room:conversation",
+    "tenant_id": "tenant-or-empty",
+    "traceparent": "",
+    "tracestate": "",
+    "baggage": ""
+  }
+}
+```
+
+Browser tokens, Web callback tokens, and credentials for another audience are never passed to a
+domain MCP. Agent issues a fresh delegation for the target service, exact operation, and remaining
+hard expiry. The response retains its OpenAI-compatible shell and adds bounded `tool_receipts`,
+`structured_output`, original standard `mcp_results`, and Host-only `host_media`.
+`mcp_results[].result` preserves MCP `CallToolResult` text, image, audio, resource, embedded
+resource, `structuredContent`, and `isError` semantics. Web converts `host_media` into artifact or
+object-store IDs; it does not replace MCP results with a private wire protocol.
 
 ## D&D: the MCP-first path
 
@@ -56,6 +124,32 @@ inbound message
 ```
 
 Modern catalogue contents never change as a side effect of another request on the same connection. Authorization can still produce a private deterministic catalogue, while legacy `tools/list_changed` remains only for compatibility and real catalogue changes. Neither catalogue selection nor an opaque handle grants authority.
+
+### Keeping the model tool list small
+
+The Hosted path uses three filters so the model never receives all low-level tools from all three
+domains:
+
+1. Trusted `system_id` connects only the MCP whose `systemIds` match the current campaign.
+2. The MCP exposes a stable, deterministically sorted, cacheable catalogue for the same
+   authorization; in-connection exposure side effects do not mutate `tools/list`.
+3. Web derives concrete `allowed_operations` from system, phase, caller permissions, and the task.
+   Agent verifies that every ID exists, then projects only that facade/workflow subset into the
+   turn's model registry.
+
+`enabledTools` is a deployment allowlist and `allowed_operations` is a per-turn projection. Neither
+replaces the domain MCP's per-call role, phase, campaign, revision, and idempotency checks. Tools
+omitted from a model turn stay in the stable underlying catalogue, which refreshes for a real
+authorization/catalogue change rather than every combat write.
+
+### MCP Tasks are only for genuinely long tools
+
+Agent enters SEP-2663 claim/poll/update/cancel only when modern `server/discover` negotiated
+`io.modelcontextprotocol/tasks` and a tool call returned `resultType: "task"`. Every `tasks/get`,
+`tasks/update`, and `tasks/cancel` uses a newly signed single-operation delegation and
+`Mcp-Name: <taskId>`; the opaque task ID is a name, not a capability. A terminal task is restored to
+the original tool's standard `CallToolResult`. Ordinary tools remain synchronous under
+`toolTimeout`; only real import/OCR/compile/high-resolution-render work uses `taskTimeout`.
 
 When campaign, principal, role, audience, branch, or restore state changes, the
 Agent stops later calls from the same model response and rebuilds without old
@@ -174,6 +268,21 @@ The committed public catalog contains only redistributable SRD Packs. A complete
 
 D&D and CoC Workbenches use ports 8766 and 8768. Non-loopback access requires an explicit bearer token and origin allowlist. Keep machine paths and secrets out of Git and reference provider keys through environment variables.
 
+## Hosted workspace lifecycle
+
+The trusted supervisor must pass `--workspace`, a stable unique `--workspace-id`, and the config
+path to `sagasmith-agent-worker`. Defaults are a 86,400-second TTL, 1 GiB per workspace, and 128
+registered workspaces under one root. Tighten them with `--workspace-ttl-seconds`,
+`--workspace-max-bytes`, and `--workspace-max-count`.
+
+The worker writes a `sagasmith.hosted-workspace/v1` marker and hashes the canonical path plus the
+Host-managed ID into a stable opaque owner. Retries and process restarts can reclaim that owner. A
+request with `terminal=true` marks the workspace terminated before it becomes eligible for TTL/LRU
+cleanup. Cleanup deletes only a child whose marker schema and recorded path match and whose status
+is `terminated`; unknown directories, active workspaces, symlinks, and damaged or mismatched
+markers are preserved. Never reuse one ID for another workspace or derive it from player/model
+text.
+
 ## Generic quick start
 
 Requires Python 3.11+:
@@ -228,6 +337,50 @@ bun install
 bun run build
 bun run test
 ```
+
+### Focused verification
+
+README, Hosted/MCP configuration, or release-lock changes should run at least:
+
+```bash
+uv run ruff check nanobot tests
+uv run pytest -q tests/apps/test_hosted_worker.py tests/tools/test_mcp_v2_contract.py \
+  tests/tools/test_mcp_tasks.py tests/test_sagasmith_local_stack.py
+uv run pytest -q tests/host_conformance
+```
+
+CI runs real-domain `release-lock` and `latest-main` lanes. Local tests must not use production
+campaign data, real user text, or paid models. Run `python -m nanobot.apps.hosted_audit` only in a
+clean Hosted image containing `.[hosted]`; it fails by design in a Local/dev environment that has
+Channel extras installed.
+
+## Deploy, upgrade, and roll back
+
+1. Read [`sagasmith-stack-lock.json`](sagasmith-stack-lock.json), verify
+   `sagasmith.release-lock/v3` and the expected `release_status`, and deploy Core plus the three
+   domains from those immutable commits. Do not assemble a production stack from archived repos
+   or floating `main` branches.
+2. Run `nanobot sagasmith install --verify-only` and `nanobot sagasmith doctor --json`. Roll domain
+   MCPs first, Agent Worker second, and Web last. Retain the previous images and lock until the new
+   transport/identity/media/Tasks smoke passes.
+3. A generic MCP can temporarily use `protocolMode: "legacy"` for a protocol incident. For the
+   coordinated stack, prefer rolling the whole image/lock set back. Legacy is a compatibility
+   adapter, not an implicit-session authority model, and archived repos remain forbidden.
+4. If the Hosted request contract is incompatible, roll Agent back before changing the Web pin.
+   Do not change a live `workspace-id` owner or replace marker/TTL/LRU handling with directory
+   clearing.
+
+Hosted Worker exposes `/health` and `GET /metrics/mcp`. The latter returns
+`sagasmith.host-mcp-metrics/v1` counters using only transport, protocol era, phase, outcome, and
+fixed catalogue-size buckets. Trusted `traceparent`, `tracestate`, and `baggage` propagate to MCP,
+but users, campaigns, runs, tool names, and arguments never become metric labels. Optional
+Langfuse model tracing complements rather than replaces these low-cardinality runtime metrics.
+
+Review [`SECURITY.md`](SECURITY.md),
+[`docs/sagasmith-host-adapters.md`](docs/sagasmith-host-adapters.md), and
+[`docs/deployment.md`](docs/deployment.md) before production rollout. Never commit
+`SAGASMITH_WORKER_SERVICE_TOKEN`, MCP signing secrets, provider keys, trusted-context files, or
+filled Local Kit templates.
 
 Docs: [Quick Start](docs/quick-start.md) · [Configuration](docs/configuration.md) · [Architecture](docs/architecture.md) · [MCP](docs/guides/configure-mcp-tools.md) · [Security](SECURITY.md)
 

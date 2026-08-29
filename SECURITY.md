@@ -209,6 +209,33 @@ If you suspect a security breach:
 5. **Update to latest version**
 6. **Report the incident** to maintainers
 
+### 11. SagaSmith Hosted Worker
+
+The Hosted Worker is an internal Web workload, not a public general-purpose OpenAI endpoint:
+
+- Build it from `Dockerfile.hosted`, run it as the included non-root user, and set
+  `tools.distribution` to `hosted`. The distribution audit must find no Channel SDKs or local
+  shell/filesystem/web/cron/subagent tools.
+- Set a unique `SAGASMITH_WORKER_SERVICE_TOKEN` of at least 32 bytes and keep it scoped to the
+  Web-to-Worker audience. Never pass browser, activity-callback, or unrelated service tokens to a
+  domain MCP.
+- Supply authority only in the separately authenticated `trusted_context`. Player/model text must
+  not choose requester, resource owner, acting Host/character, campaign, revision, audience,
+  allowed operation, expiry, or workspace identity.
+- Configure `targetService`, `authorizationAudience`, `systemIds`, and a signing secret per target
+  MCP. Modern calls use short-lived `sagasmith.auth-context/v2` delegations; legacy is an explicit
+  rollback adapter, not a session-based authorization boundary.
+- Give every persisted workspace a stable, unique Host-issued `--workspace-id`. Bound it with TTL,
+  byte, and count limits. The worker removes only terminated, marker-owned directories; unknown
+  directories, active workspaces, symlinks, and invalid markers must remain untouched.
+- Scrape `/metrics/mcp` only on the internal network. Its low-cardinality counters intentionally
+  omit users, campaigns, runs, tool names, and arguments. Protect logs and tracing backends because
+  prompts and baggage can still be sensitive.
+
+See the root [English](./README-en.md) or [Chinese](./README.md) README and
+[`docs/sagasmith-host-adapters.md`](./docs/sagasmith-host-adapters.md) for the complete request,
+delegation, media, Tasks, upgrade, and rollback contracts.
+
 ## Security Features
 
 ### Built-in Security Controls
