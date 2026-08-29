@@ -237,6 +237,21 @@ def test_real_domain_accepts_each_host_only_through_signed_bridge(
     )
 
 
+@pytest.mark.parametrize("transport", TRANSPORTS, ids=lambda item: item.value)
+def test_real_dnd_long_tool_resolves_sep2663_task_through_host_bridge(
+    transport: McpTransport,
+    tmp_path: Path,
+) -> None:
+    if _protocol_mode() != "2026-07-28":
+        pytest.skip("SEP-2663 Tasks are available only on the modern protocol")
+    asyncio.run(
+        asyncio.wait_for(
+            _exercise_dnd_task(transport, _contexts()[0], tmp_path),
+            timeout=CASE_TIMEOUT_SECONDS,
+        )
+    )
+
+
 def _http_bridge_target(domain: Domain) -> tuple[dict[str, object], str]:
     configured = os.environ.get(STATE_ROOT_ENV, "").strip()
     if not configured:
@@ -365,3 +380,70 @@ async def _exercise(
                 assert receipt["authorization_epoch"] == 0
             await session.list_resources()
             await session.list_prompts()
+
+
+async def _exercise_dnd_task(
+    transport: McpTransport,
+    context: TrustedHostContext,
+    tmp_path: Path,
+) -> None:
+    domain = DOMAINS[0]
+    workspace = _workspace()
+    if transport == McpTransport.STREAMABLE_HTTP:
+        server_config, secret = _http_bridge_target(domain)
+    else:
+        server_config, secret = _stdio_bridge_target(workspace, domain, tmp_path)
+    server_config["toolTimeout"] = 30
+    server_config["taskTimeout"] = 90
+
+    config_path = tmp_path / "bridge-task.json"
+    context_path = tmp_path / "context-task.json"
+    secret_path = tmp_path / "secret-task"
+    config_path.write_text(json.dumps(server_config), encoding="utf-8")
+    context_path.write_text(json.dumps(context.to_dict()), encoding="utf-8")
+    secret_path.write_text(secret, encoding="utf-8")
+    params = StdioServerParameters(
+        command=sys.executable,
+        args=[
+            "-m",
+            "nanobot.sagasmith_hosts.bridge",
+            "--config",
+            str(config_path),
+            "--context",
+            str(context_path),
+            "--secret-file",
+            str(secret_path),
+        ],
+        cwd=AGENT_ROOT,
+        env=dict(os.environ),
+    )
+    async with stdio_client(params) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            created = await session.call_tool(
+                "campaign_create",
+                {
+                    "name": f"Agent task parity {transport.value}",
+                    "idempotency_key": f"agent-task-campaign-{tmp_path.name}",
+                },
+            )
+            assert not created.is_error, created.content
+            campaign_payload = dict(created.structured_content or {})
+            campaign = dict(campaign_payload.get("result") or campaign_payload)
+            result = await session.call_tool(
+                "module_draft",
+                {
+                    "campaign_id": campaign["id"],
+                    "base_revision": int(campaign.get("revision") or 0),
+                    "action": "start",
+                    "payload": {
+                        "name": f"Agent {transport.value}",
+                        "content": "# Arrival\n\nA bounded room prepared for task parity.",
+                    },
+                    "idempotency_key": f"agent-task-module-{tmp_path.name}",
+                },
+            )
+            assert not result.is_error, result.content
+            payload = dict(result.structured_content or {})
+            completed = dict(payload.get("result") or payload)
+            assert "job" in completed

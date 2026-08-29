@@ -368,6 +368,13 @@ class MCPServerConfig(Base):
     url: str = ""  # HTTP/SSE: endpoint URL
     headers: dict[str, str] = Field(default_factory=dict)  # HTTP/SSE: custom headers
     tool_timeout: int = 30  # seconds before a tool call is cancelled
+    task_timeout: int = Field(
+        default=900,
+        ge=1,
+        le=86_400,
+        validation_alias=AliasChoices("taskTimeout", "task_timeout"),
+        serialization_alias="taskTimeout",
+    )  # Total timeout after a modern MCP call returns a SEP-2663 task handle.
     enabled_tools: list[str] = Field(
         default_factory=lambda: ["*"]
     )  # Only register these tools; accepts raw MCP names or wrapped mcp_<server>_<tool> names; ["*"] = all capabilities (tools, resources, prompts); any restriction = only listed tools, no resources/prompts

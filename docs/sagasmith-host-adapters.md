@@ -20,9 +20,26 @@ publish a package, image, tag, or GitHub release.
 | authority | `sagasmith.auth-context/v1` adapter | `sagasmith.auth-context/v2` per-request delegation |
 | catalogue | `tools/list_changed` may refresh a legacy session | deterministic sorted list, private cache scope |
 | cross-call state | legacy server compatibility only | explicit campaign/revision/opaque server handle |
+| long tool execution | synchronous compatibility behavior | SEP-2663 `io.modelcontextprotocol/tasks` claim, `tasks/get` / `tasks/update` / `tasks/cancel` |
+
+The modern Host advertises the [SEP-2663 Tasks extension](https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/seps/2663-tasks-extension.md)
+on every request and transparently resolves a server-directed `resultType: "task"` response back
+into the original standard `CallToolResult`. It honors the server polling interval, preserves
+JSON-RPC failures, routes `input_required` through the existing Host callback policy, and sends a
+best-effort `tasks/cancel` if the Agent turn is cancelled. Tasks are reserved for genuinely long
+single-tool work such as import, OCR, compilation, or high-resolution rendering. Ordinary short
+tools remain synchronous. The modern path never sends the removed `tasks/result`, `tasks/list`,
+or legacy `tools/call.task` forms.
+
+A task ID is an opaque name, not a capability. Every `tasks/get`, `tasks/update`, and
+`tasks/cancel` carries `Mcp-Name: <taskId>` plus a newly signed target-service delegation whose
+single allowed operation is that exact method. The Host retains the original trusted requester,
+resource owner, workload actor, campaign, room turn and base revision in task-local context; it
+never recovers those facts from the handle or model text, never reuses the original signature,
+and never extends a Web-supplied hard expiry.
 
 The v2 envelope is compatible with SagaSmith Core commit
-`0ac316655687757203a9df1b2eb81669ec1d2d78`. It binds the target MCP service, caller workload,
+`eef98fcfcaa96d08c069708b33ee7717ba1625c3`. It binds the target MCP service, caller workload,
 requester, resource owner, acting Host/character, audience, concrete operation allowlist,
 `room_turn_id`, `base_revision`, and a hard expiry. Browser or upstream bearer tokens are never
 forwarded to an MCP; the Agent signs a separate target-specific delegation.
@@ -31,10 +48,10 @@ The coordinated modern lock contains only the current active repositories:
 
 | Component | Immutable commit |
 |---|---|
-| SagaSmith Core | `0ac316655687757203a9df1b2eb81669ec1d2d78` |
-| D&D | `dd31d809cf406d9af99eb6c3fea176c33e16fee2` |
-| CoC | `492be2073a2b9bb3191111c470514e63c088d59f` |
-| Narrative | `c15fb2400407986b457d5406b76f9c3dae5b5358` |
+| SagaSmith Core | `eef98fcfcaa96d08c069708b33ee7717ba1625c3` |
+| D&D | `587f66e0673b686a7d47d1ee266d8404ef221741` |
+| CoC | `515f6a7e3ba3c2a41fff7de2624ee19e4deb6190` |
+| Narrative | `3f3694401dace148684f7fab9adda5b12679dfa0` |
 
 The lock parser rejects unknown component keys and an invalid component/profile layout. Archived
 standalone MCP, Skill, UI, and module-generator repositories cannot be release inputs or fallbacks.
@@ -148,7 +165,8 @@ The response contains `mcp_results` with standard text/image/audio/resource/embe
 blocks and `host_media` envelopes for Web artifact ingestion. Activity callbacks reuse one HTTP
 client; their token is scoped to Web and is never passed downstream.
 
-`GET /metrics/mcp` exposes bounded counters by phase, outcome, transport and protocol era, plus
+`GET /metrics/mcp` exposes bounded counters by phase (including task settlement), outcome,
+transport and protocol era, plus
 fixed buckets for stable-catalog candidate and per-turn selected counts. It never uses tool names,
 users, campaigns, runs or arguments as labels, so Hosted deployments can scrape it without creating
 unbounded cardinality or leaking authority context.

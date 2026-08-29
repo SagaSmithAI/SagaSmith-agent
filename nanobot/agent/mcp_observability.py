@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import Counter
 from threading import Lock
 
-_ALLOWED_PHASES = frozenset({"connect", "discover", "catalog", "tool", "projection"})
+_ALLOWED_PHASES = frozenset({"connect", "discover", "catalog", "tool", "task", "projection"})
 _ALLOWED_OUTCOMES = frozenset({"ok", "error", "timeout", "cancelled", "retry"})
 _ALLOWED_TRANSPORTS = frozenset({"stdio", "sse", "http", "inproc", "unknown"})
 _ALLOWED_PROTOCOLS = frozenset({"legacy", "2026-07-28", "unknown"})

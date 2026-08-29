@@ -214,15 +214,15 @@ def test_bundled_release_lock_is_modern_and_contains_only_current_inputs() -> No
     assert lock["schema"] == "sagasmith.release-lock/v3"
     assert lock["release_status"] == RELEASE_LOCK_STATUS
     assert lock["lock"] == "2026.8.29-mcp-modern-compatibility"
-    assert lock["generated_at"] == "2026-08-29T16:15:43.0395722+08:00"
+    assert lock["generated_at"] == "2026-08-29T18:42:40.1907951+08:00"
     assert "release" not in lock
     assert "released_at" not in lock
     assert lock["compatibility"] == RELEASE_COMPATIBILITY
     assert load_release_revisions(root / "sagasmith-stack-lock.json", tuple(InstallMode)) == {
-        "sagasmith-coc": "492be2073a2b9bb3191111c470514e63c088d59f",
-        "sagasmith-core": "0ac316655687757203a9df1b2eb81669ec1d2d78",
-        "sagasmith-dnd": "dd31d809cf406d9af99eb6c3fea176c33e16fee2",
-        "sagasmith-narrative": "c15fb2400407986b457d5406b76f9c3dae5b5358",
+        "sagasmith-coc": "515f6a7e3ba3c2a41fff7de2624ee19e4deb6190",
+        "sagasmith-core": "eef98fcfcaa96d08c069708b33ee7717ba1625c3",
+        "sagasmith-dnd": "587f66e0673b686a7d47d1ee266d8404ef221741",
+        "sagasmith-narrative": "3f3694401dace148684f7fab9adda5b12679dfa0",
     }
 
 
