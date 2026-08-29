@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import json
 import os
+import secrets
 from collections.abc import Mapping
 from contextlib import AsyncExitStack
 from pathlib import Path
@@ -17,7 +18,11 @@ from mcp.client.streamable_http import streamable_http_client
 from mcp.server import NotificationOptions, Server
 from mcp.server.stdio import stdio_server
 
-from nanobot.agent.auth_context import AUTH_CONTEXT_META_KEY, sign_auth_context
+from nanobot.agent.auth_context import (
+    AUTH_CONTEXT_META_KEY,
+    sign_auth_context,
+    sign_delegated_auth_context,
+)
 from nanobot.sagasmith_hosts.contract import TrustedHostContext
 
 
@@ -49,6 +54,9 @@ def _context(value: Mapping[str, Any]) -> TrustedHostContext:
         "conversation_principal",
         "session_id",
         "tenant_id",
+        "requester_principal",
+        "resource_owner_principal",
+        "acting_host_principal",
     }
     if not set(value) <= allowed:
         raise ValueError("Host context contains unsupported fields")
@@ -59,6 +67,9 @@ def _context(value: Mapping[str, Any]) -> TrustedHostContext:
         conversation_principal=str(value.get("conversation_principal") or ""),
         session_id=str(value.get("session_id") or ""),
         tenant_id=str(value.get("tenant_id") or ""),
+        requester_principal=str(value.get("requester_principal") or ""),
+        resource_owner_principal=str(value.get("resource_owner_principal") or ""),
+        acting_host_principal=str(value.get("acting_host_principal") or ""),
     )
 
 
@@ -72,6 +83,20 @@ def _first_text(value: Any, field: str) -> str:
             if isinstance(nested, Mapping) and (found := _first_text(nested, field)):
                 return found
     return ""
+
+
+def _first_nonnegative_int(value: Any, field: str) -> int:
+    if isinstance(value, Mapping):
+        candidate = value.get(field)
+        if isinstance(candidate, int) and not isinstance(candidate, bool) and candidate >= 0:
+            return candidate
+        for key in ("authority", "branch", "payload", "data", "result"):
+            nested = value.get(key)
+            if isinstance(nested, Mapping):
+                found = _first_nonnegative_int(nested, field)
+                if found >= 0:
+                    return found
+    return -1
 
 
 def _result_payload(result: types.CallToolResult) -> Mapping[str, Any]:
@@ -120,6 +145,7 @@ class AuthBridge:
         self.downstream: Client | None = None
         self.tool_definitions: dict[str, types.Tool] = {}
         self.authorization_epoch = 0
+        self.bridge_run_id = secrets.token_urlsafe(12)
         self._refresh_pending: set[str] = set()
         self._refresh_lock = asyncio.Lock()
         self.server = Server(
@@ -175,6 +201,40 @@ class AuthBridge:
         return trusted
 
     def _meta(self, tool_name: str, arguments: Mapping[str, Any], tool: types.Tool) -> dict[str, Any]:
+        if str(self.server_config.get("protocolMode") or "legacy") == "2026-07-28":
+            target_service = str(self.server_config.get("targetService") or "").strip()
+            if not target_service:
+                raise ValueError("modern downstream MCP requires targetService")
+            authorized_audience = str(
+                self.server_config.get("authorizationAudience") or ""
+            ).strip()
+            if not authorized_audience:
+                raise ValueError("modern downstream MCP requires authorizationAudience")
+            campaign_id = _first_text(arguments, "campaign_id") or (
+                f"local:{self.context.conversation_principal}"
+            )
+            base_revision = _first_nonnegative_int(arguments, "base_revision")
+            if base_revision < 0:
+                base_revision = _first_nonnegative_int(arguments, "expected_revision")
+            return {
+                AUTH_CONTEXT_META_KEY: sign_delegated_auth_context(
+                    secret=self.secret,
+                    issuer="sagasmith-agent-auth-bridge",
+                    target_service=target_service,
+                    caller_principal=f"host:{self.context.host}",
+                    workload_identity="sagasmith-auth-bridge",
+                    requester_principal=self.context.requester_principal,
+                    resource_owner_principal=self.context.resource_owner_principal,
+                    acting_host_principal=self.context.acting_host_principal,
+                    authorized_audience=authorized_audience,
+                    allowed_operations=(tool_name,),
+                    conversation_principal=self.context.conversation_principal,
+                    tenant_id=self.context.tenant_id,
+                    campaign_id=campaign_id,
+                    room_turn_id=f"{self.context.session_id}:{self.bridge_run_id}",
+                    base_revision=max(base_revision, 0),
+                )
+            }
         epoch = self.authorization_epoch
         if tool_name == "exposure" and arguments.get("action") == "open":
             epoch = 0
@@ -204,7 +264,12 @@ class AuthBridge:
         if tool is None:
             raise ValueError(f"unknown downstream tool: {name}")
         trusted = self._trusted_arguments(tool, arguments)
-        meta = self._meta(name, trusted, tool) if self._principal_argument(tool) else None
+        modern = str(self.server_config.get("protocolMode") or "legacy") == "2026-07-28"
+        meta = (
+            self._meta(name, trusted, tool)
+            if modern or self._principal_argument(tool)
+            else None
+        )
         result = await self.downstream.call_tool(
             name,
             arguments=trusted,

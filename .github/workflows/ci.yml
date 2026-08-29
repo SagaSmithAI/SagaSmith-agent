@@ -82,6 +82,11 @@ jobs:
       - name: Install Agent conformance dependencies
         run: uv sync --extra dev
 
+      - name: Verify modern release contract and active inputs
+        run: >-
+          uv run python -m pytest -q tests/test_sagasmith_local_stack.py
+          -k "bundled_release_lock_is_modern or archived_or_unknown_component_inputs"
+
       - name: Copy valid Agent config into lane state
         env:
           SOURCE_CONFIG: ${{ github.workspace }}/tests/fixtures/sagasmith-local-startup.json
@@ -146,6 +151,7 @@ jobs:
         env:
           SAGASMITH_REAL_DOMAINS_REQUIRED: "1"
           SAGASMITH_REAL_DOMAIN_LANE: ${{ matrix.lane }}
+          SAGASMITH_REAL_DOMAIN_PROTOCOL_MODE: "2026-07-28"
           SAGASMITH_REAL_DOMAIN_STATE_ROOT: ${{ runner.temp }}/sagasmith-real-domains/${{ matrix.lane }}
           SAGASMITH_REAL_DOMAIN_WORKSPACE: ${{ runner.temp }}/sagasmith-real-domains/${{ matrix.lane }}/releases/current
         run: uv run python -m pytest -q tests/host_conformance/test_real_domains.py

@@ -42,6 +42,11 @@ a non-installing audit. `--source release` uses the bundled
 `--release-ref <coordinated-tag>` only when the same tag exists in every selected
 repository.
 
+The bundled v3 lock requires MCP 2026-07-28, auth-context v2, and the shared authoritative-MCP
+contract. It contains only Core plus the three active domain repositories. A manifest with an
+unknown component, including an archived split repository, is rejected before cloning.
+This is an unpublished compatibility lock, not a package/image/tag release.
+
 The installer reconciles only SagaSmith-owned MCP and Skill entries. It backs
 up an existing config before changing it and preserves providers, secrets,
 channels, unrelated MCP servers, and unrelated Skill roots.
@@ -68,11 +73,12 @@ Default local endpoints are:
 | D&D MCP | `http://127.0.0.1:8767/mcp` |
 | CoC Workbench gateway | `http://127.0.0.1:8768/` |
 | CoC MCP | `http://127.0.0.1:8769/mcp` |
-| Narrative MCP | Agent-owned session-scoped stdio |
+| Narrative MCP | Agent-managed stdio |
 
-Each logical Agent session gets its own SagaSmith MCP connection and mutable
-native tool registry. `tools/list_changed` therefore changes only that chat's
-authoritative schema.
+The modern MCP catalogue is deterministic and private-cache scoped for the same authorization.
+The Agent selects a bounded facade subset for the current system, phase, and task, while every MCP
+call independently revalidates identity, campaign, role, revision, expiry, and allowed operation.
+Only the explicit legacy rollback adapter uses session-local exposure and `tools/list_changed`.
 
 ## Backup, restore, and upgrade
 
@@ -90,6 +96,11 @@ Backups contain the three separate domain state roots and the stack manifest.
 They exclude provider secrets, logs, source books, and source checkouts.
 Upgrade refuses dirty repositories, creates a backup first, fast-forwards only,
 reinstalls, and runs verification. Rollback also refuses dirty repositories.
+
+For a protocol-only emergency rollback, set an affected server's `protocolMode` to `legacy` while
+keeping the same locked components and signed authorization. Do not restore archived repositories
+or treat `Mcp-Session-Id` as an identity boundary. Return to `2026-07-28` after the compatibility
+incident is resolved.
 
 Uninstall removes managed config while preserving data by default:
 

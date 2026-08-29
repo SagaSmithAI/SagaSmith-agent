@@ -55,8 +55,9 @@ SagaSmith MCP；适配方式、信任边界和配置形状见
 
 ## MCP 2026-07-28 与 Hosted 边界
 
-Agent 使用 Python SDK v2 的 `protocolMode: "auto"` 同时兼容 legacy initialize 与
-MCP 2026-07-28 discover。现代路径不发送 `Mcp-Session-Id`；每次调用都携带与目标 MCP、
+内置发行锁要求 Python SDK v2 与 MCP 2026-07-28。通用 MCP 配置仍可用
+`protocolMode: "auto"` 回退到 legacy initialize，`"legacy"` 只作为显式运维回滚。
+现代路径不发送 `Mcp-Session-Id`；每次调用都携带与目标 MCP、
 workload、requester、资源 owner、acting host/character、audience、具体操作、
 `room_turn_id`、`base_revision` 和硬过期时间绑定的 `sagasmith.auth-context/v2`。
 Hosted Worker 要求独立的 `SAGASMITH_WORKER_SERVICE_TOKEN`，玩家文本与可信上下文分字段，
@@ -69,23 +70,23 @@ exclusion 写入机器可读结果，因此这条证据不被扩张为所有 Pac
 
 ## D&D：MCP-first 主路径
 
-[sagasmith-dnd](https://github.com/SagaSmithAI/sagasmith-dnd) 内的 D&D MCP 管理战役、规则、模组、角色、知识、分支、Snapshot 与战斗。每个聊天会话在服务端单独打开 exposure；服务端按当前 session、principal、campaign 与 phase 过滤原生工具列表，Agent 只选择当前任务所需的精确工具。
+[sagasmith-dnd](https://github.com/SagaSmithAI/sagasmith-dnd) 内的 D&D MCP 管理战役、规则、模组、角色、知识、分支、Snapshot 与战斗。现代目录对同一 authorization 保持确定、有序并使用 private cache hint；Agent 按当前 system、phase 和 task 只向模型暴露有界 facade 子集，每次调用仍由 MCP 重新校验身份、角色、阶段、revision 与具体 allowed operation。
 
 ```text
 消息到达
 → Host 注入 principal
 → skill_query(read/search/section) 并读取 bounded Skill sections
-→ exposure(action="open")
-→ exposure(action="search" / "set")
-→ tools/list_changed 后刷新原生 schema
-→ 直接调用列表中的原生 MCP 工具
+→ 读取稳定、有界的 MCP 目录
+→ 按 system / phase / task 选择精确 facade tool ID
+→ 传递显式 campaign / revision / 服务器签发 guidance handle
+→ 直接调用选中的原生 MCP 工具
 → MCP 校验 phase / campaign / role / actor / revision
 → 首次或变化的 host_context_binding 触发当前轮硬切换
 → isolated_evaluate / portray_npc 在全新零工具上下文中只生成提案
 → 结果写回会话与频道
 ```
 
-因此同一个 D&D MCP 进程可以为不同频道、用户与战役维护不同的可见工具面，模型不能靠构造参数提升权限。
+现代目录不会因同一连接内其他请求的副作用而改变；authorization 仍可得到私有、确定的目录。legacy `tools/list_changed` 仅用于兼容和真实目录变化。目录筛选与 opaque handle 都不授予权限，模型不能靠构造参数提升权限。
 
 战役、principal、role、audience、branch 或 restore 变化时，Agent 会停止同一
 模型回复中余下的工具调用，丢弃旧模型消息、摘要、workspace/Dream memory、
@@ -123,6 +124,11 @@ SagaSmith/
 原独立 MCP、Skills、UI 与通用 Module Generator 仓库已归档；安装器不会读取它们，
 也不会把它们作为兼容回退。
 
+内置 `sagasmith.release-lock/v3` 把 Core 与三个当前领域仓库固定到已审计的不可变
+commit，并把 MCP 2026-07-28、auth-context v2 与共享 authority contract 记录为必需
+兼容元数据。未知组件会被拒绝，因此归档拆分仓库不能静默进入发布输入。
+该 manifest 是尚未发布的兼容锁，不代表 release 公告或 tag。
+
 从 Agent 仓库选择正式发行 profile；`--mode` 仍可自由组合，不传两者时等同
 `multi-system`：
 
@@ -137,7 +143,7 @@ uv run nanobot sagasmith install
 ```
 
 `sagasmith-local-kit.json` 固定 profile、组件、端口、模板与公共
-`sagasmith.authoritative-mcp/v1` 契约。每个 profile 都可选择 `--transport stdio`
+`sagasmith.authoritative-mcp/v2` 契约。每个 profile 都可选择 `--transport stdio`
 （一个客户端独占进程）、`--transport streamable-http`（多个本机客户端共享常驻进程）
 或默认 `mixed`。两种 transport 使用相同 handlers、schemas、错误、revision、
 idempotency 与 authority 语义。HTTP 只监听 loopback。

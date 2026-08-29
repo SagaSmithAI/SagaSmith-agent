@@ -32,16 +32,18 @@ uv run nanobot sagasmith configure --mode dnd
 uv run nanobot sagasmith configure --mode coc --mode narrative
 ```
 
-Each generated SagaSmith entry declares `systemIds`, `protocolMode: "auto"`, and
+Each generated SagaSmith entry declares `systemIds`, an exact `targetService`,
+`protocolMode: "2026-07-28"`, and
 `sessionScoped: true`. Hosted workers select only the current campaign system. Modern authority is
-per request and does not depend on that connection; the per-session connection is retained only
-for legacy interoperability and process isolation during rollout.
+per request and does not depend on that connection; `sessionScoped` retains process isolation and
+is not an authorization boundary. Set `protocolMode: "legacy"` only for an explicit rollback.
 
 ### D&D
 
-SagaSmith D&D uses one session-aware `exposure` protocol and a mutable native tool list. Configure
-the trusted D&D server with `enabledTools: ["*"]`; the server initially publishes only its seven core
-tools and publishes selected domain tools after `exposure(set)`.
+SagaSmith D&D publishes a deterministic, sorted modern catalogue with private cache scope.
+Configure the trusted D&D server with `enabledTools: ["*"]`; the Agent clones that stable catalogue
+and selects a bounded facade subset for the current system, phase, and task. MCP authorization is
+rechecked on every call, independently of what the model can see.
 
 ```json
 {
@@ -63,8 +65,9 @@ tools and publishes selected domain tools after `exposure(set)`.
         "injectPrincipal": true,
         "sessionScoped": true,
         "systemIds": ["dnd5e"],
-        "protocolMode": "auto",
-        "authorizationAudience": "local",
+        "targetService": "sagasmith-dnd-mcp",
+        "protocolMode": "2026-07-28",
+        "authorizationAudience": "sagasmith-dnd-mcp",
         "enabledTools": ["*"],
         "exposeResourcesAndPrompts": true
       }
@@ -80,9 +83,9 @@ Skill roots. It removes only stale SagaSmith-owned entries and creates
 
 ### CoC and Narrative
 
-CoC uses `http://127.0.0.1:8769/mcp` with the same dynamic exposure contract.
+CoC uses `http://127.0.0.1:8769/mcp` with the same stable modern catalogue contract.
 Its authenticated sticky-session Workbench gateway is on port 8768 and binds
-the principal server-side. Narrative remains an Agent-owned session-scoped
+the principal server-side. Narrative remains an Agent-managed
 stdio child because it currently has no independent browser client.
 
 The legacy server initially exposes seven facade tools: `exposure`, `server_capabilities`,

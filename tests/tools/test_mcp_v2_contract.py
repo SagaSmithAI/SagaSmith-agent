@@ -26,6 +26,50 @@ class CapturingSession:
         )
 
 
+@pytest.mark.asyncio
+async def test_local_modern_tool_signs_target_specific_v2_without_hosted_fields() -> None:
+    session = CapturingSession()
+    wrapper = MCPToolWrapper(
+        session,
+        "sagasmith_dnd",
+        types.Tool(
+            name="campaign_query",
+            inputSchema={
+                "type": "object",
+                "properties": {"campaign_id": {"type": "string"}},
+            },
+        ),
+        inject_principal=True,
+        delegation_secret="delegation-test-secret-at-least-32-bytes",
+        authorization_audience="sagasmith-dnd-mcp",
+        target_service="sagasmith-dnd-mcp",
+        protocol="2026-07-28",
+    )
+    context = RequestContext(
+        channel="discord",
+        chat_id="table-1",
+        session_key="discord:table-1",
+        message_id="message-7",
+        actor_principal="discord:user:alice",
+        conversation_principal="discord:group:table-1",
+    )
+
+    with request_context(context):
+        result = await wrapper.execute(campaign_id="campaign-1")
+
+    assert result.is_error is False
+    auth = session.meta["sagasmith_auth_context"]
+    assert auth["schema"] == AUTH_CONTEXT_DELEGATION_SCHEMA
+    assert auth["target_service"] == "sagasmith-dnd-mcp"
+    assert auth["authorized_audience"] == "sagasmith-dnd-mcp"
+    assert auth["allowed_operations"] == ["campaign_query"]
+    assert auth["requester_principal"] == "discord:user:alice"
+    assert auth["resource_owner_principal"] == "discord:user:alice"
+    assert auth["acting_host_principal"] == "workload:sagasmith-agent"
+    assert auth["requester_principal"] != auth["acting_host_principal"]
+    assert auth["room_turn_id"] == "message-7"
+
+
 def test_trusted_operations_filter_model_catalog_without_mutating_stable_catalog() -> None:
     session = CapturingSession()
     registry = ToolRegistry()

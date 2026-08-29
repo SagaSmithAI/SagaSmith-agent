@@ -25,8 +25,9 @@ It does **not** write D&D/CoC databases directly, reimplement rules/combat/modul
 
 ## MCP 2026-07-28 and the Hosted boundary
 
-Python SDK v2 `protocolMode: "auto"` supports both legacy initialize and MCP 2026-07-28
-discover. The modern path sends no `Mcp-Session-Id`. Every call carries a short-lived
+The bundled release lock requires Python SDK v2 and MCP 2026-07-28. Generic MCP configuration
+can still use `protocolMode: "auto"` to fall back to legacy initialize, and `"legacy"` remains an
+explicit operational rollback. The modern path sends no `Mcp-Session-Id`. Every call carries a short-lived
 `sagasmith.auth-context/v2` delegation bound to the target MCP, workload, requester, resource
 owner, acting Host/character, audience, concrete operations, `room_turn_id`, and `base_revision`.
 Hosted Worker requires a dedicated `SAGASMITH_WORKER_SERVICE_TOKEN`, keeps trusted context
@@ -36,23 +37,23 @@ envelopes feed the Web artifact pipeline.
 
 ## D&D: the MCP-first path
 
-The D&D MCP in [sagasmith-dnd](https://github.com/SagaSmithAI/sagasmith-dnd) owns campaigns, rules, modules, characters, knowledge, branches, snapshots, and combat. Every chat session opens its own server-side exposure. The server filters the native tool list by current session, principal, campaign, and phase; the Agent selects only the exact tools needed for the current task.
+The D&D MCP in [sagasmith-dnd](https://github.com/SagaSmithAI/sagasmith-dnd) owns campaigns, rules, modules, characters, knowledge, branches, snapshots, and combat. Its modern catalogue is deterministic for the same authorization and carries private cache hints. The Agent selects a bounded facade subset for the current system, phase, and task; each call still revalidates identity, role, phase, revision, and allowed operation at the MCP.
 
 ```text
 inbound message
 → Host injects principal
 → skill_query(read/search/section) for bounded Skill sections
-→ exposure(action="open")
-→ exposure(action="search" / "set")
-→ refresh native schemas after tools/list_changed
-→ call the listed native MCP tool directly
+→ read the stable, bounded MCP catalogue
+→ select exact facade tool IDs for this system / phase / task
+→ pass explicit campaign / revision / server-issued guidance handle
+→ call the selected native MCP tool directly
 → MCP validates phase / campaign / role / actor / revision
 → a first or changed host_context_binding causes an in-turn hard barrier
 → isolated_evaluate / portray_npc returns a proposal from a fresh zero-tool context
 → result returns to session and channel
 ```
 
-One MCP process can therefore maintain different tool surfaces for different channels, users, and campaigns, without trusting model-supplied authority.
+Modern catalogue contents never change as a side effect of another request on the same connection. Authorization can still produce a private deterministic catalogue, while legacy `tools/list_changed` remains only for compatibility and real catalogue changes. Neither catalogue selection nor an opaque handle grants authority.
 
 When campaign, principal, role, audience, branch, or restore state changes, the
 Agent stops later calls from the same model response and rebuilds without old
@@ -94,6 +95,12 @@ Domain, MCP, Skills, UI where present, and authoring workflows. The former
 standalone MCP, Skills, UI, and generic Module Generator repositories are
 archived; the installer neither reads them nor treats them as fallbacks.
 
+The bundled `sagasmith.release-lock/v3` pins Core and all three active domain repositories to
+audited immutable commits. It also records MCP 2026-07-28, auth-context v2, and the shared
+authority contract as required compatibility metadata. Unknown components are rejected, so an
+archived split repository cannot silently become a release input.
+The manifest is an unpublished compatibility lock, not a release announcement or tag.
+
 Install a named release profile from the Agent repository. `--mode` remains
 available for custom combinations; omitting both selects `multi-system`:
 
@@ -108,7 +115,7 @@ uv run nanobot sagasmith install
 ```
 
 `sagasmith-local-kit.json` fixes the profiles, components, ports, templates, and
-shared `sagasmith.authoritative-mcp/v1` contract. Every profile supports
+shared `sagasmith.authoritative-mcp/v2` contract. Every profile supports
 `--transport stdio`, `--transport streamable-http`, or the backward-compatible
 `mixed` default. Both transports use the same handlers, schemas, errors,
 revisions, idempotency, and authority semantics; HTTP remains loopback-only.
