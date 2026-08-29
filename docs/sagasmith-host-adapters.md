@@ -178,7 +178,10 @@ worker hashes it together with the canonical workspace path into an opaque marke
 or restart can reclaim the same workspace even when its ephemeral port changes. Never derive this
 ID from player/model input, and never reuse it for another workspace. `--workspace-ttl-seconds`,
 `--workspace-max-bytes`, and `--workspace-max-count` bound registered worker workspaces. Cleanup
-removes only terminated directories with a matching SagaSmith marker; unknown directories,
-symlinks and active workspaces are not deletion candidates. Roll back the
+and active-workspace admission share a root-scoped cross-process lock. A new or reactivated
+workspace fails closed at the active count limit; the same owner and canonical path can restart
+without consuming another slot. Cleanup removes only terminated directories with a matching
+SagaSmith marker; unknown directories, symlinks and active workspaces are not deletion candidates.
+Roll back the
 Agent image before changing the request contract; use `protocolMode: "legacy"` only for an MCP
 protocol rollback, not as a long-term authorization boundary.

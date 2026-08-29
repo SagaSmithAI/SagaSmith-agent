@@ -277,12 +277,14 @@ registered workspaces under one root. Tighten them with `--workspace-ttl-seconds
 `--workspace-max-bytes`, and `--workspace-max-count`.
 
 The worker writes a `sagasmith.hosted-workspace/v1` marker and hashes the canonical path plus the
-Host-managed ID into a stable opaque owner. Retries and process restarts can reclaim that owner. A
-request with `terminal=true` marks the workspace terminated before it becomes eligible for TTL/LRU
-cleanup. Cleanup deletes only a child whose marker schema and recorded path match and whose status
-is `terminated`; unknown directories, active workspaces, symlinks, and damaged or mismatched
-markers are preserved. Never reuse one ID for another workspace or derive it from player/model
-text.
+Host-managed ID into a stable opaque owner. A root-scoped cross-process lock makes active-workspace
+admission, marker updates, and cleanup mutually exclusive. A new or reactivated workspace fails
+closed when `--workspace-max-count` active markers already exist, while a retry or process restart
+with the same owner and canonical path reuses its existing slot. A request with `terminal=true`
+marks the workspace terminated before it becomes eligible for TTL/LRU cleanup. Cleanup deletes only
+a child whose marker schema and recorded path match and whose status is `terminated`; unknown
+directories, active workspaces, symlinks, and damaged or mismatched markers are preserved. Never
+reuse one ID for another workspace or derive it from player/model text.
 
 ## Generic quick start
 

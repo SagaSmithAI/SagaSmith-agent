@@ -286,7 +286,9 @@ D&D 与 CoC Workbench 默认位于 8766 与 8768。非本机访问必须设置 b
 `--workspace-max-bytes`、`--workspace-max-count` 收紧。
 
 worker 在 workspace 中写入 `sagasmith.hosted-workspace/v1` marker，将规范路径与
-Host 管理的 ID 哈希为稳定 opaque owner。重试或进程重启可重新认领同一 owner；请求的
+Host 管理的 ID 哈希为稳定 opaque owner。root 级跨进程锁会把 active workspace 准入、
+marker 更新和清理串行化；已有 active marker 达到 `--workspace-max-count` 时，新建或重新
+激活会 fail closed，但相同 owner 与规范路径的重试或进程重启复用原槽位。请求的
 `terminal=true` 先标记终止，随后才进入 TTL/LRU 清理。清理只删除 root 下、marker
 schema/路径匹配且处于 `terminated` 状态的目录；未知目录、active workspace、symlink、
 损坏或不匹配 marker 都会保留。不要让多个 workspace 复用同一个 ID，也不要用玩家或
