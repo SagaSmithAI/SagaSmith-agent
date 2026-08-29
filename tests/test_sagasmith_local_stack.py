@@ -213,16 +213,16 @@ def test_bundled_release_lock_is_modern_and_contains_only_current_inputs() -> No
 
     assert lock["schema"] == "sagasmith.release-lock/v3"
     assert lock["release_status"] == RELEASE_LOCK_STATUS
-    assert lock["lock"] == "2026.8.29-mcp-modern-compatibility"
-    assert lock["generated_at"] == "2026-08-29T18:42:40.1907951+08:00"
+    assert lock["lock"] == "2026.8.30-mcp-modern-final"
+    assert lock["generated_at"] == "2026-08-30T00:38:06.5892176+08:00"
     assert "release" not in lock
     assert "released_at" not in lock
     assert lock["compatibility"] == RELEASE_COMPATIBILITY
     assert load_release_revisions(root / "sagasmith-stack-lock.json", tuple(InstallMode)) == {
-        "sagasmith-coc": "515f6a7e3ba3c2a41fff7de2624ee19e4deb6190",
-        "sagasmith-core": "eef98fcfcaa96d08c069708b33ee7717ba1625c3",
-        "sagasmith-dnd": "587f66e0673b686a7d47d1ee266d8404ef221741",
-        "sagasmith-narrative": "3f3694401dace148684f7fab9adda5b12679dfa0",
+        "sagasmith-coc": "eebab0986299b0cd9ce420c3521e4688356e9746",
+        "sagasmith-core": "612bfe7e5290eb5b23f2811baa83b8a28293b36e",
+        "sagasmith-dnd": "ba602ea103de67d19ffbfba2f69f3802a9e34dd3",
+        "sagasmith-narrative": "2e2dfe8a18b53ad4c090a7382c25c32a354c7621",
     }
 
 
@@ -333,6 +333,11 @@ def test_distribution_manifest_declares_all_profiles_and_templates() -> None:
     manifest = json.loads((root / "sagasmith-local-kit.json").read_text(encoding="utf-8"))
     assert manifest["schema"] == "sagasmith.local-agent-kit/v1"
     assert manifest["authoritative_contract"] == "sagasmith.authoritative-mcp/v2"
+    assert manifest["release_lock"] == {
+        "manifest": "sagasmith-stack-lock.json",
+        "lock": "2026.8.30-mcp-modern-final",
+    }
+    assert manifest["compatibility"] == RELEASE_COMPATIBILITY
     assert set(manifest["profiles"]) == {
         "dnd-only",
         "coc-only",

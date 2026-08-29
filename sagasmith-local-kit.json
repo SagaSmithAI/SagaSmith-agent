@@ -2,6 +2,16 @@
   "schema": "sagasmith.local-agent-kit/v1",
   "product": "SagaSmith Local Agent Kit",
   "authoritative_contract": "sagasmith.authoritative-mcp/v2",
+  "release_lock": {
+    "manifest": "sagasmith-stack-lock.json",
+    "lock": "2026.8.30-mcp-modern-final"
+  },
+  "compatibility": {
+    "mcp_protocol": "2026-07-28",
+    "legacy_protocol": "fallback-only",
+    "auth_context": "sagasmith.auth-context/v2",
+    "authority": "sagasmith.authoritative-mcp/v2"
+  },
   "profiles": {
     "dnd-only": {
       "modes": ["dnd"],
