@@ -64,6 +64,9 @@ async def test_local_modern_tool_signs_target_specific_v2_without_hosted_fields(
     assert auth["authorized_audience"] == "sagasmith-dnd-mcp"
     assert auth["allowed_operations"] == ["campaign_query"]
     assert auth["requester_principal"] == "discord:user:alice"
+    assert auth["resource_owner_principal"] == "discord:user:alice"
+    assert auth["acting_host_principal"] == "workload:sagasmith-agent"
+    assert auth["requester_principal"] != auth["acting_host_principal"]
     assert auth["room_turn_id"] == "message-7"
 
 

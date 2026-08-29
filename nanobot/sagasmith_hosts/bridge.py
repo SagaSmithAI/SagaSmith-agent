@@ -54,6 +54,9 @@ def _context(value: Mapping[str, Any]) -> TrustedHostContext:
         "conversation_principal",
         "session_id",
         "tenant_id",
+        "requester_principal",
+        "resource_owner_principal",
+        "acting_host_principal",
     }
     if not set(value) <= allowed:
         raise ValueError("Host context contains unsupported fields")
@@ -64,6 +67,9 @@ def _context(value: Mapping[str, Any]) -> TrustedHostContext:
         conversation_principal=str(value.get("conversation_principal") or ""),
         session_id=str(value.get("session_id") or ""),
         tenant_id=str(value.get("tenant_id") or ""),
+        requester_principal=str(value.get("requester_principal") or ""),
+        resource_owner_principal=str(value.get("resource_owner_principal") or ""),
+        acting_host_principal=str(value.get("acting_host_principal") or ""),
     )
 
 
@@ -217,9 +223,9 @@ class AuthBridge:
                     target_service=target_service,
                     caller_principal=f"host:{self.context.host}",
                     workload_identity="sagasmith-auth-bridge",
-                    requester_principal=self.context.actor_principal,
-                    resource_owner_principal=self.context.actor_principal,
-                    acting_host_principal=self.context.actor_principal,
+                    requester_principal=self.context.requester_principal,
+                    resource_owner_principal=self.context.resource_owner_principal,
+                    acting_host_principal=self.context.acting_host_principal,
                     authorized_audience=authorized_audience,
                     allowed_operations=(tool_name,),
                     conversation_principal=self.context.conversation_principal,

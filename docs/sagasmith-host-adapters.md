@@ -59,7 +59,11 @@ The adapters in `nanobot.sagasmith_hosts` map each Host into:
 }
 ```
 
-`actor_principal` is the authorization subject. `conversation_principal` is the routing and
+For legacy v1, `actor_principal` is the authorization subject. In v2 it remains a requester
+compatibility alias and must never be populated with the Agent identity. `requester_principal`
+identifies the player who requested the turn, `resource_owner_principal` identifies the campaign
+owner, and `acting_host_principal` identifies the Agent workload executing the authoritative
+operation. `conversation_principal` is the routing and
 audience boundary. Users in one group therefore share a conversation without sharing roles.
 The bridge overwrites any model-supplied principal argument. For a modern downstream it signs a
 fresh v2 delegation for the configured `targetService`, exact called tool, trusted requester and

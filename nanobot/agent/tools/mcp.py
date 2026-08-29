@@ -1080,6 +1080,21 @@ class MCPToolWrapper(_MCPWrapperBase):
                     meta[key] = value.strip()
             return meta
         if self._metrics_protocol == "2026-07-28":
+            requester_principal = (
+                request.requester_principal
+                if request is not None and request.requester_principal
+                else trusted_principal
+            )
+            resource_owner_principal = (
+                request.resource_owner_principal
+                if request is not None and request.resource_owner_principal
+                else requester_principal
+            )
+            acting_host_principal = (
+                request.acting_host_principal
+                if request is not None and request.acting_host_principal
+                else "workload:sagasmith-agent"
+            )
             base_revision = (
                 request.base_revision
                 if request is not None and request.base_revision is not None
@@ -1104,9 +1119,9 @@ class MCPToolWrapper(_MCPWrapperBase):
                     target_service=self._target_service,
                     caller_principal="workload:sagasmith-agent",
                     workload_identity="sagasmith-agent-local",
-                    requester_principal=trusted_principal,
-                    resource_owner_principal=trusted_principal,
-                    acting_host_principal=trusted_principal,
+                    requester_principal=requester_principal,
+                    resource_owner_principal=resource_owner_principal,
+                    acting_host_principal=acting_host_principal,
                     authorized_audience=self._authorization_audience,
                     allowed_operations=(self._original_name,),
                     conversation_principal=conversation_principal,

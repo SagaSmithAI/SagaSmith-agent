@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -148,7 +149,10 @@ class _FakeDownstream:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode", ["legacy", "2026-07-28"])
 async def test_auth_bridge_has_legacy_and_modern_equivalent_contract(mode: str) -> None:
-    context = adapt_codex(profile_id="local-1", project_id="campaign-tools")
+    context = replace(
+        adapt_codex(profile_id="local-1", project_id="campaign-tools"),
+        resource_owner_principal="campaign:owner:campaign-tools",
+    )
     bridge = AuthBridge(
         server_config={
             "protocolMode": mode,
@@ -175,7 +179,16 @@ async def test_auth_bridge_has_legacy_and_modern_equivalent_contract(mode: str) 
     if mode == "2026-07-28":
         assert auth["target_service"] == "sagasmith-dnd-mcp"
         assert auth["allowed_operations"] == ["exposure"]
-        assert auth["requester_principal"] == context.actor_principal
+        assert auth["requester_principal"] == context.requester_principal
+        assert auth["resource_owner_principal"] == context.resource_owner_principal
+        assert auth["acting_host_principal"] == "workload:sagasmith-agent"
+        assert len(
+            {
+                auth["requester_principal"],
+                auth["resource_owner_principal"],
+                auth["acting_host_principal"],
+            }
+        ) == 3
 
 
 @pytest.mark.asyncio

@@ -51,6 +51,9 @@ class TrustedHostContext:
     conversation_principal: str
     session_id: str
     tenant_id: str = ""
+    requester_principal: str = ""
+    resource_owner_principal: str = ""
+    acting_host_principal: str = ""
 
     def __post_init__(self) -> None:
         for field in (
@@ -59,6 +62,26 @@ class TrustedHostContext:
             "actor_principal",
             "conversation_principal",
             "session_id",
+        ):
+            _required(getattr(self, field), field)
+        requester = self.requester_principal or self.actor_principal
+        if requester != self.actor_principal:
+            raise ValueError("actor_principal must remain the requester compatibility alias")
+        object.__setattr__(self, "requester_principal", requester)
+        object.__setattr__(
+            self,
+            "resource_owner_principal",
+            self.resource_owner_principal or requester,
+        )
+        object.__setattr__(
+            self,
+            "acting_host_principal",
+            self.acting_host_principal or "workload:sagasmith-agent",
+        )
+        for field in (
+            "requester_principal",
+            "resource_owner_principal",
+            "acting_host_principal",
         ):
             _required(getattr(self, field), field)
 
@@ -70,6 +93,9 @@ class TrustedHostContext:
             "conversation_principal": self.conversation_principal,
             "session_id": self.session_id,
             "tenant_id": self.tenant_id,
+            "requester_principal": self.requester_principal,
+            "resource_owner_principal": self.resource_owner_principal,
+            "acting_host_principal": self.acting_host_principal,
         }
 
 

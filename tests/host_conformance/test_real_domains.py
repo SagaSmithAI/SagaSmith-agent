@@ -5,7 +5,7 @@ import json
 import os
 import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import pytest
@@ -166,7 +166,7 @@ def _verify_required_ci_lane() -> None:
 
 
 def _contexts() -> list[TrustedHostContext]:
-    return [
+    contexts = [
         adapt_sagasmith_agent(
             {
                 "channel": "discord",
@@ -209,6 +209,14 @@ def _contexts() -> list[TrustedHostContext]:
             principal_id="user:alice",
             conversation_id="table-1",
         ),
+    ]
+    return [
+        replace(
+            context,
+            resource_owner_principal="campaign:owner:table-1",
+            acting_host_principal="workload:sagasmith-agent",
+        )
+        for context in contexts
     ]
 
 
@@ -338,6 +346,19 @@ async def _exercise(
             assert receipt[principal_field] == context.actor_principal
             assert receipt["conversation_principal"] == context.conversation_principal
             if _protocol_mode() == "2026-07-28":
+                assert receipt["requester_principal"] == context.requester_principal
+                assert (
+                    receipt["resource_owner_principal"]
+                    == context.resource_owner_principal
+                )
+                assert receipt["acting_host_principal"] == context.acting_host_principal
+                assert len(
+                    {
+                        receipt["requester_principal"],
+                        receipt["resource_owner_principal"],
+                        receipt["acting_host_principal"],
+                    }
+                ) == 3
                 assert receipt["target_service"] == f"sagasmith-{domain.name}-mcp"
                 assert receipt["allowed_operations"] == ["exposure"]
             else:
