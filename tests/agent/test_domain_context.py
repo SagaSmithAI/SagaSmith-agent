@@ -17,14 +17,18 @@ from nanobot.agent.domain_context import (
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.memory import Consolidator, MemoryStore
 from nanobot.agent.tools.base import Tool, ToolResult
-from nanobot.agent.tools.context import RequestContext
+from nanobot.agent.tools.context import RequestContext, current_request_context
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.session.manager import Session, SessionManager
 
 
-def _binding(*, branch_id: str = "branch-a") -> DomainContextBinding:
+def _binding(
+    *,
+    branch_id: str = "branch-a",
+    domain: str = "sagasmith-dnd",
+) -> DomainContextBinding:
     return DomainContextBinding.from_mapping({
-        "domain": "sagasmith-dnd",
+        "domain": domain,
         "campaign_id": "campaign-1",
         "principal_fingerprint": principal_fingerprint("discord:user-1"),
         "authorization_fingerprint": "b" * 64,
@@ -302,6 +306,167 @@ async def test_pre_turn_sync_supports_action_campaign_query_schema() -> None:
     )
 
     assert seen == {"action": "get", "campaign_id": "campaign-1"}
+
+
+@pytest.mark.asyncio
+async def test_pre_turn_sync_restores_modern_narrative_context_after_restart(tmp_path) -> None:
+    first_process = SessionManager(tmp_path)
+    original = first_process.get_or_create("service:narrative-table")
+    binding = _binding(domain="sagasmith-narrative")
+    bind_session_context(original, binding)
+    original.add_message("assistant", "persisted narrative context")
+    first_process.save(original)
+
+    restarted_process = SessionManager(tmp_path)
+    restored = restarted_process.get_or_create("service:narrative-table")
+    calls: list[dict[str, object]] = []
+
+    class ReconnectedModernCampaignQuery(Tool):
+        _context_sync = True
+        _domain_context = "sagasmith-narrative"
+        _trusted_arguments = frozenset({"campaign_id"})
+
+        @property
+        def name(self) -> str:
+            return "mcp_sagasmith_narrative_campaign_query"
+
+        @property
+        def description(self) -> str:
+            return "sync"
+
+        @property
+        def parameters(self) -> dict[str, object]:
+            return {
+                "type": "object",
+                "properties": {"action": {"type": "string", "enum": ["get"]}},
+            }
+
+        async def execute(self, **kwargs: object) -> ToolResult:
+            request = current_request_context()
+            assert request is not None
+            calls.append({**kwargs, "campaign_id": request.campaign_id})
+            bind_session_context(restored, binding)
+            return ToolResult("ok")
+
+    tools = ToolRegistry()
+    tools.register(ReconnectedModernCampaignQuery())
+    ctx = SimpleNamespace(
+        session=restored,
+        tools=tools,
+        request_context=RequestContext(
+            channel="service",
+            chat_id="narrative-table",
+            sender_id="user-1",
+            actor_principal="user:user-1",
+            conversation_principal="room:narrative-table",
+            session_key=restored.key,
+            campaign_id="campaign-1",
+            system_id="narrative",
+            allowed_operations=("campaign_query",),
+            metadata={"auth_context_schema": "sagasmith.auth-context/v2"},
+        ),
+    )
+
+    await AgentLoop._synchronize_authoritative_domain_context(
+        SimpleNamespace(tools=tools),
+        ctx,
+    )
+
+    assert calls == [{"action": "get", "campaign_id": "campaign-1"}]
+    assert restored.get_history() == [
+        {"role": "assistant", "content": "persisted narrative context"}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_pre_turn_sync_rejects_action_schema_without_trusted_campaign() -> None:
+    session = Session(key="service:narrative-table")
+    bind_session_context(session, _binding(domain="sagasmith-narrative"))
+
+    class UntrustedCampaignQuery(Tool):
+        _context_sync = True
+        _domain_context = "sagasmith-narrative"
+
+        @property
+        def name(self) -> str:
+            return "mcp_sagasmith_narrative_campaign_query"
+
+        @property
+        def description(self) -> str:
+            return "sync"
+
+        @property
+        def parameters(self) -> dict[str, object]:
+            return {
+                "type": "object",
+                "properties": {"action": {"type": "string"}},
+            }
+
+        async def execute(self, **_kwargs: object) -> ToolResult:
+            raise AssertionError("unsupported schema must not execute")
+
+    tools = ToolRegistry()
+    tools.register(UntrustedCampaignQuery())
+    ctx = SimpleNamespace(
+        session=session,
+        tools=tools,
+        request_context=RequestContext(
+            channel="service",
+            chat_id="narrative-table",
+            session_key=session.key,
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="unsupported schema"):
+        await AgentLoop._synchronize_authoritative_domain_context(
+            SimpleNamespace(tools=tools),
+            ctx,
+        )
+
+
+@pytest.mark.asyncio
+async def test_pre_turn_sync_rejects_request_for_another_campaign() -> None:
+    session = Session(key="service:narrative-table")
+    bind_session_context(session, _binding(domain="sagasmith-narrative"))
+
+    class ModernCampaignQuery(Tool):
+        _context_sync = True
+        _domain_context = "sagasmith-narrative"
+        _trusted_arguments = frozenset({"campaign_id"})
+
+        @property
+        def name(self) -> str:
+            return "mcp_sagasmith_narrative_campaign_query"
+
+        @property
+        def description(self) -> str:
+            return "sync"
+
+        @property
+        def parameters(self) -> dict[str, object]:
+            return {"type": "object", "properties": {"action": {"type": "string"}}}
+
+        async def execute(self, **_kwargs: object) -> ToolResult:
+            raise AssertionError("campaign mismatch must not execute")
+
+    tools = ToolRegistry()
+    tools.register(ModernCampaignQuery())
+    ctx = SimpleNamespace(
+        session=session,
+        tools=tools,
+        request_context=RequestContext(
+            channel="service",
+            chat_id="narrative-table",
+            session_key=session.key,
+            campaign_id="campaign-2",
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="another campaign"):
+        await AgentLoop._synchronize_authoritative_domain_context(
+            SimpleNamespace(tools=tools),
+            ctx,
+        )
 
 
 @pytest.mark.asyncio

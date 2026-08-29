@@ -1997,26 +1997,43 @@ class AgentLoop:
                 f"one sync capability for {binding.domain!r}, found {len(matches)}."
             )
         assert ctx.request_context is not None
+        if ctx.request_context.campaign_id not in (None, binding.campaign_id):
+            raise RuntimeError(
+                "Authoritative domain context synchronization request names another campaign."
+            )
+        sync_request_context = dataclasses.replace(
+            ctx.request_context,
+            campaign_id=binding.campaign_id,
+        )
         tool_name = matches[0][0]
         sync_tool = tools.get(tool_name)
         properties = dict((sync_tool.parameters if sync_tool is not None else {}).get("properties") or {})
+        advertised_trusted_arguments = getattr(sync_tool, "_trusted_arguments", None)
+        trusted_arguments = (
+            advertised_trusted_arguments
+            if isinstance(advertised_trusted_arguments, frozenset)
+            else frozenset()
+        )
         if {"view", "payload"}.issubset(properties):
             arguments = {
                 "view": "binding",
                 "payload": {"campaign_id": binding.campaign_id},
             }
-        elif {"action", "campaign_id"}.issubset(properties):
+        elif "action" in properties and "campaign_id" in properties:
             arguments = {
                 "action": "get",
                 "campaign_id": binding.campaign_id,
             }
+        elif "action" in properties and "campaign_id" in trusted_arguments:
+            arguments = {"action": "get"}
         else:
             raise RuntimeError(
                 "Authoritative domain context synchronization capability has an "
                 "unsupported schema."
             )
+
         async def execute_bound(name: str, params: dict[str, Any]):
-            token = bind_request_context(ctx.request_context)
+            token = bind_request_context(sync_request_context)
             try:
                 return await tools.execute(name, params)
             finally:
