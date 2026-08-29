@@ -650,3 +650,59 @@ def test_hosted_worker_preserves_audio_resource_and_embedded_blocks(
         "audio-checksum",
         "grid-checksum",
     }
+
+
+def test_hosted_worker_preserves_structured_mcp_tool_error() -> None:
+    standard_error = types.CallToolResult(
+        isError=True,
+        content=[
+            types.TextContent(
+                type="text",
+                text="Revision 7 is stale; retry from revision 8.",
+            )
+        ],
+        structuredContent={
+            "error": {
+                "code": "stale_revision",
+                "message": "Revision 7 is stale; retry from revision 8.",
+                "retryable": True,
+                "expected_revision": 8,
+            }
+        },
+    )
+
+    class StructuredErrorLoop(FakeLoop):
+        async def process_direct(self, **arguments):
+            result = ToolResult(
+                "Revision 7 is stale; retry from revision 8.",
+                is_error=True,
+                mcp_result=_serialize_call_tool_result(standard_error),
+            )
+            for hook in arguments["hooks"]:
+                await hook.after_execute_tool(
+                    None,
+                    SimpleNamespace(name="mcp_dnd_combat_action"),
+                    None,
+                    None,
+                    result,
+                )
+            return SimpleNamespace(content="recoverable", metadata={"_agent_usage": {}})
+
+    with TestClient(
+        create_worker_app(StructuredErrorLoop(), "test-model", service_token=TOKEN)
+    ) as client:
+        response = client.post(
+            "/v1/chat/completions",
+            headers={"Authorization": f"Bearer {TOKEN}"},
+            json=request_json(),
+        )
+
+    assert response.status_code == 200, response.text
+    result = response.json()["mcp_results"][0]["result"]
+    assert result["isError"] is True
+    assert result["structuredContent"]["error"] == {
+        "code": "stale_revision",
+        "message": "Revision 7 is stale; retry from revision 8.",
+        "retryable": True,
+        "expected_revision": 8,
+    }
