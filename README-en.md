@@ -198,6 +198,18 @@ authority contract as required compatibility metadata. Unknown components are re
 archived split repository cannot silently become a release input.
 The manifest is an unpublished compatibility lock, not a release announcement or tag.
 
+The final coordinated lock is `2026.8.30-mcp-modern-final`:
+
+| Component | Verified immutable revision |
+| --- | --- |
+| `sagasmith-core` | `612bfe7e5290eb5b23f2811baa83b8a28293b36e` |
+| `sagasmith-dnd` | `ba602ea103de67d19ffbfba2f69f3802a9e34dd3` |
+| `sagasmith-coc` | `eebab0986299b0cd9ce420c3521e4688356e9746` |
+| `sagasmith-narrative` | `2e2dfe8a18b53ad4c090a7382c25c32a354c7621` |
+
+The Local Kit manifest declares the same lock and compatibility tuple, so packaging and
+installation metadata cannot silently drift from the validated stack.
+
 Install a named release profile from the Agent repository. `--mode` remains
 available for custom combinations; omitting both selects `multi-system`:
 

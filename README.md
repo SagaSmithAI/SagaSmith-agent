@@ -210,6 +210,17 @@ commit，并把 MCP 2026-07-28、auth-context v2 与共享 authority contract �
 兼容元数据。未知组件会被拒绝，因此归档拆分仓库不能静默进入发布输入。
 该 manifest 是尚未发布的兼容锁，不代表 release 公告或 tag。
 
+最终协同锁为 `2026.8.30-mcp-modern-final`：
+
+| 组件 | 已验证的不可变 revision |
+| --- | --- |
+| `sagasmith-core` | `612bfe7e5290eb5b23f2811baa83b8a28293b36e` |
+| `sagasmith-dnd` | `ba602ea103de67d19ffbfba2f69f3802a9e34dd3` |
+| `sagasmith-coc` | `eebab0986299b0cd9ce420c3521e4688356e9746` |
+| `sagasmith-narrative` | `2e2dfe8a18b53ad4c090a7382c25c32a354c7621` |
+
+Local Kit manifest 声明同一锁与兼容性元组，避免打包或安装元数据与已验证栈静默漂移。
+
 从 Agent 仓库选择正式发行 profile；`--mode` 仍可自由组合，不传两者时等同
 `multi-system`：
 

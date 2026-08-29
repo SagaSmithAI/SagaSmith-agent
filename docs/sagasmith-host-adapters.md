@@ -39,7 +39,7 @@ never recovers those facts from the handle or model text, never reuses the origi
 and never extends a Web-supplied hard expiry.
 
 The v2 envelope is compatible with SagaSmith Core commit
-`eef98fcfcaa96d08c069708b33ee7717ba1625c3`. It binds the target MCP service, caller workload,
+`612bfe7e5290eb5b23f2811baa83b8a28293b36e`. It binds the target MCP service, caller workload,
 requester, resource owner, acting Host/character, audience, concrete operation allowlist,
 `room_turn_id`, `base_revision`, and a hard expiry. Browser or upstream bearer tokens are never
 forwarded to an MCP; the Agent signs a separate target-specific delegation.
@@ -48,10 +48,10 @@ The coordinated modern lock contains only the current active repositories:
 
 | Component | Immutable commit |
 |---|---|
-| SagaSmith Core | `eef98fcfcaa96d08c069708b33ee7717ba1625c3` |
-| D&D | `587f66e0673b686a7d47d1ee266d8404ef221741` |
-| CoC | `515f6a7e3ba3c2a41fff7de2624ee19e4deb6190` |
-| Narrative | `3f3694401dace148684f7fab9adda5b12679dfa0` |
+| SagaSmith Core | `612bfe7e5290eb5b23f2811baa83b8a28293b36e` |
+| D&D | `ba602ea103de67d19ffbfba2f69f3802a9e34dd3` |
+| CoC | `eebab0986299b0cd9ce420c3521e4688356e9746` |
+| Narrative | `2e2dfe8a18b53ad4c090a7382c25c32a354c7621` |
 
 The lock parser rejects unknown component keys and an invalid component/profile layout. Archived
 standalone MCP, Skill, UI, and module-generator repositories cannot be release inputs or fallbacks.
