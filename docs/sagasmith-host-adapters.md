@@ -1,5 +1,26 @@
 # SagaSmith external Host Auth Adapters
 
+## MCP 2026-07-28 compatibility
+
+Agent uses Python SDK v2 and `protocolMode: "auto"`: it probes `server/discover`
+and falls back to legacy `initialize` only when the peer does not implement the modern method.
+`protocolMode: "legacy"` is an explicit rollback switch. The modern path never sends or trusts
+`Mcp-Session-Id`; identity, campaign, turn, revision, expiry and allowed operations are supplied
+again on every tool call. `clientInfo` is diagnostics, never an authorization identity.
+
+| Boundary | Legacy | 2026-07-28 |
+|---|---|---|
+| stdio / Streamable HTTP | initialize, compatibility notifications | discover or explicit version |
+| authority | `sagasmith.auth-context/v1` adapter | `sagasmith.auth-context/v2` per-request delegation |
+| catalogue | `tools/list_changed` may refresh a legacy session | deterministic sorted list, private cache scope |
+| cross-call state | legacy server compatibility only | explicit campaign/revision/opaque server handle |
+
+The v2 envelope is compatible with SagaSmith Core commit
+`0ac316655687757203a9df1b2eb81669ec1d2d78`. It binds the target MCP service, caller workload,
+requester, resource owner, acting Host/character, audience, concrete operation allowlist,
+`room_turn_id`, `base_revision`, and a hard expiry. Browser or upstream bearer tokens are never
+forwarded to an MCP; the Agent signs a separate target-specific delegation.
+
 Standard MCP transport is not an authorization boundary. Every external Host must turn trusted
 Host facts into one immutable `TrustedHostContext`, then launch one `sagasmith-auth-bridge` process
 for that requester/conversation binding. The model never receives the signing secret or controls
@@ -22,9 +43,9 @@ The adapters in `nanobot.sagasmith_hosts` map each Host into:
 
 `actor_principal` is the authorization subject. `conversation_principal` is the routing and
 audience boundary. Users in one group therefore share a conversation without sharing roles.
-The bridge overwrites any model-supplied principal argument, signs `sagasmith.auth-context/v1`,
-tracks the current authorization epoch, forwards tools/resources/prompts and their change
-notifications, and returns the MCP receipt unchanged.
+The compatibility bridge overwrites any model-supplied principal argument and signs
+`sagasmith.auth-context/v1`; Hosted Worker uses the v2 delegation above. Both forward standard
+MCP tools/resources/prompts and return standard content blocks and receipts unchanged.
 
 Available mappings are:
 
@@ -86,3 +107,28 @@ Narrative MCP processes. It covers principal forgery replacement, actor/conversa
 epoch advancement, tools/resources/prompts, and all seven Host profiles including Hosted Worker.
 The domain suites independently enforce nonce replay rejection, stale authorization epochs,
 revocation, campaign isolation, receipts, and dynamic tool-list changes.
+
+## Hosted Worker deployment
+
+Set a unique `SAGASMITH_WORKER_SERVICE_TOKEN` (at least 32 bytes) for the Web-to-Agent audience.
+The completion request must carry `trusted_context` separately from the single player message.
+It includes `system_id`, so the worker connects only the matching `systemIds` MCP configuration.
+`allowed_operations` contains exact MCP tool IDs such as `campaign_query` or `resolution`, never
+Web policy groups such as `campaign.read`. Web derives that exact allowlist from system, phase,
+caller permissions and task. Agent rejects unknown IDs before invoking the model and also enforces
+the same list when tools are called. The per-turn live registry sees legacy catalog updates while
+keeping transient response tools out of the underlying session registry.
+The response contains `mcp_results` with standard text/image/audio/resource/embedded-resource
+blocks and `host_media` envelopes for Web artifact ingestion. Activity callbacks reuse one HTTP
+client; their token is scoped to Web and is never passed downstream.
+
+`GET /metrics/mcp` exposes bounded counters by phase, outcome, transport and protocol era, plus
+fixed buckets for stable-catalog candidate and per-turn selected counts. It never uses tool names,
+users, campaigns, runs or arguments as labels, so Hosted deployments can scrape it without creating
+unbounded cardinality or leaking authority context.
+
+`--workspace-ttl-seconds`, `--workspace-max-bytes`, and `--workspace-max-count` bound registered
+worker workspaces. Cleanup removes only terminated directories with a matching SagaSmith marker;
+unknown directories, symlinks and active workspaces are not deletion candidates. Roll back the
+Agent image before changing the request contract; use `protocolMode: "legacy"` only for an MCP
+protocol rollback, not as a long-term authorization boundary.

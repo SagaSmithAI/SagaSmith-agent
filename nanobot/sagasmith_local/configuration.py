@@ -48,10 +48,11 @@ def desired_servers(
                     auth_context_secret=auth_context_secret,
                 ),
                 auth_context_secret,
+                "dnd5e",
             )
         else:
             result["sagasmith_dnd"] = _http_server(
-                "http://127.0.0.1:8767/mcp", auth_context_secret
+                "http://127.0.0.1:8767/mcp", auth_context_secret, "dnd5e"
             )
     if InstallMode.COC in selected:
         domain_transport = transport_for_mode(transport, InstallMode.COC)
@@ -66,10 +67,11 @@ def desired_servers(
                     auth_context_secret=auth_context_secret,
                 ),
                 auth_context_secret,
+                "coc7e",
             )
         else:
             result["sagasmith_coc"] = _http_server(
-                "http://127.0.0.1:8769/mcp", auth_context_secret
+                "http://127.0.0.1:8769/mcp", auth_context_secret, "coc7e"
             )
     if InstallMode.NARRATIVE in selected:
         domain_transport = transport_for_mode(transport, InstallMode.NARRATIVE)
@@ -84,31 +86,36 @@ def desired_servers(
                     auth_context_secret=auth_context_secret,
                 ),
                 auth_context_secret,
+                "narrative",
             )
         else:
             result["sagasmith_narrative"] = _http_server(
-                "http://127.0.0.1:8770/mcp", auth_context_secret
+                "http://127.0.0.1:8770/mcp", auth_context_secret, "narrative"
             )
     return result
 
 
-def _common_server(auth_context_secret: str) -> dict[str, Any]:
+def _common_server(auth_context_secret: str, system_id: str) -> dict[str, Any]:
     return {
         "toolTimeout": 900,
         "enabledTools": ["*"],
         "exposeResourcesAndPrompts": True,
         "injectPrincipal": True,
         "sessionScoped": True,
+        "systemIds": [system_id],
+        "protocolMode": "auto",
+        "authorizationAudience": "local",
         **({"authContextSecret": auth_context_secret} if auth_context_secret else {}),
+        **({"delegationSecret": auth_context_secret} if auth_context_secret else {}),
     }
 
 
-def _http_server(url: str, auth_context_secret: str) -> dict[str, Any]:
+def _http_server(url: str, auth_context_secret: str, system_id: str) -> dict[str, Any]:
     return {
         "type": "streamableHttp",
         "url": url,
         "headers": {},
-        **_common_server(auth_context_secret),
+        **_common_server(auth_context_secret, system_id),
     }
 
 
@@ -117,6 +124,7 @@ def _stdio_server(
     module: str,
     environment: dict[str, str],
     auth_context_secret: str,
+    system_id: str,
 ) -> dict[str, Any]:
     return {
         "type": "stdio",
@@ -124,7 +132,7 @@ def _stdio_server(
         "args": ["-m", module],
         "cwd": str(repo),
         "env": environment,
-        **_common_server(auth_context_secret),
+        **_common_server(auth_context_secret, system_id),
     }
 
 

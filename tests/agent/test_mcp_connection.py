@@ -11,9 +11,8 @@ from unittest.mock import MagicMock
 import anyio
 import pytest
 from mcp import types as mcp_types
-from mcp.shared.exceptions import McpError
+from mcp.shared.exceptions import MCPError
 from mcp.shared.message import SessionMessage
-from mcp.types import ErrorData
 
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools import mcp as mcp_runtime
@@ -26,12 +25,10 @@ from nanobot.config.schema import MCPServerConfig
 
 def _mcp_notification(method: str, params: dict[str, Any] | None = None) -> SessionMessage:
     return SessionMessage(
-        message=mcp_types.JSONRPCMessage(
-            mcp_types.JSONRPCNotification(
-                jsonrpc="2.0",
-                method=method,
-                params=params,
-            )
+        message=mcp_types.JSONRPCNotification(
+            jsonrpc="2.0",
+            method=method,
+            params=params,
         )
     )
 
@@ -467,7 +464,7 @@ async def test_mcp_tool_reconnects_after_session_terminated(
             self.call_count += 1
             assert arguments == {"symbol": "AAPL"}
             if self.index == 1:
-                raise McpError(ErrorData(code=-32000, message="Session terminated"))
+                raise MCPError(-32000, "Session terminated")
             return SimpleNamespace(content=[mcp_types.TextContent(type="text", text="recovered")])
 
     async def _fake_connect(servers, registry, **_kwargs):
@@ -521,7 +518,7 @@ async def test_mcp_reconnect_handler_uses_sanitized_server_prefix(
         async def call_tool(self, _name: str, arguments: dict[str, Any]) -> Any:
             assert arguments == {}
             if self.index == 1:
-                raise McpError(ErrorData(code=-32000, message="Session terminated"))
+                raise MCPError(-32000, "Session terminated")
             return SimpleNamespace(content=[mcp_types.TextContent(type="text", text="recovered")])
 
     async def _fake_connect(servers, registry, **_kwargs):
@@ -567,7 +564,7 @@ async def test_concurrent_mcp_reconnect_reuses_fresh_session(
 
     class _DeadSession:
         async def read_resource(self, _uri: str) -> Any:
-            raise McpError(ErrorData(code=-32000, message="Session terminated"))
+            raise MCPError(-32000, "Session terminated")
 
     class _LiveSession:
         async def read_resource(self, uri: str) -> Any:

@@ -4,7 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from mcp import types
+from mcp import Client, types
 
 from nanobot.sagasmith_hosts.bridge import AuthBridge
 from nanobot.sagasmith_hosts.contract import (
@@ -143,6 +143,25 @@ class _FakeDownstream:
             content=[types.TextContent(type="text", text="ok")],
             structuredContent={"revision": revision},
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["legacy", "2026-07-28"])
+async def test_auth_bridge_has_legacy_and_modern_equivalent_contract(mode: str) -> None:
+    context = adapt_codex(profile_id="local-1", project_id="campaign-tools")
+    bridge = AuthBridge(server_config={}, context=context, secret=SECRET)
+    downstream = _FakeDownstream()
+    bridge.downstream = downstream  # type: ignore[assignment]
+
+    async with Client(bridge.server, mode=mode) as client:
+        listed = await client.list_tools()
+        result = await client.call_tool(
+            "exposure",
+            {"action": "open", "campaign_id": "campaign-1"},
+        )
+
+    assert [tool.name for tool in listed.tools] == ["campaign_query", "exposure"]
+    assert result.is_error is False
 
 
 @pytest.mark.asyncio

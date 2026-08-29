@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections import ChainMap
 from typing import TYPE_CHECKING, Any
 
 from nanobot.agent.tools.base import Tool, ToolResult
@@ -36,6 +37,13 @@ class ToolRegistry:
         """Copy registrations so one session may mutate MCP tools independently."""
         cloned = ToolRegistry()
         cloned._tools = dict(self._tools)
+        return cloned
+
+    def live_clone(self) -> "ToolRegistry":
+        """Overlay transient tools while retaining live parent catalog updates."""
+
+        cloned = ToolRegistry()
+        cloned._tools = ChainMap({}, self._tools)  # type: ignore[assignment]
         return cloned
 
     def unregister(self, name: str) -> None:
@@ -261,7 +269,14 @@ class ToolRegistry:
             assert tool is not None  # guarded by prepare_call()
             result = await tool.execute(**params)
             if is_tool_error_result(name, result):
-                return ToolResult.error(str(result) + hint)
+                return ToolResult(
+                    str(result) + hint,
+                    is_error=True,
+                    structured_content=result.structured_content,
+                    audit_receipt=result.audit_receipt,
+                    media_envelopes=result.media_envelopes,
+                    mcp_result=result.mcp_result,
+                )
             return result
         except Exception as e:
             return ToolResult.error(f"Error executing {name}: {str(e)}" + hint)

@@ -1937,6 +1937,13 @@ When a trusted server intentionally publishes a mutable tool catalogue, set
 by refreshing that server's native tool wrappers. The server remains responsible
 for its session, authorization, and capability-selection boundary.
 
+Python SDK v2 defaults to `protocolMode: "auto"`, which negotiates MCP 2026-07-28 and falls back
+to legacy initialize. Use `protocolMode: "legacy"` only as an operational rollback. Modern HTTP
+does not use `Mcp-Session-Id`; request `_meta` carries trace context and a short-lived,
+target-service-specific `sagasmith.auth-context/v2` delegation. `systemIds` scopes a Hosted Worker
+to the current campaign system. `delegationSecret` and `authorizationAudience` configure the
+downstream-specific signer; do not reuse or forward a browser/API bearer token.
+
 MCP tools are automatically discovered and registered on startup. The LLM can use them alongside built-in tools — no extra configuration needed.
 
 

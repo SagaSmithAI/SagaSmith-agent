@@ -9,6 +9,7 @@ import os
 import time
 from collections.abc import Mapping
 from contextlib import AbstractContextManager, ExitStack, nullcontext, suppress
+from contextvars import ContextVar
 from copy import deepcopy
 from dataclasses import dataclass, field
 from enum import Enum, auto
@@ -105,6 +106,9 @@ if TYPE_CHECKING:
         ToolsConfig,
     )
     from nanobot.cron.service import CronService
+
+
+_TURN_USAGE: ContextVar[dict[str, int]] = ContextVar("nanobot_turn_usage", default={})
 
 
 class TurnState(Enum):
@@ -395,15 +399,23 @@ class AgentLoop:
         self._unified_session = unified_session
         self._running = False
         configured_mcp_servers = mcp_servers or {}
+        hosted_distribution = self.tools_config.distribution == "hosted"
+
+        def session_scoped_server(config: Any) -> bool:
+            return bool(
+                getattr(config, "session_scoped", False)
+                or (hosted_distribution and getattr(config, "system_ids", ()))
+            )
+
         self._mcp_servers = {
             name: config
             for name, config in configured_mcp_servers.items()
-            if not getattr(config, "session_scoped", False)
+            if not session_scoped_server(config)
         }
         self._session_mcp_servers = {
             name: config
             for name, config in configured_mcp_servers.items()
-            if getattr(config, "session_scoped", False)
+            if session_scoped_server(config)
         }
         self._mcp_stacks: dict[str, MCPConnection] = {}
         self._session_mcp_tools: dict[str, ToolRegistry] = {}
@@ -607,36 +619,54 @@ class AgentLoop:
         """Connect configured MCP servers."""
         await agent_context.connect_mcp(self, self.tools)
 
-    async def _tools_for_session(self, session_key: str) -> ToolRegistry:
-        """Return a registry whose mutable MCP schemas belong only to this session."""
-        if not self._session_mcp_servers:
+    async def _tools_for_session(
+        self,
+        session_key: str,
+        *,
+        system_id: str | None = None,
+    ) -> ToolRegistry:
+        """Return a registry connected only to MCPs relevant to this session's system."""
+        selected_servers = {
+            name: config
+            for name, config in self._session_mcp_servers.items()
+            if (
+                self.tools_config.distribution != "hosted"
+                or (
+                    system_id in getattr(config, "system_ids", ())
+                    if system_id
+                    else not getattr(config, "system_ids", ())
+                )
+            )
+        }
+        if not selected_servers:
             return self.tools
-        existing = self._session_mcp_tools.get(session_key)
+        connection_key = session_key if system_id is None else f"{session_key}\x1f{system_id}"
+        existing = self._session_mcp_tools.get(connection_key)
         if existing is not None:
             return existing
         from nanobot.agent.tools.mcp import connect_mcp_servers
 
-        lock = self._session_mcp_locks.setdefault(session_key, asyncio.Lock())
+        lock = self._session_mcp_locks.setdefault(connection_key, asyncio.Lock())
         async with lock:
-            existing = self._session_mcp_tools.get(session_key)
+            existing = self._session_mcp_tools.get(connection_key)
             if existing is not None:
                 return existing
             registry = self.tools.clone()
             connections = await connect_mcp_servers(
-                self._session_mcp_servers,
+                selected_servers,
                 registry,
                 session_store=self.sessions,
             )
-            missing = sorted(set(self._session_mcp_servers) - set(connections))
+            missing = sorted(set(selected_servers) - set(connections))
             if missing:
                 for connection in connections.values():
                     await connection.aclose()
                 raise RuntimeError(
                     "Session-scoped MCP servers did not connect: " + ", ".join(missing)
                 )
-            self._session_mcp_tools[session_key] = registry
-            self._session_mcp_stacks[session_key] = connections
-            self._attach_session_mcp_reconnect(session_key, registry)
+            self._session_mcp_tools[connection_key] = registry
+            self._session_mcp_stacks[connection_key] = connections
+            self._attach_session_mcp_reconnect(connection_key, registry)
             return registry
 
     def _attach_session_mcp_reconnect(
@@ -818,6 +848,7 @@ class AgentLoop:
 
     def _request_context_for_turn(self, ctx: TurnContext) -> RequestContext:
         scope = self.workspace_scopes.for_message(ctx.msg, ctx.session.metadata)
+        metadata = dict(ctx.msg.metadata or {})
         return RequestContext(
             channel=ctx.msg.channel,
             chat_id=ctx.msg.chat_id,
@@ -825,12 +856,23 @@ class AgentLoop:
             session_key=ctx.session_key,
             original_user_text=ctx.original_user_text,
             runtime=ctx.runtime,
-            metadata=dict(ctx.msg.metadata or {}),
+            metadata=metadata,
             sender_id=ctx.msg.sender_id,
             actor_principal=ctx.msg.actor_principal,
             conversation_principal=ctx.msg.conversation_principal,
             turn_id=ctx.turn_id,
             workspace=scope.project_path,
+            room_turn_id=metadata.get("room_turn_id"),
+            campaign_id=metadata.get("campaign_id"),
+            system_id=metadata.get("system_id"),
+            base_revision=metadata.get("base_revision"),
+            delegation_expires_at=metadata.get("delegation_expires_at"),
+            allowed_operations=tuple(metadata.get("allowed_operations") or ()),
+            audience=tuple(metadata.get("audience") or ()),
+            requester_principal=metadata.get("requester_principal"),
+            resource_owner_principal=metadata.get("resource_owner_principal"),
+            acting_host_principal=metadata.get("acting_host_principal"),
+            acting_character_ref=metadata.get("acting_character_ref"),
         )
 
     async def _resolve_runtime_context_for_turn(
@@ -1185,6 +1227,7 @@ class AgentLoop:
             reset_request_context(request_token)
             reset_file_states(file_state_token)
         self._last_usage = result.usage
+        _TURN_USAGE.set(dict(result.usage or {}))
         rebuilt_initial_count = getattr(result, "rebuilt_initial_count", 0)
         if rebuilt_initial_count:
             result.messages = [
@@ -1791,6 +1834,8 @@ class AgentLoop:
 
         event = None
         meta = dict(msg.metadata or {})
+        if usage := _TURN_USAGE.get():
+            meta["_agent_usage"] = dict(usage)
         if (
             outbound_content
             and on_stream is not None
@@ -2362,10 +2407,11 @@ class AgentLoop:
         tools: ToolRegistry | None = None,
         persist_user_message: bool = True,
         runtime: LLMRuntime | None = None,
+        trusted_metadata: dict[str, Any] | None = None,
     ) -> OutboundMessage | None:
         """Process a message directly and return the outbound payload."""
         await self._connect_mcp()
-        metadata: dict[str, Any] = {}
+        metadata: dict[str, Any] = dict(trusted_metadata or {})
         if not persist_user_message:
             metadata[turn_continuation.SKIP_USER_PERSIST_META] = True
         msg = InboundMessage(

@@ -310,7 +310,7 @@ async def _exercise(
                 "exposure",
                 {"action": "open", "principal_id": "model:forged-owner"},
             )
-            assert not result.isError, result.content
+            assert not result.is_error, result.content
             receipt = result.content[0].meta["sagasmith_auth_context_receipt"]
             assert receipt["actor_principal"] == context.actor_principal
             assert receipt["conversation_principal"] == context.conversation_principal

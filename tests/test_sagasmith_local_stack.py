@@ -245,6 +245,10 @@ def test_every_domain_supports_each_local_transport(
 ) -> None:
     servers = desired_servers(layout_for(tmp_path), tuple(InstallMode), transport=transport)
     assert {item["type"] for item in servers.values()} == {expected_type}
+    assert servers["sagasmith_dnd"]["systemIds"] == ["dnd5e"]
+    assert servers["sagasmith_coc"]["systemIds"] == ["coc7e"]
+    assert servers["sagasmith_narrative"]["systemIds"] == ["narrative"]
+    assert {item["protocolMode"] for item in servers.values()} == {"auto"}
     if transport == McpTransport.STREAMABLE_HTTP:
         assert servers["sagasmith_narrative"]["url"].endswith(":8770/mcp")
     else:

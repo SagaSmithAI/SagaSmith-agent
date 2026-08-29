@@ -53,12 +53,15 @@ Codex、Claude Code、上游 Nanobot、OpenClaw、Hermes 通过同一签名身�
 SagaSmith MCP；适配方式、信任边界和配置形状见
 [外部 Host Auth Adapter](docs/sagasmith-host-adapters.md)。
 
-## 2026-08-20 验证基线
+## MCP 2026-07-28 与 Hosted 边界
 
-当前主线使用 `sagasmith.auth-context/v1` 传递带时效签名的 principal context；
-只给出 campaign id 的会话工具会从相同 principal 的持久绑定继承 campaign，领域 MCP
-仍在每次调用时校验 role、actor、phase 与 revision。最新 Local Agent 和 Hosted Worker
-镜像均已构建并执行发行边界审计，Hosted 镜像不再依赖未提交的本地 lockfile。
+Agent 使用 Python SDK v2 的 `protocolMode: "auto"` 同时兼容 legacy initialize 与
+MCP 2026-07-28 discover。现代路径不发送 `Mcp-Session-Id`；每次调用都携带与目标 MCP、
+workload、requester、资源 owner、acting host/character、audience、具体操作、
+`room_turn_id`、`base_revision` 和硬过期时间绑定的 `sagasmith.auth-context/v2`。
+Hosted Worker 要求独立的 `SAGASMITH_WORKER_SERVICE_TOKEN`，玩家文本与可信上下文分字段，
+并只连接当前 `system_id` 对应的 MCP。标准 MCP text/image/audio/resource/embedded-resource
+结果保持不变，同时生成供 Web artifact 管道消费的 `host_media`。
 
 同一最新托管栈中的 D&D 与 CoC 参考战役已通过隔离客户端并发完成，未记录到回归
 缺口；D&D 路径记录了一个合法结局。目录 runner 会把发现的全部模组、实际运行项和
