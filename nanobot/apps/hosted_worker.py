@@ -24,7 +24,11 @@ from nanobot.agent.mcp_observability import (
     mcp_metrics_snapshot,
     record_mcp_catalog_selection,
 )
-from nanobot.apps.hosted_workspace import HostedWorkspaceLease, HostedWorkspacePolicy
+from nanobot.apps.hosted_workspace import (
+    HostedWorkspaceLease,
+    HostedWorkspacePolicy,
+    derive_workspace_owner,
+)
 
 
 class WorkerTrustedContext(BaseModel):
@@ -384,16 +388,41 @@ def create_worker_app(
     return app
 
 
-def main() -> None:
+def _parse_worker_arguments(arguments: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--workspace", required=True)
+    parser.add_argument(
+        "--workspace-id",
+        required=True,
+        help="stable opaque workspace identity issued by the trusted Host supervisor",
+    )
     parser.add_argument("--config", required=True)
     parser.add_argument("--workspace-ttl-seconds", type=int, default=86_400)
     parser.add_argument("--workspace-max-bytes", type=int, default=1_073_741_824)
     parser.add_argument("--workspace-max-count", type=int, default=128)
-    arguments = parser.parse_args()
+    return parser.parse_args(arguments)
+
+
+def _workspace_lease_from_arguments(
+    workspace: Path, arguments: argparse.Namespace
+) -> HostedWorkspaceLease:
+    policy = HostedWorkspacePolicy(
+        root=workspace.parent,
+        ttl_seconds=arguments.workspace_ttl_seconds,
+        max_bytes=arguments.workspace_max_bytes,
+        max_workspaces=arguments.workspace_max_count,
+    )
+    return HostedWorkspaceLease(
+        policy,
+        workspace,
+        owner=derive_workspace_owner(workspace, arguments.workspace_id),
+    )
+
+
+def main() -> None:
+    arguments = _parse_worker_arguments()
 
     from nanobot.agent.hooks import create_file_edit_activity_hook
     from nanobot.agent.loop import AgentLoop
@@ -418,13 +447,7 @@ def main() -> None:
         image_generation_provider_configs=image_gen_provider_configs(config),
         hook_factories=[create_file_edit_activity_hook],
     )
-    policy = HostedWorkspacePolicy(
-        root=workspace.parent,
-        ttl_seconds=arguments.workspace_ttl_seconds,
-        max_bytes=arguments.workspace_max_bytes,
-        max_workspaces=arguments.workspace_max_count,
-    )
-    lease = HostedWorkspaceLease(policy, workspace, owner=f"worker:{arguments.port}")
+    lease = _workspace_lease_from_arguments(workspace, arguments)
     service_token = os.environ.get("SAGASMITH_WORKER_SERVICE_TOKEN", "")
     if len(service_token.encode("utf-8")) < 32:
         raise RuntimeError("SAGASMITH_WORKER_SERVICE_TOKEN must contain at least 32 bytes")

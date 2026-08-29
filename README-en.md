@@ -33,7 +33,9 @@ owner, acting Host/character, audience, concrete operations, `room_turn_id`, and
 Hosted Worker requires a dedicated `SAGASMITH_WORKER_SERVICE_TOKEN`, keeps trusted context
 structurally separate from player text, and connects only the MCP for the current `system_id`.
 Standard MCP text/image/audio/resource/embedded-resource results are retained while `host_media`
-envelopes feed the Web artifact pipeline.
+envelopes feed the Web artifact pipeline. Its trusted supervisor also supplies a stable, unique
+`--workspace-id`; the worker binds an opaque owner to that ID and the canonical workspace path so
+retries and restarts safely reuse persisted state without relying on an ephemeral port.
 
 ## D&D: the MCP-first path
 

@@ -171,8 +171,12 @@ fixed buckets for stable-catalog candidate and per-turn selected counts. It neve
 users, campaigns, runs or arguments as labels, so Hosted deployments can scrape it without creating
 unbounded cardinality or leaking authority context.
 
-`--workspace-ttl-seconds`, `--workspace-max-bytes`, and `--workspace-max-count` bound registered
-worker workspaces. Cleanup removes only terminated directories with a matching SagaSmith marker;
-unknown directories, symlinks and active workspaces are not deletion candidates. Roll back the
+The trusted supervisor must pass a stable, unique `--workspace-id` for the persisted workspace. The
+worker hashes it together with the canonical workspace path into an opaque marker owner, so a retry
+or restart can reclaim the same workspace even when its ephemeral port changes. Never derive this
+ID from player/model input, and never reuse it for another workspace. `--workspace-ttl-seconds`,
+`--workspace-max-bytes`, and `--workspace-max-count` bound registered worker workspaces. Cleanup
+removes only terminated directories with a matching SagaSmith marker; unknown directories,
+symlinks and active workspaces are not deletion candidates. Roll back the
 Agent image before changing the request contract; use `protocolMode: "legacy"` only for an MCP
 protocol rollback, not as a long-term authorization boundary.
