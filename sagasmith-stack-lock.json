@@ -1,7 +1,7 @@
 {
   "schema": "sagasmith.release-lock/v3",
-  "lock": "2026.8.30-mcp-modern-final",
-  "generated_at": "2026-08-30T00:38:06.5892176+08:00",
+  "lock": "2026.9.1-luna-memory-emergent",
+  "generated_at": "2026-09-01T01:20:47.8291074+08:00",
   "release_status": "compatibility-lock-not-published",
   "compatibility": {
     "mcp_protocol": "2026-07-28",
@@ -10,17 +10,17 @@
     "authority": "sagasmith.authoritative-mcp/v2"
   },
   "shared": {
-    "sagasmith-core": "612bfe7e5290eb5b23f2811baa83b8a28293b36e"
+    "sagasmith-core": "d04ecca3cb4b3d5d1d6a232d1481974c91fbb710"
   },
   "profiles": {
     "dnd": {
-      "sagasmith-dnd": "ba602ea103de67d19ffbfba2f69f3802a9e34dd3"
+      "sagasmith-dnd": "506532d8cb322d2ddaad5bb00853f3dd252eaad1"
     },
     "coc": {
-      "sagasmith-coc": "eebab0986299b0cd9ce420c3521e4688356e9746"
+      "sagasmith-coc": "299e422976b7a2e307b335a76dd7c23ee86dc3e2"
     },
     "narrative": {
-      "sagasmith-narrative": "2e2dfe8a18b53ad4c090a7382c25c32a354c7621"
+      "sagasmith-narrative": "a9ef619b284fe249abead4099b6a7d70ff4ac014"
     }
   }
 }
