@@ -1,7 +1,7 @@
 {
   "schema": "sagasmith.release-lock/v3",
   "lock": "2026.9.1-luna-memory-emergent-final",
-  "generated_at": "2026-09-01T10:22:57.5419625+08:00",
+  "generated_at": "2026-09-01T12:18:18.9291277+08:00",
   "release_status": "compatibility-lock-not-published",
   "compatibility": {
     "mcp_protocol": "2026-07-28",
@@ -14,13 +14,13 @@
   },
   "profiles": {
     "dnd": {
-      "sagasmith-dnd": "e50c7d05fc4fd18e3f795ca0e29ebb2f08b93b5f"
+      "sagasmith-dnd": "d114c42e09be4b7e32a4984a147e87fd70129829"
     },
     "coc": {
-      "sagasmith-coc": "32b1615856a2a2d9cd08e60d486b889242cfcac8"
+      "sagasmith-coc": "323b08c3e210e4f351c03a80714d54068438242b"
     },
     "narrative": {
-      "sagasmith-narrative": "25bd2b7b6823cee478b948f842ad38c6e3c90870"
+      "sagasmith-narrative": "e61039aaa7715d785917d066404bcbe545c32de5"
     }
   }
 }

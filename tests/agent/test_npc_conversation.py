@@ -73,14 +73,14 @@ def _capsule(*, actor_id="npc", bootstrap=True, sequence=1):
             "may_call_tools": False,
             "may_roll_dice": False,
             "may_write_state": False,
-            "output_contract": "npc-conversation-proposal.v4",
+            "output_contract": "npc-conversation-proposal.v5",
         },
     }
 
 
 def _proposal(capsule, text="My answer."):
     return {
-        "schema_version": 4,
+        "schema_version": 5,
         "conversation_id": capsule["conversation_id"],
         "activation_id": capsule["activation_id"],
         "actor_runtime_id": capsule["actor_runtime_id"],
@@ -89,6 +89,7 @@ def _proposal(capsule, text="My answer."):
         "utterance_segments": [
             {
                 "text": text,
+                "content_mode": "grounded",
                 "speech_act": "assert",
                 "truth_posture": "believes_true",
                 "basis_refs": [f"actor:{capsule['actor_id']}:identity"],
@@ -137,7 +138,7 @@ class CapsuleProposalProvider:
             item for item in prompt["constraints"]["allowed_target_actor_ids"] if item != actor_id
         ]
         proposal = {
-            "schema_version": 4,
+            "schema_version": 5,
             "conversation_id": prompt["conversation_id"],
             "activation_id": prompt["activation_id"],
             "actor_runtime_id": actor_runtime_id,
@@ -150,6 +151,7 @@ class CapsuleProposalProvider:
             "utterance_segments": [
                 {
                     "text": "The boat left just before dusk.",
+                    "content_mode": "grounded",
                     "speech_act": "answer",
                     "truth_posture": "believes_true",
                     "basis_refs": [prompt["constraints"]["allowed_basis_refs"][0]],
@@ -389,7 +391,7 @@ async def test_bridge_repairs_mcp_validation_failure_within_same_lease() -> None
     assert len(submissions) == 2
     assert {item["payload"]["lease_id"] for item in submissions} == {capsule["lease_id"]}
     repair_payload = json.loads(provider.calls[1]["messages"][-1]["content"])
-    assert "npc-conversation-proposal.v4" in repair_payload["instruction"]
+    assert "npc-conversation-proposal.v5" in repair_payload["instruction"]
     assert "raw allowed_target_actor_ids" in repair_payload["instruction"]
 
 
@@ -432,17 +434,25 @@ async def test_real_coc_stdio_host_dispatches_hidden_conversation_transport(tmp_
         hidden_name = "mcp_coc_npc_conversation_transport"
         assert hidden_name in registry.tool_names
         assert hidden_name not in registry.definition_names()
-        await invoke("exposure", action="open")
-        await invoke("exposure", action="set", add_tool_ids=["campaign_change"])
+        root_exposure = await invoke("exposure", action="open")
+        await invoke(
+            "exposure",
+            action="set",
+            exposure_handle=root_exposure["exposure_handle"],
+            add_tool_ids=["campaign_change"],
+        )
         campaign = await invoke(
             "campaign_change",
             action="create",
             data={"name": "Agent stdio dialogue", "idempotency_key": "campaign"},
         )
-        await invoke("exposure", action="open", campaign_id=campaign["id"])
+        campaign_exposure = await invoke(
+            "exposure", action="open", campaign_id=campaign["id"]
+        )
         await invoke(
             "exposure",
             action="set",
+            exposure_handle=campaign_exposure["exposure_handle"],
             campaign_id=campaign["id"],
             add_tool_ids=["campaign_change", "character_change"],
         )
@@ -478,6 +488,7 @@ async def test_real_coc_stdio_host_dispatches_hidden_conversation_transport(tmp_
         await invoke(
             "exposure",
             action="set",
+            exposure_handle=campaign_exposure["exposure_handle"],
             campaign_id=campaign["id"],
             add_tool_ids=["npc_conversation"],
         )
@@ -602,17 +613,25 @@ async def test_real_dnd_stdio_host_dispatches_hidden_conversation_transport(tmp_
         hidden_name = "mcp_dnd_npc_conversation_transport"
         assert hidden_name in registry.tool_names
         assert hidden_name not in registry.definition_names()
-        await invoke("exposure", action="open")
-        await invoke("exposure", action="set", add_tool_ids=["campaign_create"])
+        root_exposure = await invoke("exposure", action="open")
+        await invoke(
+            "exposure",
+            action="set",
+            exposure_handle=root_exposure["exposure_handle"],
+            add_tool_ids=["campaign_create"],
+        )
         campaign = await invoke(
             "campaign_create",
             name="Agent stdio dialogue",
             idempotency_key="campaign",
         )
-        await invoke("exposure", action="open", campaign_id=campaign["id"])
+        campaign_exposure = await invoke(
+            "exposure", action="open", campaign_id=campaign["id"]
+        )
         await invoke(
             "exposure",
             action="set",
+            exposure_handle=campaign_exposure["exposure_handle"],
             campaign_id=campaign["id"],
             add_tool_ids=["character_create_from"],
         )
@@ -647,6 +666,7 @@ async def test_real_dnd_stdio_host_dispatches_hidden_conversation_transport(tmp_
         await invoke(
             "exposure",
             action="set",
+            exposure_handle=campaign_exposure["exposure_handle"],
             campaign_id=campaign["id"],
             add_tool_ids=["npc_conversation"],
         )
