@@ -11,7 +11,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from .benchmark import benchmark_local_kit
+from .benchmark import DEFAULT_BENCHMARK_TIMEOUT, benchmark_local_kit
 from .configuration import configure_agent
 from .model import (
     InstallMode,
@@ -310,7 +310,9 @@ def benchmark_command(
     mode: ModeOption = None,
     profile: ProfileOption = None,
     iterations: int = typer.Option(5, "--iterations", min=1, max=100),
-    timeout: float = typer.Option(30.0, "--timeout", min=1.0, max=300.0),
+    timeout: float = typer.Option(
+        DEFAULT_BENCHMARK_TIMEOUT, "--timeout", min=1.0, max=300.0
+    ),
     state_root: Path | None = typer.Option(None, "--state-root"),
     as_json: bool = typer.Option(False, "--json"),
 ) -> None:
