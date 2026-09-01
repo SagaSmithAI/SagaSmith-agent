@@ -213,16 +213,16 @@ def test_bundled_release_lock_is_modern_and_contains_only_current_inputs() -> No
 
     assert lock["schema"] == "sagasmith.release-lock/v3"
     assert lock["release_status"] == RELEASE_LOCK_STATUS
-    assert lock["lock"] == "2026.9.1-luna-memory-emergent"
-    assert lock["generated_at"] == "2026-09-01T01:20:47.8291074+08:00"
+    assert lock["lock"] == "2026.9.1-luna-memory-emergent-final"
+    assert lock["generated_at"] == "2026-09-01T12:18:18.9291277+08:00"
     assert "release" not in lock
     assert "released_at" not in lock
     assert lock["compatibility"] == RELEASE_COMPATIBILITY
     assert load_release_revisions(root / "sagasmith-stack-lock.json", tuple(InstallMode)) == {
-        "sagasmith-coc": "299e422976b7a2e307b335a76dd7c23ee86dc3e2",
+        "sagasmith-coc": "323b08c3e210e4f351c03a80714d54068438242b",
         "sagasmith-core": "d04ecca3cb4b3d5d1d6a232d1481974c91fbb710",
-        "sagasmith-dnd": "506532d8cb322d2ddaad5bb00853f3dd252eaad1",
-        "sagasmith-narrative": "a9ef619b284fe249abead4099b6a7d70ff4ac014",
+        "sagasmith-dnd": "d114c42e09be4b7e32a4984a147e87fd70129829",
+        "sagasmith-narrative": "e61039aaa7715d785917d066404bcbe545c32de5",
     }
 
 
