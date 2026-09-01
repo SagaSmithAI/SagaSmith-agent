@@ -25,6 +25,9 @@ from .configuration import coc_environment, dnd_environment, narrative_environme
 from .model import InstallMode, McpTransport, StackLayout
 from .runtime import StackError, _venv_python
 
+_AUTH_CONTEXT_SECRET = "SAGASMITH_AUTH_CONTEXT_SECRET"
+DEFAULT_BENCHMARK_TIMEOUT = 120.0
+
 
 @dataclass(frozen=True)
 class BenchmarkSpec:
@@ -77,6 +80,10 @@ def _build_spec(layout: StackLayout, mode: InstallMode, scratch: Path) -> Benchm
             }
         )
         module = "sagasmith_narrative_mcp.server"
+    # The benchmark owns a disposable loopback server and no Host identity. Do
+    # not inherit the installed Agent's signed-auth boundary into this isolated
+    # capability probe.
+    environment.pop(_AUTH_CONTEXT_SECRET, None)
     return BenchmarkSpec(
         domain=mode.value,
         command=(str(_venv_python(repo)), "-m", module),
@@ -106,22 +113,43 @@ async def _measure_session(
     started_at: float,
     iterations: int,
 ) -> tuple[float, list[float]]:
+    error: str | None = None
+    cold_start = 0.0
+    warm: list[float] = []
     async with streamable_http_client(url) as streams:
         read, write = streams[0], streams[1]
         async with ClientSession(read, write) as session:
             await session.initialize()
             first = await session.call_tool("server_capabilities", {})
             if first.is_error:
-                raise StackError("server_capabilities failed during cold-start benchmark")
-            cold_start = time.perf_counter() - started_at
-            warm: list[float] = []
-            for _ in range(iterations):
-                before = time.perf_counter()
-                result = await session.call_tool("server_capabilities", {})
-                warm.append(time.perf_counter() - before)
-                if result.is_error:
-                    raise StackError("server_capabilities failed during warm benchmark")
+                error = _tool_error(first, "cold-start")
+            else:
+                cold_start = time.perf_counter() - started_at
+                for _ in range(iterations):
+                    before = time.perf_counter()
+                    result = await session.call_tool("server_capabilities", {})
+                    warm.append(time.perf_counter() - before)
+                    if result.is_error:
+                        error = _tool_error(result, "warm")
+                        break
+    # Raising inside the MCP transport context lets AnyIO wrap the useful
+    # domain error in an opaque ExceptionGroup during transport shutdown.
+    if error:
+        raise StackError(error)
     return cold_start, warm
+
+
+def _tool_error(result: Any, phase: str) -> str:
+    detail = getattr(result, "structured_content", None)
+    if isinstance(detail, dict):
+        error = detail.get("error")
+        if isinstance(error, dict):
+            code = str(error.get("code") or "").strip()
+            message = str(error.get("message") or "").strip()
+            rendered = ": ".join(item for item in (code, message) if item)
+            if rendered:
+                return f"server_capabilities failed during {phase} benchmark: {rendered}"
+    return f"server_capabilities failed during {phase} benchmark"
 
 
 def _windows_rss(pid: int) -> int:
@@ -262,19 +290,22 @@ def _process_tree_rss(pid: int) -> int:
     return total
 
 
-def _terminate_windows_pid(pid: int) -> None:
+def _terminate_windows_pid(pid: int, timeout: float = 5.0) -> None:
     from ctypes import wintypes
 
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
     kernel32.OpenProcess.restype = wintypes.HANDLE
     kernel32.TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
+    kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    kernel32.WaitForSingleObject.restype = wintypes.DWORD
     kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
-    handle = kernel32.OpenProcess(0x0001, False, pid)
+    handle = kernel32.OpenProcess(0x0001 | 0x00100000, False, pid)
     if not handle:
         return
     try:
         kernel32.TerminateProcess(handle, 1)
+        kernel32.WaitForSingleObject(handle, max(0, int(timeout * 1000)))
     finally:
         kernel32.CloseHandle(handle)
 
@@ -319,6 +350,7 @@ def _benchmark_domain(
 ) -> dict[str, Any]:
     environment = os.environ.copy()
     environment.update(spec.environment)
+    environment.pop(_AUTH_CONTEXT_SECRET, None)
     started_at = time.perf_counter()
     process = subprocess.Popen(
         list(spec.command),
@@ -380,7 +412,7 @@ def benchmark_local_kit(
     *,
     modes: tuple[InstallMode, ...] | None = None,
     iterations: int = 5,
-    timeout: float = 30.0,
+    timeout: float = DEFAULT_BENCHMARK_TIMEOUT,
     idle_delay: float = 0.2,
 ) -> dict[str, Any]:
     """Benchmark transient domain MCPs without an LLM or authoritative user data."""

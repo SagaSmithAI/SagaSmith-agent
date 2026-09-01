@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 import pytest
 import yaml
 
+from nanobot.sagasmith_local import runtime
 from nanobot.sagasmith_local.configuration import (
     LOOPBACK_CIDR,
     coc_environment,
@@ -130,6 +131,41 @@ def test_domain_sync_installs_only_the_selected_mcp_and_required_gateway() -> No
         "sagasmith-narrative-mcp",
         "--frozen",
     ]
+
+
+def test_install_workspace_uses_resolved_npm_launcher(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    layout = layout_for(tmp_path)
+    resolved = {
+        "uv": r"C:\Tools\uv.exe",
+        "npm": r"C:\Program Files\nodejs\npm.cmd",
+    }
+    commands: list[list[str]] = []
+
+    monkeypatch.setattr(runtime, "validate_workspace", lambda *_args: [])
+    monkeypatch.setattr(runtime, "_which", lambda name: resolved[name])
+    monkeypatch.setattr(
+        runtime,
+        "_run",
+        lambda command, **_kwargs: commands.append(command) or SimpleNamespace(stdout=""),
+    )
+    monkeypatch.setattr(runtime, "configure_agent", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(runtime, "_git_revision", lambda _repo: "a" * 40)
+    monkeypatch.setattr(runtime, "doctor", lambda *_args, **_kwargs: {"checks": []})
+
+    runtime.install_workspace(layout, tuple(InstallMode), build_ui=True)
+
+    npm_commands = [command for command in commands if command[0] == resolved["npm"]]
+    assert npm_commands == [
+        [resolved["npm"], "ci"],
+        [resolved["npm"], "run", "build"],
+        [resolved["npm"], "ci"],
+        [resolved["npm"], "run", "build:ui"],
+        [resolved["npm"], "ci"],
+        [resolved["npm"], "run", "build:ui"],
+    ]
+    assert all(command[0] != "npm" for command in commands)
 
 
 def test_release_lock_selects_exact_revisions_for_each_mode(tmp_path: Path) -> None:

@@ -139,8 +139,7 @@ def install_workspace(
     if problems:
         raise StackError("workspace validation failed:\n- " + "\n- ".join(problems))
     uv = _which("uv")
-    if build_ui:
-        _which("npm")
+    npm = _which("npm") if build_ui else None
     selected = set(modes)
     if not verify_only:
         for mode, repository in (
@@ -158,16 +157,17 @@ def install_workspace(
         # preserves channel extras that the user selected explicitly.
         _run([uv, "sync", "--inexact", "--frozen"], cwd=layout.agent_root)
         if build_ui:
-            _run(["npm", "ci"], cwd=layout.agent_root / "webui")
-            _run(["npm", "run", "build"], cwd=layout.agent_root / "webui")
+            assert npm is not None
+            _run([npm, "ci"], cwd=layout.agent_root / "webui")
+            _run([npm, "run", "build"], cwd=layout.agent_root / "webui")
             if InstallMode.DND in selected:
                 root = layout.repo("sagasmith-dnd")
-                _run(["npm", "ci"], cwd=root)
-                _run(["npm", "run", "build:ui"], cwd=root)
+                _run([npm, "ci"], cwd=root)
+                _run([npm, "run", "build:ui"], cwd=root)
             if InstallMode.COC in selected:
                 root = layout.repo("sagasmith-coc")
-                _run(["npm", "ci"], cwd=root)
-                _run(["npm", "run", "build:ui"], cwd=root)
+                _run([npm, "ci"], cwd=root)
+                _run([npm, "run", "build:ui"], cwd=root)
 
     if verify_only:
         state = layout.load_state()
