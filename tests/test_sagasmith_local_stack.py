@@ -617,3 +617,72 @@ def test_backup_restore_keeps_domain_stores_separate(tmp_path: Path) -> None:
     assert (layout.data_dir / "dnd" / "runtime.db").read_bytes() == b"dnd"
     assert (layout.data_dir / "coc" / "runtime.db").read_bytes() == b"coc"
     assert json.loads(layout.state_file.read_text(encoding="utf-8"))["processes"] == []
+
+
+@pytest.mark.parametrize("write_before_failure", [False, True])
+def test_failed_restore_rolls_back_data_when_state_write_fails(
+    tmp_path: Path, monkeypatch, write_before_failure: bool
+) -> None:
+    layout = layout_for(tmp_path)
+    layout.save_state(StackState(modes=["dnd"], revision=7))
+    payload = layout.data_dir / "campaign.txt"
+    payload.write_text("backup version", encoding="utf-8")
+    archive = backup(layout, tmp_path / "backup.zip")
+    payload.write_text("current version", encoding="utf-8")
+    original_state = layout.state_file.read_bytes()
+
+    original_save = StackLayout.save_state
+
+    def fail_save(current_layout, state):
+        if write_before_failure:
+            original_save(current_layout, state)
+        raise OSError("injected state write failure")
+
+    monkeypatch.setattr(StackLayout, "save_state", fail_save)
+    with pytest.raises(OSError, match="injected"):
+        restore(layout, archive)
+    assert payload.read_text(encoding="utf-8") == "current version"
+    assert layout.state_file.read_bytes() == original_state
+    assert not (layout.state_root / ".restore-previous-data").exists()
+
+
+@pytest.mark.parametrize("recovery_name", [".restore-staging", ".restore-previous-data"])
+def test_restore_preserves_preexisting_recovery_material(tmp_path: Path, recovery_name: str) -> None:
+    layout = layout_for(tmp_path)
+    layout.save_state(StackState(modes=["dnd"]))
+    archive = backup(layout, tmp_path / "backup.zip")
+    recovery = layout.state_root / recovery_name
+    recovery.mkdir()
+    evidence = recovery / "campaign.txt"
+    evidence.write_text("recoverable data", encoding="utf-8")
+    with pytest.raises(runtime.StackError, match="recovery files"):
+        restore(layout, archive)
+    assert evidence.read_text(encoding="utf-8") == "recoverable data"
+
+
+def test_failed_rollback_preserves_both_data_versions(tmp_path: Path, monkeypatch) -> None:
+    layout = layout_for(tmp_path)
+    layout.save_state(StackState(modes=["dnd"], revision=7))
+    payload = layout.data_dir / "campaign.txt"
+    payload.write_text("backup version", encoding="utf-8")
+    archive = backup(layout, tmp_path / "backup.zip")
+    payload.write_text("current version", encoding="utf-8")
+    original_replace = runtime.os.replace
+
+    def fail_save(*args):
+        raise OSError("state write failed")
+
+    def fail_rollback(source, destination):
+        if Path(source).name == ".restore-previous-data":
+            raise OSError("rollback failed")
+        return original_replace(source, destination)
+
+    monkeypatch.setattr(StackLayout, "save_state", fail_save)
+    monkeypatch.setattr(runtime.os, "replace", fail_rollback)
+    with pytest.raises(OSError, match="rollback failed"):
+        restore(layout, archive)
+    previous = layout.state_root / ".restore-previous-data" / "campaign.txt"
+    staged = layout.state_root / ".restore-staging" / "data" / "campaign.txt"
+    assert previous.read_text(encoding="utf-8") == "current version"
+    assert staged.read_text(encoding="utf-8") == "backup version"
+    assert (layout.state_root / ".restore-staging" / ".previous-stack.json").exists()

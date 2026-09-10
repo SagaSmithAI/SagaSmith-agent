@@ -754,38 +754,59 @@ def restore(layout: StackLayout, source: Path) -> StackState:
         raise StackError("stop the local stack before restoring a backup")
     verify_backup(source)
     staging = layout.state_root / ".restore-staging"
-    if staging.exists():
-        shutil.rmtree(staging)
-    staging.mkdir(parents=True)
     previous_data = layout.state_root / ".restore-previous-data"
+    if staging.exists() or previous_data.exists():
+        raise StackError("previous restore recovery files exist; recover them before retrying")
+    staging.mkdir(parents=True)
     moved_previous = False
+    installed_data = False
+    state_write_started = False
+    cleanup_staging = True
+    saved_state = staging / ".previous-stack.json"
     try:
         with zipfile.ZipFile(source.expanduser().resolve()) as archive:
             archive.extractall(staging)
         restored_data = staging / "data"
-        if previous_data.exists():
-            shutil.rmtree(previous_data)
-        if layout.data_dir.exists():
-            os.replace(layout.data_dir, previous_data)
-            moved_previous = True
-        if restored_data.exists():
-            os.replace(restored_data, layout.data_dir)
         restored_state = staging / "stack.json"
+        # Validate state before replacing any live data.
         if restored_state.exists():
             value = json.loads(restored_state.read_text(encoding="utf-8"))
             state = StackState.from_dict(value)
             state.processes = []
             state.revision += 1
+        if layout.state_file.exists():
+            shutil.copy2(layout.state_file, saved_state)
+        if layout.data_dir.exists():
+            os.replace(layout.data_dir, previous_data)
+            moved_previous = True
+        if restored_data.exists():
+            os.replace(restored_data, layout.data_dir)
+            installed_data = True
+        if restored_state.exists():
+            state_write_started = True
             layout.save_state(state)
+    except BaseException:
+        # Preserve both copies if rollback itself fails, instead of deleting
+        # the only remaining recovery material in the finally block.
+        cleanup_staging = False
+        if installed_data and layout.data_dir.exists():
+            os.replace(layout.data_dir, staging / "data")
+        if moved_previous and previous_data.exists():
+            os.replace(previous_data, layout.data_dir)
+        if state_write_started:
+            if saved_state.exists():
+                os.replace(saved_state, layout.state_file)
+            else:
+                layout.state_file.unlink(missing_ok=True)
+        cleanup_staging = True
+        raise
+    else:
+        # The restore is committed. Cleanup failure must not roll back to a
+        # previous data tree that may already have been partially removed.
         if previous_data.exists():
             shutil.rmtree(previous_data)
-            moved_previous = False
-    except BaseException:
-        if moved_previous and previous_data.exists() and not layout.data_dir.exists():
-            os.replace(previous_data, layout.data_dir)
-        raise
     finally:
-        if staging.exists():
+        if cleanup_staging and staging.exists():
             shutil.rmtree(staging)
     return state
 
