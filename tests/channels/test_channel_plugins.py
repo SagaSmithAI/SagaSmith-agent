@@ -1120,7 +1120,7 @@ def test_optional_dependency_metadata_for_enable():
         assert not any(dep.startswith(dep_name) for dep in required)
     assert deps["dingtalk"] == ["dingtalk-stream>=0.24.0,<1.0.0"]
     assert deps["documents"] == [
-        "pypdf>=5.0.0,<6.0.0",
+        "pypdf>=6.18.0,<7.0.0",
         "python-docx>=1.1.0,<2.0.0",
         "openpyxl>=3.1.0,<4.0.0",
         "python-pptx>=1.0.0,<2.0.0",
