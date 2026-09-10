@@ -2,17 +2,20 @@
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability in nanobot, please report it by:
+SagaSmith Agent is maintained by SagaSmithAI. Do not open a public GitHub issue
+for a vulnerability that could expose credentials, private campaign data,
+GM-only content, arbitrary files, or remote execution. Use GitHub's **Report a
+vulnerability** flow for this repository; private vulnerability reporting is
+enabled. If that flow is unavailable in the repository UI, contact the
+SagaSmithAI organization through the email address published on its GitHub
+profile and include only the minimum details needed to establish a private
+channel. We forward a report to an upstream dependency only after confirming
+that the defect is owned by that dependency and does not arise from SagaSmith
+integration or configuration.
 
-1. **DO NOT** open a public GitHub issue
-2. Create a private security advisory on GitHub or contact the repository maintainers (xubinrencs@gmail.com)
-3. Include:
-   - Description of the vulnerability
-   - Steps to reproduce
-   - Potential impact
-   - Suggested fix (if any)
-
-We aim to respond to security reports within 48 hours.
+Include a concise description, minimal reproduction steps, impact, and (when
+known) a suggested fix. Do not include tokens, private campaign data, imported
+commercial content, or other sensitive production material.
 
 ## Security Best Practices
 
@@ -287,11 +290,11 @@ Before deploying nanobot:
 
 ## Updates
 
-**Last Updated**: 2026-04-05
+**Last Updated**: 2026-09-10
 
-For the latest security updates and announcements, check:
-- GitHub Security Advisories: https://github.com/HKUDS/nanobot/security/advisories
-- Release Notes: https://github.com/HKUDS/nanobot/releases
+For the latest SagaSmith Agent security updates and announcements, check:
+- GitHub Security Advisories: https://github.com/SagaSmithAI/SagaSmith-agent/security/advisories
+- Releases: https://github.com/SagaSmithAI/SagaSmith-agent/releases
 
 ## License
 
