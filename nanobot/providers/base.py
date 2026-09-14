@@ -15,6 +15,8 @@ from typing import Any
 import json_repair
 from loguru import logger
 
+from nanobot.providers.call_accounting import accounted_call
+
 STREAM_IDLE_TIMEOUT_ENV = "NANOBOT_STREAM_IDLE_TIMEOUT_S"
 DEFAULT_STREAM_IDLE_TIMEOUT_S = 90.0
 MAX_STREAM_IDLE_TIMEOUT_S = 3600.0
@@ -163,6 +165,7 @@ class LLMResponse:
     error_code: str | None = None  # Provider/code semantic, e.g. rate_limit_exceeded.
     error_retry_after_s: float | None = None
     error_should_retry: bool | None = None
+    request_id: str | None = None
 
     @property
     def has_tool_calls(self) -> bool:
@@ -877,7 +880,7 @@ class LLMProvider(ABC):
         identical_error_count = 0
         while True:
             attempt += 1
-            response = await call(**kw)
+            response = await accounted_call(self, call, kw)
             if response.finish_reason != "error":
                 return response
             last_response = response
@@ -920,7 +923,7 @@ class LLMProvider(ABC):
                     )
                     retry_kw = dict(kw)
                     retry_kw["messages"] = stripped
-                    result = await call(**retry_kw)
+                    result = await accounted_call(self, call, retry_kw)
                     # Permanently strip images from the original messages so
                     # subsequent iterations do not repeat the error-retry cycle.
                     if result.finish_reason != "error":
@@ -971,7 +974,7 @@ class LLMProvider(ABC):
                 on_retry_wait=on_retry_wait,
             )
 
-        return last_response if last_response is not None else await call(**kw)
+        return last_response if last_response is not None else await accounted_call(self, call, kw)
 
     @abstractmethod
     def get_default_model(self) -> str:

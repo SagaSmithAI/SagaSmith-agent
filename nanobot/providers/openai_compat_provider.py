@@ -29,6 +29,7 @@ from nanobot.providers.base import (
     resolve_stream_idle_timeout_s,
     tool_arguments_json_for_replay,
 )
+from nanobot.providers.call_accounting import current_call_accounting
 from nanobot.providers.openai_responses import (
     consume_sdk_stream,
     convert_messages,
@@ -938,6 +939,10 @@ class OpenAICompatProvider(LLMProvider):
     @staticmethod
     def _should_fallback_from_responses_error(e: Exception) -> bool:
         """Fallback only for likely Responses API compatibility errors."""
+        if current_call_accounting.get() is not None:
+            # A compatibility fallback is another provider request. Do not hide
+            # it inside an already-authorized attempt in a metered hosted run.
+            return False
         response = getattr(e, "response", None)
         status_code = getattr(e, "status_code", None)
         if status_code is None and response is not None:
@@ -1093,15 +1098,15 @@ class OpenAICompatProvider(LLMProvider):
         usage_map = cls._maybe_mapping(usage_obj)
         if usage_map is not None:
             result = {
-                "prompt_tokens": int(usage_map.get("prompt_tokens") or 0),
-                "completion_tokens": int(usage_map.get("completion_tokens") or 0),
-                "total_tokens": int(usage_map.get("total_tokens") or 0),
+                name: int(usage_map[name])
+                for name in ("prompt_tokens", "completion_tokens", "total_tokens")
+                if usage_map.get(name) is not None
             }
         elif usage_obj:
             result = {
-                "prompt_tokens": getattr(usage_obj, "prompt_tokens", 0) or 0,
-                "completion_tokens": getattr(usage_obj, "completion_tokens", 0) or 0,
-                "total_tokens": getattr(usage_obj, "total_tokens", 0) or 0,
+                name: getattr(usage_obj, name)
+                for name in ("prompt_tokens", "completion_tokens", "total_tokens")
+                if getattr(usage_obj, name, None) is not None
             }
         else:
             return {}
@@ -1160,6 +1165,7 @@ class OpenAICompatProvider(LLMProvider):
                         reasoning_content=reasoning_content,
                         finish_reason=str(response_map.get("finish_reason") or "stop"),
                         usage=self._extract_usage(response_map),
+                        request_id=response_map.get("id"),
                     )
                 return LLMResponse(
                     content="Error: API returned empty choices.",
@@ -1227,6 +1233,7 @@ class OpenAICompatProvider(LLMProvider):
                 tool_calls=parsed_tool_calls,
                 finish_reason=finish_reason,
                 usage=self._extract_usage(response_map),
+                request_id=response_map.get("id"),
                 reasoning_content=reasoning_content if isinstance(reasoning_content, str) else None,
             )
 
@@ -1278,6 +1285,7 @@ class OpenAICompatProvider(LLMProvider):
             tool_calls=tool_calls,
             finish_reason=finish_reason or "stop",
             usage=self._extract_usage(response),
+            request_id=getattr(response, "id", None),
             reasoning_content=reasoning_content,
         )
 
@@ -1288,6 +1296,7 @@ class OpenAICompatProvider(LLMProvider):
         tc_bufs: dict[int, dict[str, Any]] = {}
         finish_reason = "stop"
         usage: dict[str, int] = {}
+        request_id = None
 
         def _accum_tc(tc: Any, idx_hint: int) -> None:
             """Accumulate one streaming tool-call delta into *tc_bufs*."""
@@ -1331,6 +1340,7 @@ class OpenAICompatProvider(LLMProvider):
                 buf["arguments"] += str(fn_args)
 
         for chunk in chunks:
+            request_id = _get(chunk, "id") or request_id
             if isinstance(chunk, str):
                 content_parts.append(chunk)
                 continue
@@ -1425,6 +1435,7 @@ class OpenAICompatProvider(LLMProvider):
             tool_calls=tool_calls,
             finish_reason=finish_reason,
             usage=usage,
+            request_id=request_id,
             reasoning_content="".join(reasoning_parts) or None,
         )
 
@@ -1579,15 +1590,21 @@ class OpenAICompatProvider(LLMProvider):
                     )
                     body["stream"] = True
                     stream = await self._client.responses.create(**body)
+                    provider_request_id = None
 
                     async def _timed_stream():
+                        nonlocal provider_request_id
                         stream_iter = stream.__aiter__()
                         while True:
                             try:
-                                yield await asyncio.wait_for(
+                                event = await asyncio.wait_for(
                                     stream_iter.__anext__(),
                                     timeout=idle_timeout_s,
                                 )
+                                provider_request_id = getattr(
+                                    getattr(event, "response", None), "id", None
+                                ) or provider_request_id
+                                yield event
                             except StopAsyncIteration:
                                 break
 
@@ -1609,6 +1626,7 @@ class OpenAICompatProvider(LLMProvider):
                         finish_reason=finish_reason,
                         usage=usage,
                         reasoning_content=reasoning_content,
+                        request_id=provider_request_id,
                     )
                 except Exception as responses_error:
                     if self._spec and self._spec.name == "github_copilot":
