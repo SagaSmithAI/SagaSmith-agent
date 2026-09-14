@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { beforeEach } from "vitest";
+import { afterAll, beforeEach, vi } from "vitest";
 
 import i18n from "@/i18n";
 
@@ -58,4 +58,10 @@ beforeEach(async () => {
   document.documentElement.lang = "en";
   document.title = "nanobot";
   localStorage.setItem("nanobot.locale", "en");
+});
+
+// Components can start lazy imports without awaiting them. Let those imports
+// finish before Vitest disposes the module runner for this test file.
+afterAll(async () => {
+  await vi.dynamicImportSettled();
 });
