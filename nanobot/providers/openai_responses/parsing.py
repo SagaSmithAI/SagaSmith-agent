@@ -30,17 +30,25 @@ def _usage_from_response_obj(response: Any) -> dict[str, int]:
         return {}
     if not isinstance(usage_raw, dict):
         dump = getattr(usage_raw, "model_dump", None)
-        usage_raw = dump() if callable(dump) else vars(usage_raw)
-    prompt_tokens = int(usage_raw.get("input_tokens") or usage_raw.get("prompt_tokens") or 0)
-    completion_tokens = int(
-        usage_raw.get("output_tokens") or usage_raw.get("completion_tokens") or 0
-    )
-    total_tokens = int(usage_raw.get("total_tokens") or prompt_tokens + completion_tokens)
-    return {
-        "prompt_tokens": prompt_tokens,
-        "completion_tokens": completion_tokens,
-        "total_tokens": total_tokens,
-    }
+        dumped = dump() if callable(dump) else None
+        if isinstance(dumped, dict):
+            usage_raw = dumped
+        else:
+            usage_raw = {name: getattr(usage_raw, name, None) for name in (
+                "input_tokens", "prompt_tokens", "output_tokens", "completion_tokens",
+                "total_tokens", "input_tokens_details",
+            )}
+    result = {}
+    for source, target in (("input_tokens", "prompt_tokens"), ("output_tokens", "completion_tokens")):
+        value = usage_raw.get(source, usage_raw.get(target))
+        if value is not None:
+            result[target] = int(value)
+    if "prompt_tokens" in result and "completion_tokens" in result:
+        result["total_tokens"] = int(usage_raw.get("total_tokens") or sum(result.values()))
+    details = usage_raw.get("input_tokens_details") or {}
+    if isinstance(details, dict) and details.get("cached_tokens") is not None:
+        result["cached_tokens"] = int(details["cached_tokens"])
+    return result
 
 
 def _parse_tool_call_arguments(args_raw: Any, name: str | None) -> Any:
@@ -305,6 +313,7 @@ def parse_response_output(response: Any) -> LLMResponse:
         finish_reason=finish_reason,
         usage=usage,
         reasoning_content=reasoning_content if isinstance(reasoning_content, str) else None,
+        request_id=response.get("id"),
     )
 
 
@@ -409,11 +418,7 @@ async def consume_sdk_stream(
             if resp:
                 usage_obj = getattr(resp, "usage", None)
                 if usage_obj:
-                    usage = {
-                        "prompt_tokens": int(getattr(usage_obj, "input_tokens", 0) or 0),
-                        "completion_tokens": int(getattr(usage_obj, "output_tokens", 0) or 0),
-                        "total_tokens": int(getattr(usage_obj, "total_tokens", 0) or 0),
-                    }
+                    usage = _usage_from_response_obj(resp)
                 for out_item in getattr(resp, "output", None) or []:
                     if getattr(out_item, "type", None) == "reasoning":
                         for s in getattr(out_item, "summary", None) or []:

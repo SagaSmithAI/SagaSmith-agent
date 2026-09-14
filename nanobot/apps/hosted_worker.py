@@ -24,11 +24,13 @@ from nanobot.agent.mcp_observability import (
     mcp_metrics_snapshot,
     record_mcp_catalog_selection,
 )
+from nanobot.apps.hosted_accounting import HostedCallAccounting
 from nanobot.apps.hosted_workspace import (
     HostedWorkspaceLease,
     HostedWorkspacePolicy,
     derive_workspace_owner,
 )
+from nanobot.providers.call_accounting import current_call_accounting
 
 MAX_HOSTED_MCP_OPERATIONS = 16
 
@@ -158,7 +160,7 @@ def create_worker_app(
 
     @app.get("/health")
     def health() -> dict[str, str]:
-        return {"status": "ok"}
+        return {"status": "ok", "provider_accounting": "per-attempt-v1"}
 
     @app.get("/metrics/mcp")
     def mcp_metrics() -> dict[str, Any]:
@@ -314,7 +316,9 @@ def create_worker_app(
         record_mcp_catalog_selection(mcp_candidates, mcp_selected)
         structured_tool = None
         receipt_hook = ReceiptCaptureHook()
-        if payload.response_contract is not None:
+        if payload.response_contract is not None and (
+            "terminal" in payload.response_contract or "name" in payload.response_contract
+        ):
             contract = payload.response_contract
             try:
                 from nanobot.agent.tools.structured_output import StructuredOutputTool
@@ -343,17 +347,28 @@ def create_worker_app(
                     "invalid structured response contract",
                 ) from exc
 
-        response = await agent_loop.process_direct(
-            content=content,
-            session_key=session_key,
-            channel="service",
-            sender_id=trusted.requester_principal,
-            actor_principal=trusted.requester_principal,
-            conversation_principal=trusted.conversation_principal,
-            tools=turn_tools,
-            hooks=[receipt_hook],
-            trusted_metadata=_trusted_metadata(trusted),
-        )
+        callback = (payload.response_contract or {}).get("usage_callback")
+        accounting = None
+        if callback is not None:
+            try:
+                accounting = HostedCallAccounting(app.state.http_client, callback)
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(422, "invalid host accounting callback") from exc
+        accounting_token = current_call_accounting.set(accounting)
+        try:
+            response = await agent_loop.process_direct(
+                content=content,
+                session_key=session_key,
+                channel="service",
+                sender_id=trusted.requester_principal,
+                actor_principal=trusted.requester_principal,
+                conversation_principal=trusted.conversation_principal,
+                tools=turn_tools,
+                hooks=[receipt_hook],
+                trusted_metadata=_trusted_metadata(trusted),
+            )
+        finally:
+            current_call_accounting.reset(accounting_token)
         if structured_tool is not None and structured_tool.submission is None:
             raise HTTPException(
                 status.HTTP_502_BAD_GATEWAY,
