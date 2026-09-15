@@ -1410,11 +1410,12 @@ def test_backfill_does_not_touch_messages_when_thinking_explicitly_off() -> None
                 assert "reasoning_content" not in msg
 
 
-def test_deepseek_v4_backfills_incomplete_reasoning_history_when_effort_implicit() -> None:
+@pytest.mark.parametrize("model", ["deepseek-v4-pro", "deepseek-flash"])
+def test_deepseek_v4_backfills_incomplete_reasoning_history_when_effort_implicit(model) -> None:
     """DeepSeek-V4 reasons natively: backfill even without explicit reasoning_effort."""
     spec = find_by_name("deepseek")
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
-        p = OpenAICompatProvider(api_key="k", default_model="deepseek-v4-pro", spec=spec)
+        p = OpenAICompatProvider(api_key="k", default_model=model, spec=spec)
     messages = [
         {"role": "system", "content": "system"},
         {"role": "user", "content": "hi"},
@@ -1426,7 +1427,7 @@ def test_deepseek_v4_backfills_incomplete_reasoning_history_when_effort_implicit
     ]
 
     kw = p._build_kwargs(
-        messages=list(messages), tools=None, model="deepseek-v4-pro",
+        messages=list(messages), tools=None, model=model,
         max_tokens=1024, temperature=0.7,
         reasoning_effort=None, tool_choice=None,
     )

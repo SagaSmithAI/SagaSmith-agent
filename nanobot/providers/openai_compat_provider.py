@@ -858,7 +858,9 @@ class OpenAICompatProvider(LLMProvider):
             spec is not None
             and spec.name == "deepseek"
             and semantic_effort not in ("none", "minimal", "minimum")
-            and any(t in model_name.lower() for t in ("deepseek-v4", "deepseek-reasoner"))
+            and any(t in model_name.lower() for t in (
+                "deepseek-v4", "deepseek-reasoner", "deepseek-flash",
+            ))
         )
         if explicit_thinking or implicit_deepseek_thinking:
             for msg in kwargs["messages"]:
