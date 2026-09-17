@@ -134,7 +134,7 @@ async def test_v2_delegation_and_turn_fields_are_model_invisible_and_server_boun
         delegation_secret="delegation-test-secret-at-least-32-bytes",
         authorization_audience="player",
     )
-    assert set(wrapper.parameters["properties"]) == {"move"}
+    assert set(wrapper.parameters["properties"]) == {"move", "campaign_id", "idempotency_key"}
 
     expiry = datetime.now(UTC) + timedelta(minutes=5)
     context = RequestContext(
@@ -162,6 +162,7 @@ async def test_v2_delegation_and_turn_fields_are_model_invisible_and_server_boun
         },
     )
     with request_context(context):
+        assert set(wrapper.parameters["properties"]) == {"move"}
         result = await wrapper.execute(move="north")
 
     assert session.arguments == {
@@ -184,6 +185,26 @@ async def test_v2_delegation_and_turn_fields_are_model_invisible_and_server_boun
         "isError": False,
         "resultType": "complete",
     }
+
+
+@pytest.mark.asyncio
+async def test_local_campaign_write_keeps_required_inputs_without_host_envelope() -> None:
+    session = CapturingSession()
+    wrapper = MCPToolWrapper(session, "dnd", types.Tool(
+        name="campaign_change", description="Update campaign",
+        inputSchema={
+            "type": "object",
+            "properties": {name: {"type": "string"} for name in
+                           ("campaign_id", "idempotency_key")},
+            "required": ["campaign_id", "idempotency_key"],
+        },
+    ))
+    with request_context(RequestContext(channel="cli", chat_id="local")):
+        assert wrapper.parameters["required"] == ["campaign_id", "idempotency_key"]
+        assert wrapper.validate_params({"campaign_id": "campaign-1"})
+        result = await wrapper.execute(campaign_id="campaign-1", idempotency_key="write-1")
+    assert not result.is_error
+    assert session.arguments == {"campaign_id": "campaign-1", "idempotency_key": "write-1"}
 
 
 @pytest.mark.asyncio

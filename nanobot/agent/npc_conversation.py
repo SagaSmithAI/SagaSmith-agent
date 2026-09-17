@@ -25,6 +25,12 @@ claims and cite at least one allowed basis ref. Add truth posture, targets, lang
 private intent, actions, resolution requests, working deltas, visible cues, or a decision summary
 only when they help express the actor's decision. Any supplied basis ref or target must come from
 the capsule constraints. Request mechanical resolution instead of declaring an outcome. Private
+working_deltas arrays contain JSON objects, never strings. Omit optional deltas or use empty
+arrays when there is no change. A commitment object requires actor_id (the speaking actor),
+commitment_key, and content. Do not copy explanatory placeholder text into arrays.
+Actor knowledge objects require actor_id equal to the speaking actor. Fact objects require
+subject_ref="actor:<speaking actor id>", kind="actor_state", and predicate equal to
+relationship_to, goal, or commitment. These are proposals, not permission to change other actors.
 fields are never publication text. Return exactly one JSON object matching
 npc-conversation-proposal.v5, without Markdown or commentary."""
 
@@ -65,9 +71,9 @@ _OUTPUT_SHAPE = {
         }
     ],
     "working_deltas": {
-        "facts": ["actor-owned relationship, goal, or commitment fact object"],
-        "actor_knowledge": ["actor-scoped subjective knowledge candidate"],
-        "commitments": ["actor-owned commitment candidate"],
+        "facts": [],
+        "actor_knowledge": [],
+        "commitments": [],
     },
     "visible_cues": ["player-observable cue"],
     "decision_summary": "private string",
@@ -272,6 +278,7 @@ class NpcConversationWorkerPool:
                 "conversation_id": capsule["conversation_id"],
                 "activation_id": capsule["activation_id"],
                 "actor_runtime_id": capsule["actor_runtime_id"],
+                "actor_id": capsule["actor_id"],
                 "working_state": capsule["working_state"],
                 "inbox": capsule["inbox"],
                 "constraints": capsule["constraints"],

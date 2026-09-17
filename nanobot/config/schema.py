@@ -182,6 +182,7 @@ class ProviderConfig(Base):
     )
     proxy: str | None = None  # Explicit HTTP proxy; image downloads trust its DNS and egress
     thinking_style: str | None = None  # Thinking/reasoning style for custom providers
+    codex_auth_file: str | None = None  # Read-only Codex CLI auth.json; OAuth cache otherwise
 
     # Valid values mirror the keys of _THINKING_STYLE_MAP in
     # nanobot/providers/openai_compat_provider.py. Kept duplicated here to

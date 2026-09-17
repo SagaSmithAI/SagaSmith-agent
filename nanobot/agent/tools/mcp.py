@@ -951,13 +951,13 @@ class MCPToolWrapper(_MCPWrapperBase):
         if self._campaign_revision_argument in properties:
             self._trusted_arguments |= {self._campaign_revision_argument}
         for name in self._trusted_arguments:
-            if name != self._campaign_revision_argument:
+            if name not in {self._campaign_revision_argument, "campaign_id", "idempotency_key"}:
                 properties.pop(name, None)
         required = self._parameters.get("required")
         if isinstance(required, list):
             self._parameters["required"] = [
                 item for item in required if item not in self._trusted_arguments
-                or item == self._campaign_revision_argument
+                or item in {self._campaign_revision_argument, "campaign_id", "idempotency_key"}
             ]
 
     @property
@@ -975,13 +975,22 @@ class MCPToolWrapper(_MCPWrapperBase):
     @property
     def parameters(self) -> dict[str, Any]:
         request = current_request_context()
+        hidden = set()
+        if request is not None:
+            if request.campaign_id is not None:
+                hidden.add("campaign_id")
+            if request.metadata.get("idempotency_key") is not None:
+                hidden.add("idempotency_key")
         if (self._campaign_revision_argument and request is not None
                 and request.base_revision is not None):
+            hidden.add(self._campaign_revision_argument)
+        if hidden:
             schema = copy.deepcopy(self._parameters)
-            schema.get("properties", {}).pop(self._campaign_revision_argument, None)
+            for name in hidden:
+                schema.get("properties", {}).pop(name, None)
             if isinstance(schema.get("required"), list):
                 schema["required"] = [name for name in schema["required"]
-                                      if name != self._campaign_revision_argument]
+                                      if name not in hidden]
             return schema
         return self._parameters
 
