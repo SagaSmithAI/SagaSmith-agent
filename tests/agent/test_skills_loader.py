@@ -36,7 +36,8 @@ def _write_skill(
 
 
 def _precise_mtime(path: Path, offset: int = 0) -> None:
-    value = 1_700_000_000_123_456_789 + offset
+    # NTFS rounds to 100 ns; distinct fixture versions must survive that rounding.
+    value = 1_700_000_000_123_456_700 + offset * 1_000
     os.utime(path, ns=(value, value))
 
 
