@@ -222,9 +222,11 @@ class ToolResult(str):
         media: list[str] | tuple[str, ...] | None = None,
         media_envelopes: list[HostMediaEnvelope] | tuple[HostMediaEnvelope, ...] | None = None,
         mcp_result: dict[str, Any] | None = None,
+        dispatch_unknown: bool = False,
     ) -> ToolResult:
         obj = str.__new__(cls, content)
         obj.is_error = is_error
+        obj.dispatch_unknown = dispatch_unknown
         obj.context_barrier = context_barrier
         obj.structured_content = deepcopy(structured_content)
         obj.audit_receipt = deepcopy(audit_receipt)

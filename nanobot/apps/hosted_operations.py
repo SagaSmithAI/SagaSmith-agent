@@ -6,7 +6,7 @@ from contextlib import nullcontext
 from dataclasses import replace
 from typing import Any
 
-from nanobot.agent.tools.base import Tool
+from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tools.context import current_request_context, request_context
 
 
@@ -51,16 +51,23 @@ class JournaledTool(Tool):
         response.raise_for_status()
 
     async def execute(self, **kwargs: Any) -> Any:
+        context = current_request_context()
+        if context is not None and context.command_progress.get("unknown"):
+            return ToolResult("Previous operation outcome is unknown; reconcile its original key.",
+                              is_error=True, dispatch_unknown=True)
         call_id = str(uuid.uuid4())
         identity = {"call_id": call_id, "tool": self._delegate._original_name}
         # A callback failure propagates before the domain can perform any write.
         await self._record({**identity, "state": "dispatched"})
-        context = current_request_context()
         scope = request_context(replace(context, metadata={
             **context.metadata, "idempotency_key": f"room-operation:{call_id}",
         })) if context is not None else nullcontext()
         with scope:
             result = await self._delegate.execute(**kwargs)
+        if getattr(result, "dispatch_unknown", False):
+            if context is not None:
+                context.command_progress["unknown"] = f"room-operation:{call_id}"
+            return result
         # Do not catch timeout/cancellation: the durable fence remains uncertain.
         await self._record({
             **identity, "state": "returned",
@@ -70,4 +77,17 @@ class JournaledTool(Tool):
                 "is_error": bool(getattr(result, "is_error", False)),
             },
         })
+        if context is not None and not getattr(result, "is_error", False):
+            receipt = getattr(result, "audit_receipt", None)
+            if isinstance(receipt, dict) and all((
+                receipt.get("campaign_id") == context.campaign_id,
+                receipt.get("room_turn_id") == context.room_turn_id,
+                receipt.get("requester_principal") == context.requester_principal,
+                receipt.get("tool") == self._delegate._original_name,
+                receipt.get("base_revision") == context.command_progress.get("revision", context.base_revision),
+            )):
+                revision = receipt.get("campaign_revision", receipt.get("revision"))
+                current = context.command_progress.get("revision", context.base_revision)
+                if isinstance(revision, int) and not isinstance(revision, bool) and revision >= current:
+                    context.command_progress["revision"] = revision
         return result

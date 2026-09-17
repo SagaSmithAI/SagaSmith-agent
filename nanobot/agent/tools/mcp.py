@@ -1,6 +1,7 @@
 """MCP client: connects to MCP servers and wraps their tools as native nanobot tools."""
 
 import asyncio
+import copy
 import hashlib
 import importlib
 import json
@@ -888,6 +889,9 @@ class MCPToolWrapper(_MCPWrapperBase):
         meta = getattr(tool_def, "meta", None)
         if not isinstance(meta, dict):
             meta = {}
+        annotations = getattr(tool_def, "annotations", None)
+        self._read_only = _mcp_field(annotations, "read_only_hint", "readOnlyHint", False) is True
+        self._campaign_revision_argument = meta.get("sagasmith_campaign_revision_argument")
         domain_context = meta.get("sagasmith_domain_context")
         self._domain_context = (
             domain_context.strip()
@@ -944,13 +948,21 @@ class MCPToolWrapper(_MCPWrapperBase):
             )
             if name in properties
         )
+        if self._campaign_revision_argument in properties:
+            self._trusted_arguments |= {self._campaign_revision_argument}
         for name in self._trusted_arguments:
-            properties.pop(name, None)
+            if name != self._campaign_revision_argument:
+                properties.pop(name, None)
         required = self._parameters.get("required")
         if isinstance(required, list):
             self._parameters["required"] = [
                 item for item in required if item not in self._trusted_arguments
+                or item == self._campaign_revision_argument
             ]
+
+    @property
+    def read_only(self) -> bool:
+        return self._read_only
 
     @property
     def name(self) -> str:
@@ -962,6 +974,15 @@ class MCPToolWrapper(_MCPWrapperBase):
 
     @property
     def parameters(self) -> dict[str, Any]:
+        request = current_request_context()
+        if (self._campaign_revision_argument and request is not None
+                and request.base_revision is not None):
+            schema = copy.deepcopy(self._parameters)
+            schema.get("properties", {}).pop(self._campaign_revision_argument, None)
+            if isinstance(schema.get("required"), list):
+                schema["required"] = [name for name in schema["required"]
+                                      if name != self._campaign_revision_argument]
+            return schema
         return self._parameters
 
     def _trusted_principal(self) -> str:
@@ -1079,7 +1100,7 @@ class MCPToolWrapper(_MCPWrapperBase):
                 tenant_id=str(metadata.get("tenant_id") or ""),
                 campaign_id=request.campaign_id,
                 room_turn_id=request.room_turn_id,
-                base_revision=request.base_revision,
+                base_revision=request.command_progress.get("revision", request.base_revision),
                 expires_at=expires_at,
             )
             meta: dict[str, Any] = {AUTH_CONTEXT_META_KEY: delegation}
@@ -1161,11 +1182,15 @@ class MCPToolWrapper(_MCPWrapperBase):
         metadata = request.metadata
         values: dict[str, Any] = {
             "room_turn_id": request.room_turn_id,
-            "base_revision": request.base_revision,
+            "base_revision": request.command_progress.get("revision", request.base_revision),
             "idempotency_key": metadata.get("idempotency_key"),
             "campaign_id": request.campaign_id,
             "acting_character_id": request.acting_character_ref,
         }
+        if self._campaign_revision_argument:
+            values[self._campaign_revision_argument] = request.command_progress.get(
+                "revision", request.base_revision
+            )
         return {
             **arguments,
             **{
@@ -1219,6 +1244,12 @@ class MCPToolWrapper(_MCPWrapperBase):
     ) -> str:
         retried_transient = False
         refreshed_session = False
+        dispatched = False
+
+        def failed(message):
+            return ToolResult(message, is_error=True,
+                              dispatch_unknown=dispatched and not self.read_only)
+
         while True:
             try:
                 # Keep MCP SDK requests in the wrapper's task. asyncio.wait_for
@@ -1244,11 +1275,13 @@ class MCPToolWrapper(_MCPWrapperBase):
                         task_timeout_context(timeout_control),
                     ):
                         if meta is None:
+                            dispatched = True
                             result = await self._session.call_tool(
                                 self._original_name,
                                 arguments=kwargs,
                             )
                         else:
+                            dispatched = True
                             result = await self._session.call_tool(
                                 self._original_name,
                                 arguments=kwargs,
@@ -1267,7 +1300,7 @@ class MCPToolWrapper(_MCPWrapperBase):
                     else self._tool_timeout
                 )
                 logger.warning("MCP tool '{}' timed out after {}s", self._name, timeout_seconds)
-                return ToolResult.error(f"(MCP tool call timed out after {timeout_seconds}s)")
+                return failed(f"(MCP tool call timed out after {timeout_seconds}s)")
             except asyncio.CancelledError:
                 # MCP SDK's anyio cancel scopes can leak CancelledError on timeout/failure.
                 # Re-raise only if our task was externally cancelled (e.g. /stop).
@@ -1280,7 +1313,7 @@ class MCPToolWrapper(_MCPWrapperBase):
                     protocol=self._metrics_protocol,
                 )
                 logger.warning("MCP tool '{}' was cancelled by server/SDK", self._name)
-                return ToolResult.error("(MCP tool call was cancelled)")
+                return failed("(MCP tool call was cancelled)")
             except Exception as exc:
                 if await self._refresh_session_after_termination(
                     exc,
@@ -1317,7 +1350,7 @@ class MCPToolWrapper(_MCPWrapperBase):
                         transport=self._metrics_transport,
                         protocol=self._metrics_protocol,
                     )
-                    return ToolResult.error(
+                    return failed(
                         f"(MCP tool call failed after retry: {type(exc).__name__})"
                     )
                 logger.exception(
@@ -1332,7 +1365,7 @@ class MCPToolWrapper(_MCPWrapperBase):
                     transport=self._metrics_transport,
                     protocol=self._metrics_protocol,
                 )
-                return ToolResult.error(f"(MCP tool call failed: {type(exc).__name__})")
+                return failed(f"(MCP tool call failed: {type(exc).__name__})")
             else:
                 if self._post_call_sync is not None:
                     # A remote tools/list_changed notification can arrive after
@@ -1423,7 +1456,7 @@ class MCPToolWrapper(_MCPWrapperBase):
                         type(exc).__name__,
                         exc,
                     )
-                    return ToolResult.error(
+                    return failed(
                         f"(MCP tool returned malformed content: {type(exc).__name__})"
                     )
 

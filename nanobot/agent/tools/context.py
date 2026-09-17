@@ -44,6 +44,7 @@ class RequestContext:
     resource_owner_principal: str | None = None
     acting_host_principal: str | None = None
     acting_character_ref: str | None = None
+    command_progress: dict[str, Any] = field(default_factory=dict, compare=False)
 
 
 @runtime_checkable
