@@ -13,6 +13,27 @@ from nanobot.providers.base import LLMResponse, ToolCallRequest
 
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
 
+
+def test_compound_call_ids_have_short_distinct_replayable_file_references(tmp_path):
+    from nanobot.utils.helpers import maybe_persist_tool_result
+
+    references = []
+    for suffix in ("a", "b"):
+        call_id = "call_" + "x" * 80 + "|fc_" + suffix * 40
+        reference = maybe_persist_tool_result(
+            tmp_path, "session", call_id, suffix * 3000, max_chars=100,
+        )
+        replay = maybe_persist_tool_result(
+            tmp_path, "session", call_id, suffix * 3000, max_chars=100,
+        )
+        assert replay == reference
+        references.append(reference)
+    files = list((tmp_path / ".nanobot/tool-results/session").glob("*.txt"))
+    assert len(files) == 2
+    assert all(len(path.name) <= 36 for path in files)
+    assert {path.read_text() for path in files} == {"a" * 3000, "b" * 3000}
+    assert all(any(str(path) in ref for path in files) for ref in references)
+
 async def test_runner_persists_large_tool_results_for_follow_up_calls(tmp_path):
     from nanobot.agent.runner import AgentRunner
 

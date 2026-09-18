@@ -1,6 +1,7 @@
 """Utility functions for nanobot."""
 
 import base64
+import hashlib
 import json
 import os
 import re
@@ -590,7 +591,12 @@ def maybe_persist_tool_result(
         _cleanup_tool_result_buckets(root, bucket)
     except Exception:
         logger.exception("Failed to clean stale tool result buckets in {}", root)
-    path = bucket / f"{safe_filename(tool_call_id)}.{suffix}"
+    filename = safe_filename(tool_call_id)
+    # Responses compound call IDs are long and easy for a model to truncate
+    # when copying the read_file path. Keep references short and deterministic.
+    if len(filename) > 48:
+        filename = "result_" + hashlib.sha256(tool_call_id.encode()).hexdigest()[:24]
+    path = bucket / f"{filename}.{suffix}"
     if not path.exists():
         if suffix == "json" and isinstance(content, list):
             write_text_atomic(path, json.dumps(content, ensure_ascii=False, indent=2))
