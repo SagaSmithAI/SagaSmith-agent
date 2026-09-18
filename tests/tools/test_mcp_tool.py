@@ -1186,6 +1186,30 @@ async def test_execute_builds_host_only_accessible_media_envelope(tmp_path: Path
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("purpose", ["source_evidence", "combat_grid", None])
+async def test_only_explicit_source_evidence_enters_model_images(tmp_path: Path, purpose) -> None:
+    from nanobot.agent.context_governance import ContextGovernor
+    from nanobot.config.loader import set_config_path
+
+    set_config_path(tmp_path / "config.json")
+
+    async def call_tool(_name: str, arguments: dict) -> object:
+        return SimpleNamespace(
+            content=[_FakeImageContent(_PNG_B64, "image/png")],
+            structuredContent={"media_purpose": purpose}, isError=False,
+        )
+
+    result = await _make_wrapper(SimpleNamespace(call_tool=call_tool)).execute()
+    assert _PNG_B64 not in str(result)
+    if purpose == "source_evidence":
+        content = ContextGovernor.normalize_tool_result(None, "call", "mcp_test", result)
+        assert content[1]["image_url"]["url"] == f"data:image/png;base64,{_PNG_B64}"
+        assert result.media[0] not in str(content)
+    else:
+        assert result.model_content is None
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("audience_projection", "context", "expects_media"),
     [
@@ -1241,6 +1265,7 @@ async def test_image_delivery_respects_audience_projection(
     structured = {
         "audience_projection": audience_projection,
         "mime_type": "image/png",
+        "media_purpose": "source_evidence",
     }
 
     async def call_tool(_name: str, arguments: dict) -> object:
@@ -1259,6 +1284,7 @@ async def test_image_delivery_respects_audience_projection(
 
     payload = json.loads(result)
     assert bool(result.media) is expects_media
+    assert bool(result.model_content) is expects_media
     assert _PNG_B64 not in result
     if expects_media:
         assert payload["images"][0]["mime"] == "image/png"

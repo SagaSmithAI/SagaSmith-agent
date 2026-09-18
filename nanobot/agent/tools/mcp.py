@@ -1444,6 +1444,21 @@ class MCPToolWrapper(_MCPWrapperBase):
                         transport=self._metrics_transport,
                         protocol=self._metrics_protocol,
                     )
+                    model_content = None
+                    if (
+                        isinstance(structured_content, dict)
+                        and structured_content.get("media_purpose") == "source_evidence"
+                        and not _shared_media_delivery_blocked(structured_content)
+                    ):
+                        from mcp import types
+
+                        images = [
+                            {"type": "image_url", "image_url": {"url": url}}
+                            for block in result.content
+                            if (url := _image_block_data_url(block, types)) is not None
+                        ]
+                        if images:
+                            model_content = [{"type": "text", "text": rendered}, *images]
                     return ToolResult(
                         rendered,
                         context_barrier=context_changed,
@@ -1451,6 +1466,7 @@ class MCPToolWrapper(_MCPWrapperBase):
                         audit_receipt=_auth_context_receipt_from_result(result.content),
                         media_envelopes=media_envelopes,
                         mcp_result=mcp_result,
+                        model_content=model_content,
                     )
                 except Exception as exc:
                     record_mcp_event(

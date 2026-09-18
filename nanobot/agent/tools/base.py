@@ -210,6 +210,7 @@ class ToolResult(str):
     media: tuple[str, ...]
     media_envelopes: tuple[HostMediaEnvelope, ...]
     mcp_result: dict[str, Any] | None
+    model_content: list[dict[str, Any]] | None
 
     def __new__(
         cls,
@@ -223,6 +224,7 @@ class ToolResult(str):
         media_envelopes: list[HostMediaEnvelope] | tuple[HostMediaEnvelope, ...] | None = None,
         mcp_result: dict[str, Any] | None = None,
         dispatch_unknown: bool = False,
+        model_content: list[dict[str, Any]] | None = None,
     ) -> ToolResult:
         obj = str.__new__(cls, content)
         obj.is_error = is_error
@@ -231,6 +233,7 @@ class ToolResult(str):
         obj.structured_content = deepcopy(structured_content)
         obj.audit_receipt = deepcopy(audit_receipt)
         obj.mcp_result = deepcopy(mcp_result)
+        obj.model_content = deepcopy(model_content)
         envelopes = list(media_envelopes or ())
         envelope_paths = {item.path for item in envelopes}
         envelopes.extend(
