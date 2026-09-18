@@ -353,9 +353,15 @@ class NpcConversationWorkerPool:
                                 {
                                     "task": "repair_npc_conversation_proposal",
                                     "error": last_error,
+                                    "conversation_id": capsule["conversation_id"],
+                                    "activation_id": capsule["activation_id"],
+                                    "actor_runtime_id": capsule["actor_runtime_id"],
+                                    "constraints": capsule["constraints"],
                                     "instruction": (
                                         "Return one corrected npc-conversation-proposal.v5 object "
-                                        "only; every utterance segment needs content_mode, and "
+                                        "only. Copy the identity fields from THIS repair request, "
+                                        "not any earlier proposal. Every utterance segment needs "
+                                        "content_mode, and "
                                         "grounded/deception/uncertain segments need allowed basis_refs."
                                     ),
                                 },
