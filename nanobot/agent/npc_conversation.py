@@ -24,7 +24,14 @@ performative speech that makes no factual claim; use grounded, deception, or unc
 claims and cite at least one allowed basis ref. Add truth posture, targets, language, delivery,
 private intent, actions, resolution requests, working deltas, visible cues, or a decision summary
 only when they help express the actor's decision. Any supplied basis ref or target must come from
-the capsule constraints. Request mechanical resolution instead of declaring an outcome. Private
+the capsule constraints. Request mechanical resolution instead of declaring an outcome.
+Ordinary speech, refusal, offers, and threats do not by themselves require a check or adjudication.
+Leave resolution_requests empty when the only next step is another participant's free choice,
+such as whether to retreat, negotiate, or advance. Never request a ruling to choose a player's
+response. Use narrative settlement for speech-only proposals; omit proposed_action when no action
+is attempted. Request mechanics only for an actual attempted action or rule-governed effect whose
+outcome needs settlement, without assuming that a listener obeys, believes, or is frightened.
+Private
 working_deltas arrays contain JSON objects, never strings. Omit optional deltas or use empty
 arrays when there is no change. A commitment object requires actor_id (the speaking actor),
 commitment_key, and content. Do not copy explanatory placeholder text into arrays.
