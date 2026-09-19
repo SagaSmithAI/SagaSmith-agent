@@ -399,6 +399,13 @@ class AgentRunner:
         )
 
         for iteration in range(spec.max_iterations):
+            context = AgentHookContext(
+                iteration=iteration,
+                messages=messages,
+                session_key=spec.session_key,
+            )
+            # Include hook feedback in this request's governed message copy.
+            await hook.before_iteration(context)
             try:
                 # Keep the persisted conversation untouched. Context governance
                 # may repair or compact historical messages for the model, but
@@ -430,12 +437,6 @@ class AgentRunner:
                     )
                 except Exception:
                     messages_for_model = messages
-            context = AgentHookContext(
-                iteration=iteration,
-                messages=messages,
-                session_key=spec.session_key,
-            )
-            await hook.before_iteration(context)
             response = await self._request_model(spec, messages_for_model, hook, context)
             context.response = response
             context.tool_calls = list(response.tool_calls)

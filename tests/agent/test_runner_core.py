@@ -17,6 +17,34 @@ _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
 
 
 @pytest.mark.asyncio
+async def test_before_iteration_feedback_reaches_same_model_request():
+    from nanobot.agent.hook import AgentHook
+    from nanobot.agent.runner import AgentRunner
+
+    feedback = {"role": "user", "content": "Use the corrected item identifier."}
+
+    class FeedbackHook(AgentHook):
+        async def before_iteration(self, context):
+            context.messages.append(dict(feedback))
+
+    provider = MagicMock(spec=LLMProvider)
+    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="done"))
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    initial = [{"role": "user", "content": "Continue the task."}]
+    result = await AgentRunner().run(make_run_spec(
+        provider, initial_messages=initial, tools=tools, model="test-model",
+        max_iterations=1, hook=FeedbackHook(),
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    sent = provider.chat_with_retry.await_args.kwargs["messages"]
+    assert feedback in sent
+    assert result.messages.count(feedback) == 1
+    assert initial == [{"role": "user", "content": "Continue the task."}]
+
+
+@pytest.mark.asyncio
 async def test_runner_preserves_reasoning_fields_and_tool_results():
     from nanobot.agent.runner import AgentRunner
 
