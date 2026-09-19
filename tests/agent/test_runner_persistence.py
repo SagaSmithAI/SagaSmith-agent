@@ -153,6 +153,25 @@ def test_persist_json_result_summarizes_root_scalars_after_large_nested_data(tmp
     assert saved.read_text(encoding="utf-8") == raw
 
 
+def test_persist_json_result_keeps_nested_named_identity_without_expanding_lists(tmp_path):
+    from nanobot.utils.helpers import maybe_persist_tool_result
+
+    payload = {"status": "committed", "campaign_revision": 738, "result": {"combat": {
+        "current_turn": {"actor_id": "current-actor", "name": "Current actor",
+                         "turn_budget": {"main_action": 1}},
+        "combatants": [{"actor_id": "historical-actor", "name": "Old actor"}] * 100,
+    }}}
+    raw = json.dumps(payload)
+    persisted = maybe_persist_tool_result(tmp_path, "session", "identity", raw, max_chars=64)
+    assert '"result.combat.current_turn"' in persisted
+    assert '"actor_id": "current-actor"' in persisted
+    assert '"campaign_revision": 738' in persisted
+    assert "historical-actor" not in persisted
+    assert "turn_budget" not in persisted
+    assert len(persisted) < 1800
+    assert (tmp_path / ".nanobot/tool-results/session/identity.txt").read_text("utf-8") == raw
+
+
 def test_persist_json_result_surfaces_bounded_result_continuation_ids(tmp_path):
     from nanobot.utils.helpers import maybe_persist_tool_result
 

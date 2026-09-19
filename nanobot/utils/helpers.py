@@ -477,6 +477,32 @@ def _tool_result_json_summary(text: str) -> str | None:
             else:
                 scalars.append((key, value))
 
+        # Preserve a few named object identities through shallow envelopes. This
+        # avoids forcing a file read merely to identify the subject of a reply.
+        # Never walk arrays: historical records and large entity lists stay in
+        # the persisted output rather than masquerading as current metadata.
+        identities: dict[str, Any] = {}
+
+        def collect_identities(node: dict[str, Any], path: str, depth: int) -> None:
+            if depth > 3 or len(identities) >= 3:
+                return
+            name = node.get("name")
+            if isinstance(name, str) and len(name) <= 80:
+                identity = {
+                    key: value for key, value in node.items()
+                    if isinstance(key, str) and (key == "id" or key.endswith("_id"))
+                    and isinstance(value, str) and 0 < len(value) <= 80
+                }
+                if identity:
+                    identities[path or "$root"] = {"name": name, **dict(list(identity.items())[:2])}
+            for key, value in list(node.items())[:32]:
+                if isinstance(key, str) and isinstance(value, dict):
+                    collect_identities(value, f"{path}.{key}" if path else key, depth + 1)
+
+        collect_identities(payload, "", 0)
+        if identities:
+            containers.insert(0, ("<named objects; partial metadata>", identities))
+
         # Scalars come first so mechanically useful root metadata remains visible
         # even when a large nested payload precedes it in the original document.
         selected = (scalars + containers)[:_TOOL_RESULT_SUMMARY_MAX_FIELDS]
