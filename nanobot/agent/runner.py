@@ -18,6 +18,7 @@ from nanobot.agent.context_governance import (
     ContextGovernor,
 )
 from nanobot.agent.hook import AgentHook, AgentHookContext, AgentRunHookContext
+from nanobot.agent.local_trace import trace_call, trace_tool_call, trace_turn
 from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result
 from nanobot.bus.events import HostMediaEnvelope
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
@@ -323,7 +324,8 @@ class AgentRunner:
 
         try:
             await hook.before_run(context)
-            result = await self._run_core(spec, hook, messages)
+            with trace_turn(spec):
+                result = await self._run_core(spec, hook, messages)
         except asyncio.CancelledError as exc:
             context.messages = deepcopy(messages)
             context.stop_reason = "cancelled"
@@ -399,6 +401,13 @@ class AgentRunner:
         )
 
         for iteration in range(spec.max_iterations):
+            context = AgentHookContext(
+                iteration=iteration,
+                messages=messages,
+                session_key=spec.session_key,
+            )
+            # Include hook feedback in this request's governed message copy.
+            await hook.before_iteration(context)
             try:
                 # Keep the persisted conversation untouched. Context governance
                 # may repair or compact historical messages for the model, but
@@ -430,12 +439,6 @@ class AgentRunner:
                     )
                 except Exception:
                     messages_for_model = messages
-            context = AgentHookContext(
-                iteration=iteration,
-                messages=messages,
-                session_key=spec.session_key,
-            )
-            await hook.before_iteration(context)
             response = await self._request_model(spec, messages_for_model, hook, context)
             context.response = response
             context.tool_calls = list(response.tool_calls)
@@ -831,6 +834,7 @@ class AgentRunner:
         kwargs["reasoning_effort"] = generation.reasoning_effort
         return kwargs
 
+    @trace_call("llm")
     async def _request_model(
         self,
         spec: AgentRunSpec,
@@ -1086,6 +1090,7 @@ class AgentRunner:
             return None
         return clean
 
+    @trace_call("llm")
     async def _request_no_tools(
         self,
         spec: AgentRunSpec,
@@ -1338,9 +1343,9 @@ class AgentRunner:
         await hook.before_execute_tool(context, tool_call, tool, params)
         try:
             if tool is not None:
-                result = await tool.execute(**params)
+                result = await trace_tool_call(tool, tool.execute(**params))
             else:
-                result = await spec.tools.execute(tool_call.name, params)
+                result = await trace_tool_call(None, spec.tools.execute(tool_call.name, params))
         except asyncio.CancelledError:
             raise
         except BaseException as exc:

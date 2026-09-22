@@ -211,6 +211,20 @@ def test_hosted_worker_injects_authenticated_principal_as_sender() -> None:
     assert response.json()["usage"]["total_tokens"] == 5
 
 
+def test_hosted_identity_isolates_member_histories_but_keeps_same_member_continuity():
+    loop = FakeLoop()
+    with TestClient(create_worker_app(loop, "test-model", service_token=TOKEN)) as client:
+        for principal in ("user:owner", "user:player", "user:owner"):
+            response = client.post("/v1/chat/completions",
+                                   headers={"Authorization": f"Bearer {TOKEN}"},
+                                   json=request_json(trusted_context=trusted_context(
+                                       requester_principal=principal)))
+            assert response.status_code == 200
+    keys = [call["session_key"] for call in loop.calls]
+    assert keys[0] != keys[1]
+    assert keys[0] == keys[2]
+
+
 def test_hosted_worker_selects_only_authorized_mcp_operations_for_model() -> None:
     loop = FakeLoop()
     loop.registry.register(SimpleNamespace(name="builtin", _model_visible=True))

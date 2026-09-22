@@ -278,6 +278,7 @@ class SubagentManager:
                 channel=origin["channel"],
                 chat_id=origin["chat_id"],
                 message_id=origin_message_id,
+                metadata={"subagent": True},
                 session_key=sess_key,
                 runtime=runtime,
                 )

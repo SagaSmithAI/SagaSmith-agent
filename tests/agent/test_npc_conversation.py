@@ -254,6 +254,23 @@ async def test_worker_repair_preserves_role_order_and_rollback_restores_cursor()
     assert pool.status("conversation")["workers"][0]["turn_count"] == 0
 
 
+@pytest.mark.asyncio
+async def test_second_activation_repair_restates_current_identity() -> None:
+    first = _capsule(sequence=1)
+    second = _capsule(bootstrap=False, sequence=2)
+    provider = FakeProvider([_proposal(first), _proposal(first), _proposal(second)])
+    pool = NpcConversationWorkerPool()
+    await pool.activate(first, runtime=_runtime(provider))
+    pool.confirm_last_activation("conversation", "conversation:npc")
+    proposal = await pool.activate(second, runtime=_runtime(provider))
+    repair = json.loads(provider.calls[2]["messages"][-1]["content"])
+    assert "activation_id" in repair["error"]
+    for key in ("conversation_id", "activation_id", "actor_runtime_id", "constraints"):
+        assert repair[key] == second[key]
+    assert proposal["activation_id"] == second["activation_id"]
+    assert pool.checkout_options("conversation", "conversation:npc")["cursor"] == 2
+
+
 def test_worker_checks_transport_identity_but_leaves_semantics_to_mcp() -> None:
     capsule = _capsule()
     free = _proposal(capsule)

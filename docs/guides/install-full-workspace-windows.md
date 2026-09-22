@@ -69,11 +69,15 @@ Default local endpoints are:
 | Surface | Address |
 |---|---|
 | Agent WebUI | `http://127.0.0.1:8765/` |
-| D&D Workbench gateway | `http://127.0.0.1:8766/` |
-| D&D MCP | `http://127.0.0.1:8767/mcp` |
+| D&D MCP | One Agent-managed local authority over stdio |
 | CoC Workbench gateway | `http://127.0.0.1:8768/` |
 | CoC MCP | `http://127.0.0.1:8769/mcp` |
 | Narrative MCP | Agent-managed stdio |
+
+D&D Gateway (8766) and HTTP MCP (8767) start only with explicit
+`--transport streamable-http`. Default mixed mode keeps CoC on HTTP and D&D on
+trusted local stdio. See [local-first DND](local-first-dnd.md) for workspace
+installation, recovery, validation evidence, and the unreleased package boundary.
 
 The modern MCP catalogue is deterministic and private-cache scoped for the same authorization.
 The Agent selects a bounded facade subset for the current system, phase, and task, while every MCP

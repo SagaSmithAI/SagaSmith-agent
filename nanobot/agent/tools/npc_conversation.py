@@ -25,7 +25,12 @@ from nanobot.agent.tools.schema import ObjectSchema, StringSchema, tool_paramete
         campaign_id=StringSchema(description="MCP campaign id", max_length=100),
         conversation_id=StringSchema(description="MCP conversation id", max_length=100),
         activation=ObjectSchema(
-            description="Public activation descriptor returned by the conversation MCP",
+            description=(
+                "Copy the complete activation object returned by conversation ingest/query. "
+                "Required for activate: activation_ref, actor_id, from_cursor, "
+                "conversation_revision. Preserve the opaque activation_ref verbatim; "
+                "do not reconstruct or summarize this object."
+            ),
             additional_properties=True,
             nullable=True,
         ),
@@ -64,7 +69,8 @@ class NpcConversationWorkerTool(Tool):
             "Dispatch a public SagaSmith NPC activation to a persistent, zero-tool, actor-isolated "
             "model worker. The host privately checks out the actor capsule, submits the proposal "
             "to MCP, and returns only the validated publication. Use release after closing or "
-            "aborting the conversation."
+            "aborting the conversation. For activate, supply campaign_id and the complete "
+            "returned activation descriptor, including activation_ref."
         )
 
     def _mcp_tool(self, original_name: str, server_name: str | None = None) -> Tool:

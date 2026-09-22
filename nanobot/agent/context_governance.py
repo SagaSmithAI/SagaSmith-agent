@@ -7,6 +7,7 @@ mutate an existing session history list in place.
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -113,6 +114,11 @@ class ContextGovernor:
         tool_name: str,
         result: Any,
     ) -> Any:
+        model_content = getattr(result, "model_content", None)
+        if model_content is not None and not getattr(result, "is_error", False):
+            # Explicit source evidence uses native multimodal blocks, like read_file.
+            # Its short string projection remains suitable for progress/audit logs.
+            return deepcopy(model_content)
         result = ensure_nonempty_tool_result(tool_name, result)
         if tool_name in TOOL_RESULT_OFFLOAD_EXEMPT_TOOLS:
             return result

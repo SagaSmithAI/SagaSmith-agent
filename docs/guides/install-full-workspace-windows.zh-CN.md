@@ -60,8 +60,12 @@ uv run nanobot sagasmith stop
 精确子进程 PID、命令和日志位于 `workspace/.sagasmith-local`。停止命令只处理
 该清单记录的进程。
 
-默认端口：Agent WebUI 8765、D&D Gateway 8766、D&D MCP 8767、
-CoC Gateway 8768、CoC MCP 8769。Narrative 由 Agent 按会话启动 stdio。
+默认 mixed 模式：Agent WebUI 8765；D&D 使用单个固定身份的 stdio authority，
+不启动 D&D Gateway/HTTP 服务；CoC Gateway 8768、CoC MCP 8769。
+Narrative 由 Agent 按会话启动 stdio。显式 `--transport streamable-http` 才使用
+D&D Gateway 8766 和 MCP 8767，保留共享服务的身份委托。
+
+本地 D&D 的安装、恢复语义、性能证据与限制见 [本地优先 DND](local-first-dnd.md)。
 
 现代 MCP 目录对同一 authorization 保持确定、有序并使用 private cache scope。Agent
 按当前 system、phase 与 task 只选择有界 facade 子集；每次调用仍由 MCP 独立校验身份、

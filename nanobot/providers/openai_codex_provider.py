@@ -7,6 +7,7 @@ import hashlib
 import json
 import re
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -45,10 +46,12 @@ class OpenAICodexProvider(LLMProvider):
         self,
         default_model: str = "openai-codex/gpt-5.1-codex",
         proxy: str | None = None,
+        auth_file: str | None = None,
     ):
         super().__init__(api_key=None, api_base=None)
         self.default_model = default_model
         self.proxy = proxy or None
+        self.auth_file = Path(auth_file).expanduser() if auth_file else None
 
     async def _call_codex(
         self,
@@ -84,8 +87,12 @@ class OpenAICodexProvider(LLMProvider):
             body["tools"] = convert_tools(tools)
 
         try:
-            token = await asyncio.to_thread(get_codex_token, proxy=self.proxy)
-            headers = _build_headers(token.account_id, token.access)
+            if self.auth_file is not None:
+                account_id, access = await asyncio.to_thread(_read_codex_auth, self.auth_file)
+            else:
+                token = await asyncio.to_thread(get_codex_token, proxy=self.proxy)
+                account_id, access = token.account_id, token.access
+            headers = _build_headers(account_id, access)
 
             try:
                 content, tool_calls, finish_reason, usage, reasoning_content = await _request_codex(
@@ -160,6 +167,25 @@ class OpenAICodexProvider(LLMProvider):
 
     def get_default_model(self) -> str:
         return self.default_model
+
+
+def _read_codex_auth(path: Path) -> tuple[str, str]:
+    """Read the explicitly selected CLI credential without copying or refreshing it.
+
+    Re-read on each request so rotations performed by Codex take effect. The API
+    validates token expiry; this provider never modifies the CLI's credential.
+    """
+    try:
+        tokens = json.loads(path.read_text(encoding="utf-8"))["tokens"]
+        account_id, access = tokens["account_id"], tokens["access_token"]
+        if not all(isinstance(value, str) and value.strip() for value in (account_id, access)):
+            raise ValueError
+        return account_id, access
+    except (OSError, ValueError, KeyError, TypeError):
+        raise ValueError(
+            "Cannot read Codex CLI credentials from codex_auth_file; "
+            "select a valid auth.json or sign in with Codex again."
+        ) from None
 
 
 def _strip_model_prefix(model: str) -> str:

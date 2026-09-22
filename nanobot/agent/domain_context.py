@@ -61,6 +61,8 @@ class DomainContextBinding:
     context_epoch: str = ""
     authorization_epoch: int = 0
     memory_policy: str = MEMORY_POLICY_DOMAIN_AUTHORITATIVE
+    timeline_epoch: str = ""
+    rules_fingerprint: str = ""
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> "DomainContextBinding":
@@ -102,6 +104,8 @@ class DomainContextBinding:
             context_epoch=_text(value.get("context_epoch"), "context_epoch"),
             authorization_epoch=authorization_epoch,
             memory_policy=policy,
+            timeline_epoch=_text(value.get("timeline_epoch"), "timeline_epoch"),
+            rules_fingerprint=_text(value.get("rules_fingerprint"), "rules_fingerprint"),
         )
         expected_epoch = binding.derived_epoch()
         if binding.context_epoch and binding.context_epoch != expected_epoch:
@@ -118,6 +122,10 @@ class DomainContextBinding:
             "audience": self.audience,
             "branch_id": self.branch_id,
         }
+        if self.timeline_epoch:
+            payload["timeline_epoch"] = self.timeline_epoch
+        if self.rules_fingerprint:
+            payload["rules_fingerprint"] = self.rules_fingerprint
         return hashlib.sha256(
             json.dumps(
                 payload,
@@ -129,6 +137,8 @@ class DomainContextBinding:
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            **({"timeline_epoch": self.timeline_epoch} if self.timeline_epoch else {}),
+            **({"rules_fingerprint": self.rules_fingerprint} if self.rules_fingerprint else {}),
             "domain": self.domain,
             "campaign_id": self.campaign_id,
             "principal_fingerprint": self.principal_fingerprint,

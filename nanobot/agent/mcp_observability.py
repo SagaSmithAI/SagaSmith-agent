@@ -38,6 +38,9 @@ def record_mcp_event(
     protocol: str = "unknown",
 ) -> None:
     """Record one event without accepting user/campaign/tool/argument labels."""
+    from nanobot.agent.local_trace import trace_recovery
+
+    trace_recovery(outcome)
 
     key = (
         phase if phase in _ALLOWED_PHASES else "tool",

@@ -660,6 +660,13 @@ nanobot agent -m "Reply with one short sentence."
 
 Codex uses OAuth instead of API keys. Requires a ChatGPT Plus or Pro account. `nanobot provider login` stores the OAuth session outside config. A `providers.openai_codex` block is optional and is only needed for provider-specific settings such as a proxy.
 
+To reuse an existing Codex CLI login, set
+`providers.openai_codex.codexAuthFile` to `~/.codex/auth.json`. The provider reads
+this explicitly selected file on every request, so CLI credential rotations take
+effect without restarting. It does not copy, refresh, or modify the file and does
+not fall back to the separate OAuth cache. Renew an expired login through Codex.
+Omit this setting to retain `nanobot provider login` and its managed OAuth cache.
+
 **1. Login:**
 ```bash
 nanobot provider login openai-codex

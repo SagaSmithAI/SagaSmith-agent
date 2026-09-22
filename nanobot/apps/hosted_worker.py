@@ -279,7 +279,15 @@ def create_worker_app(
 
             return RoomActivityTool()
 
-        session_key = f"service:{payload.session_id}"
+        # A hosted identity can answer several members in the same room. Never
+        # reuse one member's private model history for a different requester.
+        import hashlib
+
+        audience_partition = hashlib.sha256(json.dumps([
+            trusted.requester_principal, trusted.acting_host_principal,
+            trusted.acting_character_id, trusted.authorized_audience,
+        ]).encode()).hexdigest()[:32]
+        session_key = f"service:{payload.session_id}:{audience_partition}"
         base_tools = await agent_loop._tools_for_session(
             session_key,
             system_id=trusted.system_id,
@@ -314,6 +322,20 @@ def create_worker_app(
                 "allowed_operations selected no model-visible MCP tools",
             )
         record_mcp_catalog_selection(mcp_candidates, mcp_selected)
+        operation_callback = (payload.response_contract or {}).get("operation_callback")
+        if operation_callback is not None:
+            from nanobot.apps.hosted_operations import JournaledTool
+
+            if not isinstance(operation_callback, dict) or not all(
+                isinstance(operation_callback.get(key), str) and operation_callback[key]
+                for key in ("url", "token")
+            ):
+                raise HTTPException(422, "invalid operation callback")
+            for name in list(turn_tools.tool_names):
+                tool = turn_tools.get(name)
+                if (tool is not None and not tool.read_only
+                        and getattr(tool, "_original_name", None) in allowed_operations):
+                    turn_tools.register(JournaledTool(tool, app.state.http_client, operation_callback))
         structured_tool = None
         receipt_hook = ReceiptCaptureHook()
         if payload.response_contract is not None and (
@@ -369,10 +391,14 @@ def create_worker_app(
             )
         finally:
             current_call_accounting.reset(accounting_token)
+        response_metadata = getattr(response, "metadata", {}) or {}
+        usage = response_metadata.get("_agent_usage") or {}
         if structured_tool is not None and structured_tool.submission is None:
             raise HTTPException(
                 status.HTTP_502_BAD_GATEWAY,
-                "agent did not submit the required structured response",
+                {"code": "presentation_missing", "retryable": True,
+                 "message": "agent did not submit the required structured response",
+                 "usage": usage, "model": model_name},
             )
         if workspace_lease is not None:
             if payload.terminal:
@@ -381,8 +407,6 @@ def create_worker_app(
                 workspace_lease.touch()
             workspace_lease.enforce_capacity()
 
-        response_metadata = getattr(response, "metadata", {}) or {}
-        usage = response_metadata.get("_agent_usage") or {}
         response_text = str(getattr(response, "content", response) or "")
         return {
             "id": f"chatcmpl-{uuid.uuid4().hex[:12]}",

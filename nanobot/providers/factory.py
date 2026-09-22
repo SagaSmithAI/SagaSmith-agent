@@ -59,6 +59,8 @@ def _make_provider_core(
     if spec and spec.is_transcription_only:
         raise ValueError(f"Provider '{provider_name}' only supports transcription.")
     backend = spec.backend if spec else "openai_compat"
+    if p and p.codex_auth_file and backend != "openai_codex":
+        raise ValueError("codex_auth_file is only supported for OpenAI Codex.")
     if p and p.proxy and backend not in {"openai_compat", "openai_codex"}:
         raise ValueError(
             f"providers.{provider_name}.proxy is only supported for "
@@ -88,6 +90,7 @@ def _make_provider_core(
         provider = OpenAICodexProvider(
             default_model=model,
             proxy=getattr(p, "proxy", None) if p else None,
+            auth_file=p.codex_auth_file if p else None,
         )
     elif backend == "azure_openai":
         from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
@@ -229,6 +232,7 @@ def provider_signature(
             fallback.reasoning_effort,
             fallback.context_window_tokens,
             getattr(fp, "proxy", None) if fp else None,
+            fp.codex_auth_file if fp else None,
         )
 
     provider_name = config.get_provider_name(resolved.model, preset=resolved)
@@ -249,6 +253,7 @@ def provider_signature(
         resolved.reasoning_effort,
         resolved.context_window_tokens,
         getattr(p, "proxy", None) if p else None,
+        p.codex_auth_file if p else None,
         tuple(_fallback_signature(fallback) for fallback in fallback_presets),
     )
 

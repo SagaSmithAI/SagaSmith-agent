@@ -78,7 +78,7 @@ def test_named_profiles_and_transports_are_stable() -> None:
     )
     assert (
         transport_for_mode(McpTransport.MIXED, InstallMode.DND)
-        == McpTransport.STREAMABLE_HTTP
+        == McpTransport.STDIO
     )
 
 
@@ -319,7 +319,8 @@ def test_each_mode_has_an_explicit_transport(
     servers = desired_servers(layout_for(tmp_path), modes)
     assert set(servers) == names
     if "sagasmith_dnd" in servers:
-        assert servers["sagasmith_dnd"]["url"].endswith(":8767/mcp")
+        assert servers["sagasmith_dnd"]["type"] == "stdio"
+        assert servers["sagasmith_dnd"]["localAuthority"] is True
     if "sagasmith_coc" in servers:
         assert servers["sagasmith_coc"]["url"].endswith(":8769/mcp")
     if "sagasmith_narrative" in servers:
@@ -349,13 +350,13 @@ def test_every_domain_supports_each_local_transport(
         servers["sagasmith_narrative"]["targetService"]
         == "sagasmith-narrative-mcp"
     )
-    assert {
-        item["authorizationAudience"] for item in servers.values()
-    } == {
-        "sagasmith-dnd-mcp",
-        "sagasmith-coc-mcp",
-        "sagasmith-narrative-mcp",
-    }
+    for name, item in servers.items():
+        if name == "sagasmith_dnd" and transport == McpTransport.STDIO:
+            assert "authorizationAudience" not in item
+            assert item["env"]["SAGASMITH_DND_MCP_BOUND_PRINCIPAL_ID"] == "system:local"
+            assert item["sessionScoped"] is False
+        else:
+            assert item["authorizationAudience"] == item["targetService"]
     assert {item["protocolMode"] for item in servers.values()} == {"2026-07-28"}
     if transport == McpTransport.STREAMABLE_HTTP:
         assert servers["sagasmith_narrative"]["url"].endswith(":8770/mcp")

@@ -13,6 +13,27 @@ from nanobot.providers.base import LLMResponse, ToolCallRequest
 
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
 
+
+def test_compound_call_ids_have_short_distinct_replayable_file_references(tmp_path):
+    from nanobot.utils.helpers import maybe_persist_tool_result
+
+    references = []
+    for suffix in ("a", "b"):
+        call_id = "call_" + "x" * 80 + "|fc_" + suffix * 40
+        reference = maybe_persist_tool_result(
+            tmp_path, "session", call_id, suffix * 3000, max_chars=100,
+        )
+        replay = maybe_persist_tool_result(
+            tmp_path, "session", call_id, suffix * 3000, max_chars=100,
+        )
+        assert replay == reference
+        references.append(reference)
+    files = list((tmp_path / ".nanobot/tool-results/session").glob("*.txt"))
+    assert len(files) == 2
+    assert all(len(path.name) <= 36 for path in files)
+    assert {path.read_text() for path in files} == {"a" * 3000, "b" * 3000}
+    assert all(any(str(path) in ref for path in files) for ref in references)
+
 async def test_runner_persists_large_tool_results_for_follow_up_calls(tmp_path):
     from nanobot.agent.runner import AgentRunner
 
@@ -130,6 +151,25 @@ def test_persist_json_result_summarizes_root_scalars_after_large_nested_data(tmp
 
     saved = tmp_path / ".nanobot" / "tool-results" / "current_session" / "call_json.txt"
     assert saved.read_text(encoding="utf-8") == raw
+
+
+def test_persist_json_result_keeps_nested_named_identity_without_expanding_lists(tmp_path):
+    from nanobot.utils.helpers import maybe_persist_tool_result
+
+    payload = {"status": "committed", "campaign_revision": 738, "result": {"combat": {
+        "current_turn": {"actor_id": "current-actor", "name": "Current actor",
+                         "turn_budget": {"main_action": 1}},
+        "combatants": [{"actor_id": "historical-actor", "name": "Old actor"}] * 100,
+    }}}
+    raw = json.dumps(payload)
+    persisted = maybe_persist_tool_result(tmp_path, "session", "identity", raw, max_chars=64)
+    assert '"result.combat.current_turn"' in persisted
+    assert '"actor_id": "current-actor"' in persisted
+    assert '"campaign_revision": 738' in persisted
+    assert "historical-actor" not in persisted
+    assert "turn_budget" not in persisted
+    assert len(persisted) < 1800
+    assert (tmp_path / ".nanobot/tool-results/session/identity.txt").read_text("utf-8") == raw
 
 
 def test_persist_json_result_surfaces_bounded_result_continuation_ids(tmp_path):
