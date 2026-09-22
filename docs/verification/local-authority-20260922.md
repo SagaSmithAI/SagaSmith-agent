@@ -51,3 +51,20 @@ four real archive scenarios for Artificer equipment, build-to-Defender, spell
 choices/guards and SCAG Watcher Eye; one additional public protocol RNG scenario.
 Runtime's 95 tests pass. These are bounded rule/build scenarios, not a completed
 LLM campaign or certification of every listed 2014 mechanic.
+
+## Larger actor sets
+
+The [27-actor sample](local-authority-20260922-27-actors.json) uses `--extra-actors 25`
+and five measured transfers. Median transfer was 80.39 ms, binding 7.56 ms and
+empty-library connection 2.85 seconds. Transfers use 109 SQL queries (one more
+than the earlier small-party version), while binding queries remain at 19.
+The extra query reads only actor IDs and revisions. Full sheets are loaded only
+for selected actors; an unrelated actor's revision still invalidates context.
+A Core regression records zero Character ORM loads for the revision index and
+one for a selected actor among twenty large sheets, excluding another campaign.
+This is a bounded-load improvement, not evidence of a latency win at every party
+size. The earlier measurements remain historical results, not silently replaced.
+
+Real Tortle acceptance additionally passed both Shell Defense variants and the
+one-hour Hold Breath lifecycle. Signed Host bridge creation and SEP-2663 task
+completion passed over real stdio after fixing bootstrap campaign scope.

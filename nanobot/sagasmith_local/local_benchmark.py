@@ -24,6 +24,7 @@ from nanobot.session.manager import SessionManager
 async def measure(
     executable: Path, root: Path, iterations: int, *, official_library: Path | None = None,
     dnd_skills: Path | None = None,
+    extra_actors: int = 0,
 ) -> dict:
     registry = ToolRegistry()
     store = SessionManager(root / "host")
@@ -70,6 +71,10 @@ async def measure(
             target = await call("character_create_from", {"mode": "direct", "payload": {
                 "campaign_id": campaign["id"], "name": "Target",
             }})
+            for index in range(extra_actors):
+                await call("character_create_from", {"mode": "direct", "payload": {
+                    "campaign_id": campaign["id"], "name": f"Unselected actor {index}",
+                }})
             await call("inventory_change", {"owner": "character", "owner_id": source["id"],
                 "action": "add", "payload": {"item": {
                     "id": "rope", "name": "Rope", "kind": "equipment",
@@ -95,6 +100,7 @@ async def measure(
         "llm_used": False, "authoritative_user_data_used": False,
         "official_content_library_configured": official_library is not None,
         "bundled_skills_configured": dnd_skills is not None,
+        "campaign_actor_count": extra_actors + 2,
         "cold_connection_ms": cold_ms, "iterations": iterations,
         "visible_tools": visible_count, "visible_schema_utf8_bytes": schema_bytes,
         "warm_transfer_median_ms": statistics.median(
@@ -113,6 +119,8 @@ def main():
     parser.add_argument("--dnd-python", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--iterations", type=int, default=5)
+    parser.add_argument("--extra-actors", type=int, default=0,
+                        help="Create additional unselected actors to exercise context scaling")
     parser.add_argument(
         "--official-library", type=Path,
         help="Verified local content library to mount into the disposable database",
@@ -125,6 +133,8 @@ def main():
     args = parser.parse_args()
     if args.iterations < 1:
         parser.error("iterations must be at least 1")
+    if args.extra_actors < 0:
+        parser.error("extra-actors must be nonnegative")
     if args.official_library and not args.dnd_skills:
         parser.error("--official-library requires --dnd-skills for bundled SRD dependencies")
     with TemporaryDirectory(prefix="sagasmith-authority-benchmark-") as directory:
@@ -132,11 +142,13 @@ def main():
             args.dnd_python.resolve(), Path(directory), args.iterations,
             official_library=args.official_library,
             dnd_skills=args.dnd_skills,
+            extra_actors=args.extra_actors,
         ))
         if args.measure_restart:
             result["restart"] = asyncio.run(measure(
                 args.dnd_python.resolve(), Path(directory), args.iterations,
                 official_library=args.official_library, dnd_skills=args.dnd_skills,
+                extra_actors=args.extra_actors,
             ))
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
