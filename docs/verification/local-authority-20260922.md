@@ -83,3 +83,26 @@ while rejecting drift in its principal, session policy, or authentication enviro
 The HTTP readiness deadline is 180 seconds because first content installation can
 exceed the previous 35-second limit. Child exits still fail immediately; this does
 not skip content verification or make the first import faster.
+
+## Ordinary-text reference fast path
+
+Profiling the same installed Python environment and library, with only the Runtime
+source changed, found 326,914,202 string replacements during first import. Most
+strings contained no reference marker. Import/export now return those strings
+directly while preserving exact chunk-key lookup and the existing substitution
+path for actual references. The [profile summary](local-authority-20260922-startup-profile.json)
+records 23,658,239 replacements afterward (92.8% fewer), and `localize` cumulative
+time falling from 62.49 to 6.05 seconds. These timings include profiler overhead;
+validation and archive checksum checks remain enabled.
+
+The [unprofiled sample](local-authority-20260922-text-fastpath.json) measured first
+connection at 47.65 seconds and restart at 7.12 seconds. Earlier complete-library
+samples were 68–75 seconds. These samples were not isolated timing trials, so the
+call-count reduction is stronger evidence than a precise latency percentage.
+The content import/export/actor round trip, real Tortle Claws import/attack/replay/
+restart, and all 95 Runtime tests passed after the change.
+
+A separate disposable offline recovery exercise created data through real stdio,
+backed it up, added another campaign, restored all 11 original files byte-for-byte,
+then reopened stdio and completed another transfer. This covers closed-connection
+recovery, not hot backup or detection of every externally launched stdio process.

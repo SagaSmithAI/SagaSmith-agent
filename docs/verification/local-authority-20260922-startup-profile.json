@@ -1,0 +1,22 @@
+{
+  "schema": "sagasmith.startup-profile/v1",
+  "llm_used": false,
+  "user_data_used": false,
+  "profile_overhead_included": true,
+  "before_commit": "1b3ea3dbcef93b272c8b9c04925e6ebb4888a3f2",
+  "after_commit": "a8ae77e0cb49c688a4525d7c77d36919f482bf57",
+  "before": {
+    "total_calls": 1013540000,
+    "profile_seconds": 198.21330540000037,
+    "string_replace_calls": 326914202,
+    "string_replace_self_seconds": 23.0609712,
+    "localize_cumulative_seconds": 62.494911800000004
+  },
+  "after": {
+    "total_calls": 710113944,
+    "profile_seconds": 141.6481498000005,
+    "string_replace_calls": 23658239,
+    "string_replace_self_seconds": 2.8996378000000003,
+    "localize_cumulative_seconds": 6.048124400000001
+  }
+}

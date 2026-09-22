@@ -1,7 +1,7 @@
 {
   "schema": "sagasmith.release-lock/v3",
   "lock": "2026.9.22-local-first-dnd",
-  "generated_at": "2026-09-22T06:35:21Z",
+  "generated_at": "2026-09-22T07:03:00Z",
   "release_status": "compatibility-lock-not-published",
   "compatibility": {
     "mcp_protocol": "2026-07-28",
@@ -14,7 +14,7 @@
   },
   "profiles": {
     "dnd": {
-      "sagasmith-dnd": "1b3ea3dbcef93b272c8b9c04925e6ebb4888a3f2"
+      "sagasmith-dnd": "a8ae77e0cb49c688a4525d7c77d36919f482bf57"
     },
     "coc": {
       "sagasmith-coc": "323b08c3e210e4f351c03a80714d54068438242b"
