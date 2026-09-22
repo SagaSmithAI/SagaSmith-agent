@@ -61,6 +61,17 @@ rtk .venv\Scripts\python.exe -m nanobot.sagasmith_local.local_benchmark --dnd-py
 Lobby 投影 20 个工具，schema UTF-8 共 29,537 字节。时间受机器负载影响，不能外推为
 真实 LLM 回合速度或跨版本性能提升。
 
+以上为空内容库基准。完整内容库必须同时提供 SRD skills 路径；用以下命令在临时数据库中
+分别测量首次导入和已安装内容的重启，不修改现有战役：
+
+```powershell
+rtk .venv\Scripts\python.exe -m nanobot.sagasmith_local.local_benchmark --dnd-python ..\Sagasmith-dnd\.venv\Scripts\python.exe --dnd-skills ..\Sagasmith-dnd\skills --official-library ..\local-content-20260922 --measure-restart --output local-library-benchmark.json
+```
+
+`--official-library` 应指向自行验证的本地内容库。首次安装需要导入内容，不能与空库冷连接混算；
+`restart.cold_connection_ms` 单独记录复用已安装内容时的连接耗时。测量过程不用 LLM，
+也不修改输入档案。可参见 [2026-09-22 验证记录](../verification/local-authority-20260922.md)。
+
 回合指标保存在 Agent session 的 `local_turn_metrics`，包含 LLM/工具调用次数及耗时、
 读取、重试、超时、数据库查询与耗时、首段完整叙事耗时。首段完整叙事不是 streaming
 首 token 时间。Runtime 回执的 `local_execution` 还包含排队时间；不记录提示词或秘密。
