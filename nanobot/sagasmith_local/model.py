@@ -277,7 +277,7 @@ def normalize_transport(value: str | McpTransport | None) -> McpTransport:
 def transport_for_mode(transport: McpTransport, mode: InstallMode) -> McpTransport:
     if transport != McpTransport.MIXED:
         return transport
-    if mode in {InstallMode.DND, InstallMode.COC}:
+    if mode == InstallMode.COC:
         return McpTransport.STREAMABLE_HTTP
     return McpTransport.STDIO
 

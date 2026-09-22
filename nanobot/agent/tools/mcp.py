@@ -864,6 +864,9 @@ class MCPToolWrapper(_MCPWrapperBase):
         call_lock: asyncio.Lock | None = None,
         transport: str = "unknown",
         protocol: str = "unknown",
+        local_operations: Any | None = None,
+        read_timeout: int = 30,
+        write_timeout: int = 120,
     ):
         self._set_mcp_connection(session, server_name)
         self._original_name = tool_def.name
@@ -886,11 +889,16 @@ class MCPToolWrapper(_MCPWrapperBase):
         self._call_lock = call_lock
         self._metrics_transport = transport
         self._metrics_protocol = protocol
+        self._local_operations = local_operations
         meta = getattr(tool_def, "meta", None)
         if not isinstance(meta, dict):
             meta = {}
         annotations = getattr(tool_def, "annotations", None)
         self._read_only = _mcp_field(annotations, "read_only_hint", "readOnlyHint", False) is True
+        if local_operations is not None:
+            if meta.get("sagasmith_local_authority") is not True:
+                raise ValueError("server does not advertise the configured local authority contract")
+            self._tool_timeout = read_timeout if self._read_only else write_timeout
         self._campaign_revision_argument = meta.get("sagasmith_campaign_revision_argument")
         domain_context = meta.get("sagasmith_domain_context")
         self._domain_context = (
@@ -899,6 +907,8 @@ class MCPToolWrapper(_MCPWrapperBase):
             else None
         )
         self._context_sync = meta.get("sagasmith_context_sync") is True
+        self._local_daily = meta.get("sagasmith_local_daily", True)
+        self._local_phases = meta.get("sagasmith_phases", [])
         properties = self._parameters.get("properties", {})
         # Grant tools have a subject principal_id and a separate caller field.
         # Prefer the caller field so transport identity can never overwrite the
@@ -924,7 +934,7 @@ class MCPToolWrapper(_MCPWrapperBase):
             if isinstance(advertised_default, str) and advertised_default.strip()
             else None
         )
-        if inject_principal:
+        if inject_principal or local_operations is not None:
             # Transport-authentication input is never an LLM argument.  Tools
             # without a trusted identity parameter receive no injected field.
             if self._principal_argument is not None:
@@ -964,6 +974,13 @@ class MCPToolWrapper(_MCPWrapperBase):
     def read_only(self) -> bool:
         return self._read_only
 
+    def is_model_visible(self):
+        local = self._local_operations
+        if local is None or self.name in local.selected:
+            return True
+        phase = local.context().get("phase")
+        return self._local_daily and (not phase or not self._local_phases or phase in self._local_phases)
+
     @property
     def name(self) -> str:
         return self._name
@@ -976,6 +993,16 @@ class MCPToolWrapper(_MCPWrapperBase):
     def parameters(self) -> dict[str, Any]:
         request = current_request_context()
         hidden = set()
+        if self._local_operations is not None:
+            hidden.update({"idempotency_key", "expected_revision", "expected_campaign_revision",
+                           "expected_character_revision", "expected_source_revision",
+                           "expected_target_revision", "branch_id", "expected_branch_id",
+                           "expected_head_snapshot_id", "expected_state_version"})
+            context = self._local_operations.context()
+            if context.get("campaign_id"):
+                hidden.add("campaign_id")
+            if context.get("actor_id"):
+                hidden.add("actor_id")
         if request is not None:
             if request.campaign_id is not None:
                 hidden.add("campaign_id")
@@ -986,6 +1013,23 @@ class MCPToolWrapper(_MCPWrapperBase):
             hidden.add(self._campaign_revision_argument)
         if hidden:
             schema = copy.deepcopy(self._parameters)
+            if self._local_operations is not None:
+                protocol_fields = hidden - {"campaign_id", "actor_id"}
+
+                def strip_protocol(node):
+                    if isinstance(node, dict):
+                        for field in protocol_fields:
+                            node.get("properties", {}).pop(field, None)
+                        if isinstance(node.get("required"), list):
+                            node["required"] = [field for field in node["required"]
+                                                if field not in protocol_fields]
+                        for child in node.values():
+                            strip_protocol(child)
+                    elif isinstance(node, list):
+                        for child in node:
+                            strip_protocol(child)
+
+                strip_protocol(schema)
             for name in hidden:
                 schema.get("properties", {}).pop(name, None)
             if isinstance(schema.get("required"), list):
@@ -1186,6 +1230,15 @@ class MCPToolWrapper(_MCPWrapperBase):
 
     def _inject_trusted_arguments(self, arguments: dict[str, Any]) -> dict[str, Any]:
         request = current_request_context()
+        if self._local_operations is not None:
+            campaign_id = (request.campaign_id if request else None) or self._local_operations.context().get("campaign_id")
+            if campaign_id and "campaign_id" in self._trusted_arguments:
+                arguments = {"campaign_id": campaign_id, **arguments}
+            if campaign_id and self._original_name == "campaign_query" and arguments.get("view") != "list":
+                arguments = {**arguments, "payload": {
+                    "campaign_id": campaign_id, **(arguments.get("payload") or {}),
+                }}
+            return arguments
         if request is None:
             return arguments
         metadata = request.metadata
@@ -1239,11 +1292,30 @@ class MCPToolWrapper(_MCPWrapperBase):
             trusted_principal = self._trusted_principal()
             if self._principal_argument is not None:
                 kwargs = {**kwargs, self._principal_argument: trusted_principal}
-        kwargs = self._inject_trusted_arguments(kwargs)
         if self._call_lock is not None:
             async with self._call_lock:
-                return await self._execute_call(kwargs, trusted_principal=trusted_principal)
-        return await self._execute_call(kwargs, trusted_principal=trusted_principal)
+                return await self._execute_prepared(kwargs, trusted_principal)
+        return await self._execute_prepared(kwargs, trusted_principal)
+
+    async def _execute_prepared(self, kwargs, trusted_principal):
+        kwargs = self._inject_trusted_arguments(kwargs)
+        local = self._local_operations
+        if local is not None:
+            trusted_principal = local.principal_id
+            request = current_request_context()
+            if request is not None and request.metadata.get("subagent") and not self.read_only:
+                return ToolResult.error("Subagents may propose local actions but cannot commit them.")
+            # The authority resolves current protocol inputs inside its command queue.
+        managed_write = local is not None and not self.read_only and "idempotency_key" in self._trusted_arguments
+        if managed_write:
+            kwargs.pop("idempotency_key", None)
+            kwargs["idempotency_key"] = local.prepare(self._original_name, kwargs)
+        result = await self._execute_call(kwargs, trusted_principal=trusted_principal)
+        if local is not None and not getattr(result, "is_error", False):
+            local.remember(getattr(result, "structured_content", None))
+        if managed_write and not getattr(result, "dispatch_unknown", False):
+            local.finish()
+        return result
 
     async def _execute_call(
         self,
@@ -1324,6 +1396,9 @@ class MCPToolWrapper(_MCPWrapperBase):
                 logger.warning("MCP tool '{}' was cancelled by server/SDK", self._name)
                 return failed("(MCP tool call was cancelled)")
             except Exception as exc:
+                if (self._local_operations is not None and dispatched and not self.read_only
+                        and not kwargs.get("idempotency_key")):
+                    return failed("Local write result is unknown; automatic replay is unavailable.")
                 if await self._refresh_session_after_termination(
                     exc,
                     refreshed_session,
@@ -1496,6 +1571,8 @@ class MCPToolWrapper(_MCPWrapperBase):
         if self._domain_context is None or self._session_store is None:
             return False
         request = current_request_context()
+        if request is None:
+            return False
         session_key = request.session_key or f"{request.channel}:{request.chat_id}"
         if session_key is None:
             return False
@@ -1902,6 +1979,12 @@ async def connect_mcp_servers(
         refresh_task: asyncio.Task[None] | None = None
         refresh_lock = asyncio.Lock()
         call_lock = asyncio.Lock()
+        from nanobot.agent.local_mcp import LocalCapabilities, LocalOperationState
+
+        local_operations = (
+            LocalOperationState(name, session_store, cfg.bound_principal_id)
+            if getattr(cfg, "local_authority", False) else None
+        )
         refresh_generation = 0
         synced_generation = 0
         legacy_catalog = True
@@ -2117,6 +2200,14 @@ async def connect_mcp_servers(
                     desired: dict[str, Any] = {}
                     matched_enabled_tools: set[str] = set()
                     tool_definitions = sorted(listed.tools, key=lambda item: item.name)
+                    if local_operations is not None and not any(
+                        (getattr(tool, "meta", None) or {}).get("sagasmith_local_authority")
+                        for tool in tool_definitions
+                    ):
+                        raise RuntimeError(
+                            "Local authority is not supported by this DND runtime. "
+                            "Install the matching workspace Runtime/Core before starting local mode."
+                        )
                     available_raw_names = [tool_def.name for tool_def in tool_definitions]
                     available_wrapped_names = [
                         _sanitize_mcp_tool_name(f"mcp_{name}_{tool_def.name}")
@@ -2174,13 +2265,22 @@ async def connect_mcp_servers(
                             call_lock=call_lock,
                             transport=metrics_transport,
                             protocol=metrics_protocol,
+                            local_operations=local_operations if (getattr(tool_def, "meta", None) or {}).get(
+                                "sagasmith_local_authority"
+                            ) else None,
+                            read_timeout=getattr(cfg, "read_timeout", 30),
+                            write_timeout=getattr(cfg, "write_timeout", 120),
                         )
                         if reconnect is not None:
                             wrapper.set_reconnect_handler(reconnect)
+                        if local_operations is not None and wrapper._local_operations is None:
+                            wrapper._model_visible = False
                         registry.register(wrapper)
                         logger.debug(
                             "MCP: registered tool '{}' from server '{}'", wrapped_name, name
                         )
+                    if local_operations is not None:
+                        registry.register(LocalCapabilities(local_operations, registry))
 
                     if warn_unmatched and enabled_tools and not allow_all_tools:
                         unmatched = sorted(enabled_tools - matched_enabled_tools)

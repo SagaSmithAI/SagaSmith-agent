@@ -134,13 +134,22 @@ def _stdio_server(
     auth_context_secret: str,
     system_id: str,
 ) -> dict[str, Any]:
+    policy = _common_server(auth_context_secret, system_id, TARGET_SERVICES[system_id])
+    if system_id == "dnd5e":
+        policy.update({"localAuthority": True, "injectPrincipal": False,
+                       "boundPrincipalId": "system:local",
+                       "exposeResourcesAndPrompts": False,
+                       "sessionScoped": False, "toolTimeout": 120,
+                       "readTimeout": 30, "writeTimeout": 120, "taskTimeout": 900})
+        for key in ("authContextSecret", "delegationSecret", "authorizationAudience"):
+            policy.pop(key, None)
     return {
         "type": "stdio",
         "command": str(_python_executable(repo)),
         "args": ["-m", module],
         "cwd": str(repo),
         "env": environment,
-        **_common_server(auth_context_secret, system_id, TARGET_SERVICES[system_id]),
+        **policy,
     }
 
 
@@ -305,7 +314,13 @@ def dnd_environment(
         ("SAGASMITH_DND_MCP_MODULE_OCR_SCALE", "2.0"),
     ):
         values[name] = os.environ.get(name, default)
-    if secret := auth_context_secret or _configured_auth_context_secret(layout):
+    if transport == McpTransport.STDIO:
+        values["SAGASMITH_DND_LOCAL_AUTHORITY"] = "1"
+        values["SAGASMITH_DND_MCP_AUTO_SEED"] = os.environ.get("SAGASMITH_DND_MCP_AUTO_SEED", "0")
+        values["SAGASMITH_DND_MCP_BOUND_PRINCIPAL_ID"] = "system:local"
+        # Override inherited shared-deployment credentials in the child process.
+        values["SAGASMITH_AUTH_CONTEXT_SECRET"] = ""
+    elif secret := auth_context_secret or _configured_auth_context_secret(layout):
         values["SAGASMITH_AUTH_CONTEXT_SECRET"] = secret
     return values
 

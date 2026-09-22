@@ -131,6 +131,7 @@ class ToolRegistry:
             tool
             for tool in self._tools.values()
             if getattr(tool, "_model_visible", True)
+            and (not callable(getattr(tool, "is_model_visible", None)) or tool.is_model_visible())
             and (not callable(getattr(tool, "is_available", None)) or tool.is_available(ctx))
         ]
         definitions = [tool.to_schema() for tool in visible_tools]
@@ -157,6 +158,7 @@ class ToolRegistry:
             name
             for name, tool in self._tools.items()
             if getattr(tool, "_model_visible", True)
+            and (not callable(getattr(tool, "is_model_visible", None)) or tool.is_model_visible())
             and (not callable(getattr(tool, "is_available", None)) or tool.is_available(ctx))
         ]
         return sorted(names, key=lambda name: (name.startswith("mcp_"), name))

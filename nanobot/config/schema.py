@@ -369,6 +369,10 @@ class MCPServerConfig(Base):
     url: str = ""  # HTTP/SSE: endpoint URL
     headers: dict[str, str] = Field(default_factory=dict)  # HTTP/SSE: custom headers
     tool_timeout: int = 30  # seconds before a tool call is cancelled
+    local_authority: bool = False
+    bound_principal_id: str = ""
+    read_timeout: int = Field(default=30, ge=1, le=3600)
+    write_timeout: int = Field(default=120, ge=1, le=3600)
     task_timeout: int = Field(
         default=900,
         ge=1,
@@ -416,6 +420,16 @@ class MCPServerConfig(Base):
         validation_alias=AliasChoices("sessionScoped", "session_scoped"),
         serialization_alias="sessionScoped",
     )  # Give each logical Agent session its own MCP session and mutable native schema.
+
+    @model_validator(mode="after")
+    def validate_local_authority(self):
+        if self.local_authority and (
+            self.type != "stdio" or self.session_scoped or self.inject_principal
+            or not self.bound_principal_id
+            or self.auth_context_secret or self.delegation_secret
+        ):
+            raise ValueError("localAuthority requires one stdio connection with startup-bound identity")
+        return self
 
 
 def _lazy_default(module_path: str, class_name: str) -> Any:
