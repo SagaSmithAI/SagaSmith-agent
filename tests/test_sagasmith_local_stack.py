@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 from urllib.parse import urlparse
 
 import pytest
@@ -43,6 +44,23 @@ from nanobot.sagasmith_local.runtime import (
     tail_logs,
     verify_backup,
 )
+
+
+def test_http_readiness_allows_content_import_and_detects_child_exit(monkeypatch):
+    clock = iter([0.0, 1.0, 40.0])
+    monkeypatch.setattr(runtime.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(runtime.time, "sleep", lambda _: None)
+    response = Mock()
+    response.__enter__ = Mock(return_value=SimpleNamespace(status=200))
+    response.__exit__ = Mock(return_value=False)
+    probe = Mock(side_effect=[OSError("not listening yet"), response])
+    monkeypatch.setattr(runtime.urllib.request, "urlopen", probe)
+    runtime._wait_ready("http://127.0.0.1:8767/mcp", Mock(poll=Mock(return_value=None)))
+    assert probe.call_count == 2
+
+    monkeypatch.setattr(runtime.time, "monotonic", lambda: 0.0)
+    with pytest.raises(runtime.StackError, match="process exited"):
+        runtime._wait_ready("http://127.0.0.1:8767/mcp", Mock(poll=Mock(return_value=1)))
 
 
 def layout_for(tmp_path: Path) -> StackLayout:
@@ -111,6 +129,8 @@ def test_domain_sync_installs_only_the_selected_mcp_and_required_gateway() -> No
         "sync",
         "--package",
         "sagasmith-dnd-mcp",
+        "--python",
+        "3.12",
         "--frozen",
     ]
     assert _domain_sync_command("uv", InstallMode.COC, McpTransport.MIXED) == [
@@ -570,6 +590,30 @@ def test_doctor_checks_provider_database_skills_and_transport(
     assert len(skill_checks) == 1
     assert skill_checks[0]["ok"] is True
     assert report["mcp_transport"] == "streamable-http"
+
+
+@pytest.mark.parametrize("tamper", [None, "sessionScoped", "localAuthority", "boundPrincipalId", "env"])
+def test_doctor_accepts_single_local_authority_and_rejects_policy_drift(
+    tmp_path: Path, monkeypatch, tamper: str | None,
+) -> None:
+    layout = layout_for(tmp_path)
+    monkeypatch.setattr("nanobot.sagasmith_local.runtime._venv_python", lambda repo: Path("python"))
+    monkeypatch.setattr("nanobot.sagasmith_local.runtime._run",
+                        lambda *args, **kwargs: SimpleNamespace(stdout=""))
+    value = reconcile_agent_config({}, layout, (InstallMode.DND,))
+    server = value["tools"]["mcpServers"]["sagasmith_dnd"]
+    if tamper == "sessionScoped":
+        server[tamper] = True
+    elif tamper == "localAuthority":
+        server[tamper] = False
+    elif tamper == "boundPrincipalId":
+        server[tamper] = "forged"
+    elif tamper == "env":
+        server[tamper]["SAGASMITH_DND_LOCAL_AUTHORITY"] = "0"
+    layout.config_path.write_text(json.dumps(value), encoding="utf-8")
+    report = doctor(layout, modes=(InstallMode.DND,), include_runtime=False)
+    check = next(item for item in report["checks"] if item["name"] == "agent-config")
+    assert check["ok"] is (tamper is None)
 
 
 def test_state_round_trip_and_status_never_invents_processes(tmp_path: Path) -> None:

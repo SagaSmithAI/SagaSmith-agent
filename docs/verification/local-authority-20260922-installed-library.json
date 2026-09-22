@@ -1,0 +1,312 @@
+{
+  "schema": "sagasmith.local-authority-benchmark/v1",
+  "llm_used": false,
+  "authoritative_user_data_used": false,
+  "official_content_library_configured": true,
+  "bundled_skills_configured": true,
+  "campaign_actor_count": 2,
+  "cold_connection_ms": 75158.8268999476,
+  "iterations": 3,
+  "visible_tools": 20,
+  "visible_schema_utf8_bytes": 29537,
+  "warm_transfer_median_ms": 49.65810012072325,
+  "warm_binding_median_ms": 6.64520007558167,
+  "samples": [
+    {
+      "operation": "campaign_create",
+      "host_ms": 26.078599970787764,
+      "runtime": {
+        "operation_id": "local-633923d0786e463aba249973b9b2bc42",
+        "elapsed_ms": 17.464,
+        "queue_ms": 0.007,
+        "database": {
+          "queries": 21,
+          "elapsed_ms": 0.6997999735176563
+        },
+        "protocol_inputs_managed": true
+      }
+    },
+    {
+      "operation": "character_create_from",
+      "host_ms": 38.982899859547615,
+      "runtime": {
+        "operation_id": "local-e4e85516efaa49f885f493668dfc6f78",
+        "elapsed_ms": 29.043,
+        "queue_ms": 0.004,
+        "database": {
+          "queries": 66,
+          "elapsed_ms": 1.154500525444746
+        },
+        "protocol_inputs_managed": true
+      }
+    },
+    {
+      "operation": "character_create_from",
+      "host_ms": 30.46259982511401,
+      "runtime": {
+        "operation_id": "local-ad22c9def9424edb848c6f49cda107c2",
+        "elapsed_ms": 23.84,
+        "queue_ms": 0.004,
+        "database": {
+          "queries": 66,
+          "elapsed_ms": 0.7708999328315258
+        },
+        "protocol_inputs_managed": true
+      }
+    },
+    {
+      "operation": "inventory_change",
+      "host_ms": 49.236000049859285,
+      "runtime": {
+        "operation_id": "local-502c8b1c77844415af10ac73a8ed782a",
+        "elapsed_ms": 36.681,
+        "queue_ms": 0.006,
+        "database": {
+          "queries": 93,
+          "elapsed_ms": 1.4378009364008904
+        },
+        "protocol_inputs_managed": true
+      }
+    },
+    {
+      "operation": "inventory_transfer",
+      "host_ms": 52.584700053557754,
+      "runtime": {
+        "operation_id": "local-041d3f25596d4de9b10886fdc669c435",
+        "elapsed_ms": 39.063,
+        "queue_ms": 0.004,
+        "database": {
+          "queries": 109,
+          "elapsed_ms": 1.3226009905338287
+        },
+        "protocol_inputs_managed": true
+      }
+    },
+    {
+      "operation": "inventory_transfer",
+      "host_ms": 49.41199999302626,
+      "runtime": {
+        "operation_id": "local-022b5598658b416cac12974f2f60bad9",
+        "elapsed_ms": 39.299,
+        "queue_ms": 0.004,
+        "database": {
+          "queries": 109,
+          "elapsed_ms": 1.31129939109087
+        },
+        "protocol_inputs_managed": true
+      }
+    },
+    {
+      "operation": "inventory_transfer",
+      "host_ms": 49.65810012072325,
+      "runtime": {
+        "operation_id": "local-0a6e42d3d5174d2ebe570e1671ffca71",
+        "elapsed_ms": 39.509,
+        "queue_ms": 0.005,
+        "database": {
+          "queries": 109,
+          "elapsed_ms": 1.2850991915911436
+        },
+        "protocol_inputs_managed": true
+      }
+    },
+    {
+      "operation": "campaign_query",
+      "host_ms": 9.755900129675865,
+      "runtime": {
+        "operation_id": null,
+        "elapsed_ms": 4.2,
+        "queue_ms": 0.004,
+        "database": {
+          "queries": 19,
+          "elapsed_ms": 0.2125001046806574
+        },
+        "protocol_inputs_managed": true
+      }
+    },
+    {
+      "operation": "campaign_query",
+      "host_ms": 6.64520007558167,
+      "runtime": {
+        "operation_id": null,
+        "elapsed_ms": 4.08,
+        "queue_ms": 0.004,
+        "database": {
+          "queries": 19,
+          "elapsed_ms": 0.21079950965940952
+        },
+        "protocol_inputs_managed": true
+      }
+    },
+    {
+      "operation": "campaign_query",
+      "host_ms": 6.072900025174022,
+      "runtime": {
+        "operation_id": null,
+        "elapsed_ms": 3.884,
+        "queue_ms": 0.003,
+        "database": {
+          "queries": 19,
+          "elapsed_ms": 0.1847993116825819
+        },
+        "protocol_inputs_managed": true
+      }
+    }
+  ],
+  "restart": {
+    "schema": "sagasmith.local-authority-benchmark/v1",
+    "llm_used": false,
+    "authoritative_user_data_used": false,
+    "official_content_library_configured": true,
+    "bundled_skills_configured": true,
+    "campaign_actor_count": 2,
+    "cold_connection_ms": 6991.093599935994,
+    "iterations": 3,
+    "visible_tools": 20,
+    "visible_schema_utf8_bytes": 29537,
+    "warm_transfer_median_ms": 47.09889995865524,
+    "warm_binding_median_ms": 6.061499938368797,
+    "samples": [
+      {
+        "operation": "campaign_create",
+        "host_ms": 31.487999949604273,
+        "runtime": {
+          "operation_id": "local-4c1740bde5dc451081d90b7c739e63ec",
+          "elapsed_ms": 18.687,
+          "queue_ms": 0.005,
+          "database": {
+            "queries": 21,
+            "elapsed_ms": 0.725199468433857
+          },
+          "protocol_inputs_managed": true
+        }
+      },
+      {
+        "operation": "character_create_from",
+        "host_ms": 82.59129989892244,
+        "runtime": {
+          "operation_id": "local-4e9363455c7d4743bd0c765f8bac9dd0",
+          "elapsed_ms": 72.636,
+          "queue_ms": 0.004,
+          "database": {
+            "queries": 66,
+            "elapsed_ms": 1.2667004484683275
+          },
+          "protocol_inputs_managed": true
+        }
+      },
+      {
+        "operation": "character_create_from",
+        "host_ms": 28.635799884796143,
+        "runtime": {
+          "operation_id": "local-eba8d65bade94ac38e6d23f29fe6cfbe",
+          "elapsed_ms": 22.431,
+          "queue_ms": 0.004,
+          "database": {
+            "queries": 66,
+            "elapsed_ms": 0.713099492713809
+          },
+          "protocol_inputs_managed": true
+        }
+      },
+      {
+        "operation": "inventory_change",
+        "host_ms": 43.0759999435395,
+        "runtime": {
+          "operation_id": "local-b97472f373484402818f89b1631a5184",
+          "elapsed_ms": 33.511,
+          "queue_ms": 0.004,
+          "database": {
+            "queries": 92,
+            "elapsed_ms": 1.3062006328254938
+          },
+          "protocol_inputs_managed": true
+        }
+      },
+      {
+        "operation": "inventory_transfer",
+        "host_ms": 49.14809996262193,
+        "runtime": {
+          "operation_id": "local-a579f3e7e990412499bdd025bcba7eed",
+          "elapsed_ms": 36.324,
+          "queue_ms": 0.003,
+          "database": {
+            "queries": 109,
+            "elapsed_ms": 1.2332007754594088
+          },
+          "protocol_inputs_managed": true
+        }
+      },
+      {
+        "operation": "inventory_transfer",
+        "host_ms": 47.09889995865524,
+        "runtime": {
+          "operation_id": "local-8ed81b6ec7ed4758977d89b534638368",
+          "elapsed_ms": 36.373,
+          "queue_ms": 0.003,
+          "database": {
+            "queries": 109,
+            "elapsed_ms": 1.2058017309755087
+          },
+          "protocol_inputs_managed": true
+        }
+      },
+      {
+        "operation": "inventory_transfer",
+        "host_ms": 46.82460008189082,
+        "runtime": {
+          "operation_id": "local-723d163f02f24be9a412ac860f59d69f",
+          "elapsed_ms": 36.919,
+          "queue_ms": 0.004,
+          "database": {
+            "queries": 109,
+            "elapsed_ms": 1.2090986128896475
+          },
+          "protocol_inputs_managed": true
+        }
+      },
+      {
+        "operation": "campaign_query",
+        "host_ms": 9.57280001603067,
+        "runtime": {
+          "operation_id": null,
+          "elapsed_ms": 4.107,
+          "queue_ms": 0.004,
+          "database": {
+            "queries": 19,
+            "elapsed_ms": 0.20859972573816776
+          },
+          "protocol_inputs_managed": true
+        }
+      },
+      {
+        "operation": "campaign_query",
+        "host_ms": 6.061499938368797,
+        "runtime": {
+          "operation_id": null,
+          "elapsed_ms": 3.86,
+          "queue_ms": 0.004,
+          "database": {
+            "queries": 19,
+            "elapsed_ms": 0.21529966033995152
+          },
+          "protocol_inputs_managed": true
+        }
+      },
+      {
+        "operation": "campaign_query",
+        "host_ms": 6.048599956557155,
+        "runtime": {
+          "operation_id": null,
+          "elapsed_ms": 3.731,
+          "queue_ms": 0.003,
+          "database": {
+            "queries": 19,
+            "elapsed_ms": 0.2093994989991188
+          },
+          "protocol_inputs_managed": true
+        }
+      }
+    ]
+  }
+}

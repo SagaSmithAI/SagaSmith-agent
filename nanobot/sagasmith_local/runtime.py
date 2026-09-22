@@ -114,6 +114,10 @@ def _domain_sync_command(
     transport: McpTransport,
 ) -> list[str]:
     command = [uv, "sync", "--package", f"sagasmith-{mode.value}-mcp"]
+    if mode == InstallMode.DND:
+        # A free-threaded interpreter selected from PATH has no compatible
+        # pywin32 wheel. Pin the normal interpreter tested by the local kit.
+        command.extend(("--python", "3.12"))
     if mode in {InstallMode.DND, InstallMode.COC} and (
         transport_for_mode(transport, mode) == McpTransport.STREAMABLE_HTTP
     ):
@@ -343,7 +347,9 @@ def _is_running(pid: int) -> bool:
     return True
 
 
-def _wait_ready(url: str, process: subprocess.Popen[bytes], timeout: float = 35.0) -> None:
+def _wait_ready(url: str, process: subprocess.Popen[bytes], timeout: float = 180.0) -> None:
+    # First D&D boot verifies and installs bundled content before opening HTTP.
+    # Keep polling the child so genuine exits still fail immediately.
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if process.poll() is not None:
@@ -540,7 +546,19 @@ def _server_matches(actual: dict[str, Any], expected: dict[str, Any]) -> bool:
         "args",
         "cwd",
     )
-    return all(actual.get(key) == expected.get(key) for key in keys)
+    keys = (*keys, "sessionScoped", "localAuthority", "boundPrincipalId",
+            "injectPrincipal", "protocolMode", "exposeResourcesAndPrompts")
+    if not all(actual.get(key) == expected.get(key) for key in keys):
+        return False
+    if expected.get("localAuthority"):
+        environment = actual.get("env") or {}
+        if not isinstance(environment, dict):
+            return False
+        return all(environment.get(key) == expected["env"][key] for key in (
+            "SAGASMITH_DND_LOCAL_AUTHORITY", "SAGASMITH_DND_MCP_BOUND_PRINCIPAL_ID",
+            "SAGASMITH_AUTH_CONTEXT_SECRET",
+        ))
+    return True
 
 
 def doctor(
@@ -584,9 +602,6 @@ def doctor(
                 "externalSkillsDirs", []
             )
             config_ok = actual_owned == expected_names and all(
-                actual_servers[name].get("sessionScoped") is True
-                for name in expected_names
-            ) and all(
                 _server_matches(actual_servers[name], expected_servers[name])
                 for name in expected_names
             ) and all(root in skills for root in desired_skill_roots(layout, selected))

@@ -50,6 +50,9 @@ Skills 复用有效 Host 状态和写回执，不再要求每轮全量读卡、�
 
 ## 验证与性能
 
+DND 安装器使用常规 CPython 3.12，避免 Windows 自动选中自由线程解释器后无法安装
+`pywin32`。已有个人配置与战役迁移仍应使用显式安装路径和备份流程。
+
 可复现的真实 Host → stdio → Runtime 基准（无需 provider）：
 
 ```powershell

@@ -68,3 +68,18 @@ size. The earlier measurements remain historical results, not silently replaced.
 Real Tortle acceptance additionally passed both Shell Defense variants and the
 one-hour Hold Breath lifecycle. Signed Host bridge creation and SEP-2663 task
 completion passed over real stdio after fixing bootstrap campaign scope.
+
+## Independent release-lock installation
+
+A fresh `dnd-only` installation cloned the pinned Core and D&D commits into a
+separate state root and installed the minimal dependency set with Python 3.12.
+The [installed-environment sample](local-authority-20260922-installed-library.json)
+then exercised the real stdio server with the complete repaired local library:
+first import 75.16 seconds, restart 6.99 seconds, transfer medians 49.66/47.10 ms,
+and binding medians 6.65/6.06 ms (three calls per process). No LLM or user campaign
+data was used. Installation and doctor now accept the single local authority
+while rejecting drift in its principal, session policy, or authentication environment.
+
+The HTTP readiness deadline is 180 seconds because first content installation can
+exceed the previous 35-second limit. Child exits still fail immediately; this does
+not skip content verification or make the first import faster.
